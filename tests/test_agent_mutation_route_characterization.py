@@ -1,9 +1,4 @@
-"""Pre-migration characterization for Agent-related mutation routes.
-
-These tests intentionally describe the current route topology and actor checks.
-Later migration tasks must replace an assertion only when they also add the new
-authorization/policy coverage described by the OpenSpec inventory.
-"""
+"""Characterization for Agent-related mutation routes during migration."""
 
 from __future__ import annotations
 
@@ -71,24 +66,41 @@ def test_inventory_covers_every_required_mutation_surface_and_disposition():
     assert "TBD" not in INVENTORY
 
 
-def test_current_direct_agent_routes_are_explicitly_characterized_as_unprotected():
+def test_direct_agent_routes_are_guarded_by_the_central_legacy_policy():
     # do_GET precedes do_POST in the source, so isolate do_POST to EOF instead.
     post_start = SERVER.index("    def do_POST(self):")
     post = SERVER[post_start:]
     delete = _method_block("do_DELETE", "do_OPTIONS")
 
-    for route in (
-        'self.path == "/api/office-config"',
-        'self.path == "/api/agent/create"',
-        'request_path.startswith("/api/agent-workspace/")',
-        'self.path == "/set-model"',
-    ):
-        block = _route_block(post, route)
-        assert "_reject_untrusted_management_request" not in block, route
+    post_guard = (
+        'agent_legacy_mutation_policy_service.requires_management(\n'
+        '                "POST", request_path'
+    )
+    delete_guard = (
+        'agent_legacy_mutation_policy_service.requires_management(\n'
+        '                "DELETE", request_path'
+    )
+    assert post_guard in post
+    assert delete_guard in delete
+    assert post.index(post_guard) < post.index('self.path == "/api/office-config"')
+    assert post.index(post_guard) < post.index('self.path == "/api/agent/create"')
+    assert post.index(post_guard) < post.index(
+        'request_path.startswith("/api/agent-workspace/")'
+    )
+    assert post.index(post_guard) < post.index('self.path == "/set-model"')
+    assert delete.index(delete_guard) < delete.index(
+        'self.path == "/api/agent/delete"'
+    )
 
-    agent_delete = _route_block(delete, 'self.path == "/api/agent/delete"')
-    assert "_reject_untrusted_management_request" not in agent_delete
-    assert "_handle_agent_delete(body)" in agent_delete
+    assert "_handle_agent_create(body)" not in _route_block(
+        post, 'self.path == "/api/agent/create"'
+    )
+    assert "self._set_agent_model" not in _route_block(
+        post, 'self.path == "/set-model"'
+    )
+    assert "_handle_agent_delete(body)" not in _route_block(
+        delete, 'self.path == "/api/agent/delete"'
+    )
 
 
 def test_current_global_provider_and_project_prefixes_require_management_token():
@@ -127,22 +139,32 @@ def test_current_global_provider_and_project_prefixes_require_management_token()
     ) in delete
 
 
-def test_current_agent_skill_and_library_writes_are_characterized_as_unprotected():
+def test_agent_skill_and_library_writes_share_the_central_management_guard():
     post_start = SERVER.index("    def do_POST(self):")
     post = SERVER[post_start:]
     delete = _method_block("do_DELETE", "do_OPTIONS")
 
+    post_guard = post.index(
+        "agent_legacy_mutation_policy_service.requires_management("
+    )
+    delete_guard = delete.index(
+        "agent_legacy_mutation_policy_service.requires_management("
+    )
     skill_write = _route_block(
         post, 'self.path.startswith("/api/agent/") and "/skills" in self.path'
     )
-    assert "_reject_untrusted_management_request" not in skill_write
     assert "_handle_skill_write(" in skill_write
+    assert post_guard < post.index(
+        'self.path.startswith("/api/agent/") and "/skills" in self.path'
+    )
 
     skill_delete = _route_block(
         delete, 'self.path.startswith("/api/agent/") and "/skills/" in self.path'
     )
-    assert "_reject_untrusted_management_request" not in skill_delete
     assert "_handle_skill_delete(" in skill_delete
+    assert delete_guard < delete.index(
+        'self.path.startswith("/api/agent/") and "/skills/" in self.path'
+    )
 
     for route in (
         'self.path == "/api/skills-library"',
@@ -150,8 +172,7 @@ def test_current_agent_skill_and_library_writes_are_characterized_as_unprotected
         'self.path == "/api/skills-library/save-from-agent"',
         'self.path == "/api/skills-library/upload"',
     ):
-        block = _route_block(post, route)
-        assert "_reject_untrusted_management_request" not in block, route
+        assert post_guard < post.index(route)
 
 
 def test_setup_route_has_its_own_management_check():

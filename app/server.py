@@ -76,6 +76,7 @@ from services import hr_manual_daily_sync as hr_manual_daily_sync_service
 from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
 from services import vo_agent_communication as vo_agent_communication_service
+from services import agent_legacy_mutation_policy as agent_legacy_mutation_policy_service
 from services.project_execution_ordering import first_incomplete_task
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
@@ -29871,23 +29872,30 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
 
     def do_DELETE(self):
+        request_path = urllib.parse.urlparse(self.path).path
         if _is_meeting_domain_path(self.path):
             authority = _meeting_domain_authority_status()
             if not authority.get("ok"):
                 self._send_json({"error": "Meeting store is not ready", **authority}, status=authority["_status"])
                 return
+        if (
+            agent_legacy_mutation_policy_service.requires_management(
+                "DELETE", request_path
+            )
+            and self._reject_untrusted_management_request()
+        ):
+            return
         if urllib.parse.urlparse(self.path).path.startswith("/api/projects/") and self._reject_untrusted_management_request():
             return
         if self.path == "/api/agent/delete":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_agent_delete(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "DELETE", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
             return
         elif self.path.startswith("/api/meetings/history/"):
             # DELETE /api/meetings/history/<id>
@@ -30010,6 +30018,13 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         request_path = parsed_url.path
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_post(request_path)
+            return
+        if (
+            agent_legacy_mutation_policy_service.requires_management(
+                "POST", request_path
+            )
+            and self._reject_untrusted_management_request()
+        ):
             return
         if request_path == "/api/agent/project-authoring/projects":
             self._handle_agent_project_direct_create()
@@ -30440,38 +30455,44 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         # --- OFFICE CONFIG PERSISTENCE ---
         elif self.path == "/api/office-config":
-            length = int(self.headers.get('Content-Length', 0))
-            body = self.rfile.read(length) if length else b'{}'
-            # Validate JSON
-            try:
-                json.loads(body)
-            except json.JSONDecodeError:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(b'{"error":"Invalid JSON"}')
+            proposed, error = self._read_limited_json_body(
+                limit=self._MANAGEMENT_BODY_LIMIT
+            )
+            if error:
+                self._send_json_error(error, allow_origin="*")
                 return
             _oc_path = os.path.join(STATUS_DIR, "office-config.json")
-            with open(_oc_path, "w") as f:
-                f.write(body.decode())
+            try:
+                with open(_oc_path, "r", encoding="utf-8") as config_file:
+                    current = json.load(config_file)
+            except (OSError, ValueError):
+                current = {}
+            decision = agent_legacy_mutation_policy_service.office_config_update(
+                current,
+                proposed,
+            )
+            if not decision.allowed:
+                self._send_json(
+                    decision.response(),
+                    status=decision.status,
+                    allow_origin="*",
+                )
+                return
+            with open(_oc_path, "w", encoding="utf-8") as config_file:
+                json.dump(proposed, config_file, ensure_ascii=False)
             os.chmod(_oc_path, 0o666)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(b'{"ok":true}')
+            self._send_json({"ok": True}, allow_origin="*")
             return
         # --- AGENT CREATION API ---
         elif self.path == "/api/agent/create":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_agent_create(body)
-            self.send_response(result.get("_status", 200))
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            result.pop("_status", None)
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "POST", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
             return
         elif self.path == "/api/archive-room/manager":
             length = int(self.headers.get('Content-Length', 0))
@@ -30564,8 +30585,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         elif request_path.startswith("/api/agent-workspace/"):
             agent_key = urllib.parse.unquote(request_path.split("/api/agent-workspace/", 1)[1].strip("/"))
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
+            body, error = self._read_limited_json_body(
+                limit=self._MANAGEMENT_BODY_LIMIT
+            )
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            decision = agent_legacy_mutation_policy_service.workspace_update(body)
+            if not decision.allowed:
+                self._send_json(
+                    decision.response(),
+                    status=decision.status,
+                    allow_origin="*",
+                )
+                return
             result = _handle_agent_workspace_update(agent_key, body)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
@@ -31166,16 +31199,14 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({"error": str(e)}).encode())
             return
         elif self.path == "/set-model":
-            length = int(self.headers.get('Content-Length', 0))
-            body = json.loads(self.rfile.read(length)) if length else {}
-            agent_key = body.get("agent", "")
-            model_id = body.get("model", "")
-            result = self._set_agent_model(agent_key, model_id)
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps(result).encode())
+            decision = agent_legacy_mutation_policy_service.retired_route(
+                "POST", request_path
+            )
+            self._send_json(
+                decision.response(),
+                status=decision.status,
+                allow_origin="*",
+            )
         elif self.path == "/api/native-models/openclaw/agent-model":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
