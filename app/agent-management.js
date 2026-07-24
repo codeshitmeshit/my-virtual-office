@@ -259,11 +259,21 @@
     if (root.document) {
         root.document.addEventListener('keydown', handleKeydown);
         root.document.addEventListener('DOMContentLoaded', function () {
-            if (!root.document.querySelector('link[href*="agent-management.css"]')) {
+            [
+                'agent-management.css?v=1784910000-merged-shell',
+                'agent-configuration.css?v=1784910000-configuration-panel',
+            ].forEach(function (href) {
+                const name = href.split('?')[0];
+                if (root.document.querySelector('link[href*="' + name + '"]')) return;
                 const stylesheet = root.document.createElement('link');
                 stylesheet.rel = 'stylesheet';
-                stylesheet.href = 'agent-management.css?v=1784910000-merged-shell';
+                stylesheet.href = href;
                 root.document.head.appendChild(stylesheet);
+            });
+            if (!root.AgentConfiguration && !root.document.querySelector('script[src*="agent-configuration.js"]')) {
+                const script = root.document.createElement('script');
+                script.src = 'agent-configuration.js?v=1784910000-configuration-panel';
+                root.document.body.appendChild(script);
             }
             const dialog = modal();
             if (dialog) dialog.addEventListener('click', function (event) {
