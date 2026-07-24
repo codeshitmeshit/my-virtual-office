@@ -284,13 +284,64 @@ class AgentProfileConfigurationService:
             patch,
             expected_revision=command.expected_revision,
         )
+        return self._notify_directory(profile, field, command.value)
+
+    def restore(
+        self,
+        actor: ConfigurationActor,
+        *,
+        target_ai_id: str,
+        field: str,
+        value: object,
+        expected_revision: int,
+        appearance_was_present: bool = True,
+    ) -> ProfileMutationResult:
+        """Restore one previously authorized value from a trusted undo record."""
+
+        target = str(target_ai_id or "").strip()
+        normalized_field = str(field or "").strip()
+        self._authorize(actor, target)
+        if normalized_field in LOW_RISK_FIELDS:
+            patch = {normalized_field: copy.deepcopy(value)}
+        elif normalized_field.startswith("appearance."):
+            appearance_field = normalized_field.removeprefix("appearance.")
+            current = self._store.get(target)
+            appearance = copy.deepcopy(current.appearance if current else {})
+            if appearance_was_present:
+                appearance[appearance_field] = self._appearance_value(
+                    appearance_field, value
+                )
+            else:
+                if appearance_field not in APPEARANCE_FIELDS:
+                    raise AgentProfileCommandError(
+                        f"appearance field {appearance_field} is not configurable"
+                    )
+                appearance.pop(appearance_field, None)
+            patch = {"appearance": appearance}
+        else:
+            raise AgentProfileAuthorizationError(
+                f"field {normalized_field} is not a low-risk profile field"
+            )
+        profile = self._store.update(
+            target,
+            patch,
+            expected_revision=expected_revision,
+        )
+        return self._notify_directory(profile, normalized_field, value)
+
+    def _notify_directory(
+        self,
+        profile: AgentProfile,
+        field: str,
+        value: object,
+    ) -> ProfileMutationResult:
         if field not in DIRECTORY_RECONCILIATION_FIELDS:
             return ProfileMutationResult(profile=profile, field=field)
         try:
             self._directory.profile_changed(
-                ai_id=target,
+                ai_id=profile.ai_id,
                 field=field,
-                value=copy.deepcopy(command.value),
+                value=copy.deepcopy(value),
                 revision=profile.revision,
             )
         except Exception:
