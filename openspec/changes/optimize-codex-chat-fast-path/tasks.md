@@ -72,3 +72,7 @@
 ## 15. Third Push Review Remediation
 
 - [x] 15.1 Extend pre-response isolation to approval and input server requests with response-time identity revalidation, interrupt and clean up the authoritative native turn on buffer overflow, bound the pre-response visibility delay without accepting stale events, make local VO endpoint fallback ignore inherited external URLs, and add deterministic security, cleanup, latency, and documentation regressions.
+
+## 16. Default Fast-Path Capacity
+
+- [x] 16.1 Enable the Codex chat fast path by default, raise the validated and Provider-clamped default capacity to 8, preserve explicit flag-off rollback at capacity 1, update diagnostics/runbook/specification text, and add deterministic default, boundary, and ninth-turn capacity regressions without claiming a real-Provider capacity-8 performance proof.

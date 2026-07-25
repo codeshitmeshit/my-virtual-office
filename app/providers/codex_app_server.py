@@ -677,7 +677,17 @@ class _LateStartCleanup:
 class CodexAppServerClient:
     """Small synchronous facade over app-server's bidirectional JSONL RPC."""
 
-    def __init__(self, workspace: str, model: str = "", binary: str | None = None, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str | None = None, sandbox: str | None = None, approval_policy: str | None = None):
+    def __init__(
+        self,
+        workspace: str,
+        model: str = "",
+        binary: str | None = None,
+        max_concurrent_turns: int = 8,
+        route_approvals_through_vo: bool = False,
+        home_path: str | None = None,
+        sandbox: str | None = None,
+        approval_policy: str | None = None,
+    ):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
         self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
@@ -722,9 +732,9 @@ class CodexAppServerClient:
         self._operations_lock = threading.Lock()
         self._owned_thread_ids: set[str] = set()
         try:
-            self.max_concurrent_turns = max(1, min(int(max_concurrent_turns or 1), 4))
+            self.max_concurrent_turns = max(1, min(int(max_concurrent_turns), 8))
         except (TypeError, ValueError):
-            self.max_concurrent_turns = 1
+            self.max_concurrent_turns = 8
         self._turn_capacity = threading.BoundedSemaphore(self.max_concurrent_turns)
         self._thread_locks_guard = threading.Lock()
         self._thread_locks: dict[str, dict[str, Any]] = {}
@@ -2341,11 +2351,11 @@ _CLIENTS: dict[tuple[str, str, str, str, int, bool, str, str], CodexAppServerCli
 _CLIENTS_LOCK = threading.Lock()
 
 
-def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 1, route_approvals_through_vo: bool = False, home_path: str = "", sandbox: str = "workspace-write", approval_policy: str = "on-request") -> CodexAppServerClient | CodexHttpBridgeClient:
+def get_codex_bridge(workspace: str, model: str = "", bridge_url: str = "", *, max_concurrent_turns: int = 8, route_approvals_through_vo: bool = False, home_path: str = "", sandbox: str = "workspace-write", approval_policy: str = "on-request") -> CodexAppServerClient | CodexHttpBridgeClient:
     try:
-        capacity = max(1, min(int(max_concurrent_turns or 1), 4))
+        capacity = max(1, min(int(max_concurrent_turns), 8))
     except (TypeError, ValueError):
-        capacity = 1
+        capacity = 8
     route_in_vo = bool(route_approvals_through_vo)
     resolved_sandbox = CodexAppServerClient._normalize_sandbox(sandbox)
     resolved_approval_policy = CodexAppServerClient._normalize_approval_policy(approval_policy)

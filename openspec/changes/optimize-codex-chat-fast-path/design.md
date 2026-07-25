@@ -107,7 +107,7 @@ The Agent-wide `_codex_operation_lock(agent_id)` becomes a conversation-scoped a
 `CodexAppServerClient` replaces its client-wide `_run_lock` with:
 
 - a per-thread lock for native-thread ordering;
-- a non-blocking app-server semaphore, initially configurable from 1 through 4 and enabled at 2 during the first fast-path rollout;
+- a non-blocking app-server semaphore configurable from 1 through 8, with a product default of 8 while preserving explicit capacity overrides;
 - the existing operations map keyed by thread ID and JSONL request-ID routing;
 - an explicit busy result when capacity is unavailable.
 
@@ -127,8 +127,8 @@ Alternative considered: reduce the sleep from 200 to 20 milliseconds. Rejected b
 
 The following startup-read configuration is validated and clamped; invalid values fail closed to the legacy path and emit a sanitized diagnostic:
 
-- `VO_CODEX_CHAT_FAST_PATH_ENABLED` (default off for deployment, then enabled after baseline/shadow validation);
-- `VO_CODEX_MAX_CONCURRENT_TURNS` (1-4; initial enabled rollout value 2);
+- `VO_CODEX_CHAT_FAST_PATH_ENABLED` (default on; an explicit false value restores the legacy path after restart);
+- `VO_CODEX_MAX_CONCURRENT_TURNS` (1-8; default 8);
 - `VO_CODEX_STREAM_COALESCE_MIN_MS` (default/minimum 33);
 - `VO_CODEX_STREAM_COALESCE_MAX_MS` (default/maximum 100).
 
@@ -142,7 +142,7 @@ Logs use run/conversation digests and event classes only. They must not include 
 
 ## Risks / Trade-offs
 
-- **[Provider does not safely support concurrent active threads]** → Gate capacity above 1 behind deterministic multiplexing tests and staged rollout; retain all non-concurrency fast-path improvements at capacity 1.
+- **[Provider does not safely sustain the product default of 8 active threads]** → Preserve deterministic multiplexing correctness tests, monitor real-load pressure and cross-delivery signals, and override capacity downward without disabling the other fast-path latency improvements.
 - **[Transient coalescing changes visible ordering or duplicates text]** → Use per-run ordered buckets, explicit barriers, stable sequence IDs, and original-vs-coalesced reconstruction tests.
 - **[Async compatibility projection loses recent activity]** → Treat it as non-authoritative; durable user/final/approval/terminal state is committed through existing authorities and restart tests ignore transient loss.
 - **[Global memory grows under many conversations]** → Enforce scope, fragment, byte, and global bounds; flush or bypass rather than queue without limit.
@@ -157,9 +157,9 @@ Logs use run/conversation digests and event classes only. They must not include 
 2. Land instrumentation and bounded fast-path components with `VO_CODEX_CHAT_FAST_PATH_ENABLED=0`; verify no behavior or latency regression.
 3. Enable the fast path in deterministic tests at concurrency 1, verify the latency SLOs, transient loss contract, durable recovery, event reconstruction, and rollback path.
 4. Prove app-server multiplexing, then enable concurrency 2 in an isolated local/BOE-equivalent environment. Observe busy reasons, active turns, coalescer pressure, durable failures, p95 latency, and cross-conversation isolation.
-5. Increase no further than 4 only if the same gates pass with stable CPU, memory, file-descriptor, and event-loop/reader latency.
+5. The product default is 8. Treat the existing two-thread multiplexing fixture as a correctness floor rather than a capacity-8 performance proof, and monitor CPU, memory, file-descriptor, workspace-I/O, and reader latency under real load.
 6. For rollback, stop new Codex runs, finish or cancel active turns, drain durable state, discard transient buffers, restart with the flag off, and verify history/thread mapping/approval/final results. No data reverse migration is required.
 
 ## Open Questions
 
-No product or architecture decision remains open before task planning. The safe Provider concurrency proven by tests is an implementation-time rollout result: failure to prove capacity 2 keeps the configured capacity at 1 and does not relax the confirmed correctness or latency gates.
+No product or architecture decision remains open before task planning. The deterministic Provider protocol fixture proves two-thread interleaving; the configured default of 8 is a product capacity choice and does not by itself constitute a real-Provider performance or saturation proof.

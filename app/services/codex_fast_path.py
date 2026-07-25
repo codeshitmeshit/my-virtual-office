@@ -171,10 +171,10 @@ class CodexFastPathTelemetry:
 
 @dataclass(frozen=True)
 class CodexFastPathSettings:
-    requested_enabled: bool = False
-    enabled: bool = False
+    requested_enabled: bool = True
+    enabled: bool = True
     valid: bool = True
-    max_concurrent_turns: int = 1
+    max_concurrent_turns: int = 8
     coalesce_min_ms: int = 33
     coalesce_max_ms: int = 100
     issues: tuple[str, ...] = ()
@@ -735,16 +735,16 @@ def load_codex_fast_path_settings(environ: Mapping[str, Any], codex_config: Mapp
     fast_config = nested if isinstance(nested, Mapping) else codex_config
     issues: list[str] = []
     requested_enabled = _strict_bool(
-        _configured_value(environ, "VO_CODEX_CHAT_FAST_PATH_ENABLED", fast_config, "enabled", False),
-        False,
+        _configured_value(environ, "VO_CODEX_CHAT_FAST_PATH_ENABLED", fast_config, "enabled", True),
+        True,
         "invalid_enabled",
         issues,
     )
     max_turns = _bounded_int(
-        _configured_value(environ, "VO_CODEX_MAX_CONCURRENT_TURNS", fast_config, "maxConcurrentTurns", 1),
+        _configured_value(environ, "VO_CODEX_MAX_CONCURRENT_TURNS", fast_config, "maxConcurrentTurns", 8),
+        8,
         1,
-        1,
-        4,
+        8,
         "invalid_max_concurrent_turns",
         issues,
     )

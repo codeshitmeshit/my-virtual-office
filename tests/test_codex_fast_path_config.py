@@ -16,12 +16,12 @@ if str(APP_DIR) not in sys.path:
 from services.codex_fast_path import CodexEventFastPath, CodexFastPathSettings, classify_codex_event, load_codex_fast_path_settings
 
 
-def test_defaults_are_valid_and_disabled():
+def test_defaults_are_valid_enabled_and_capacity_eight():
     settings = load_codex_fast_path_settings({}, {})
-    assert settings.enabled is False
-    assert settings.requested_enabled is False
+    assert settings.enabled is True
+    assert settings.requested_enabled is True
     assert settings.valid is True
-    assert settings.max_concurrent_turns == 1
+    assert settings.max_concurrent_turns == 8
     assert settings.coalesce_min_ms == 33
     assert settings.coalesce_max_ms == 100
     assert settings.diagnostics()["startupOnly"] is True
@@ -58,10 +58,32 @@ def test_invalid_configuration_fails_closed_without_echoing_values():
     assert settings.requested_enabled is True
     assert settings.enabled is False
     assert settings.valid is False
-    assert settings.max_concurrent_turns == 1
+    assert settings.max_concurrent_turns == 8
     assert (settings.coalesce_min_ms, settings.coalesce_max_ms) == (33, 100)
     assert set(diagnostics["issues"]) == {"invalid_max_concurrent_turns", "invalid_coalesce_window"}
     assert secret_canary not in str(diagnostics)
+
+
+def test_capacity_eight_is_valid_and_nine_fails_closed():
+    valid = load_codex_fast_path_settings({"VO_CODEX_MAX_CONCURRENT_TURNS": "8"}, {})
+    assert valid.enabled is True
+    assert valid.valid is True
+    assert valid.max_concurrent_turns == 8
+
+    invalid = load_codex_fast_path_settings({"VO_CODEX_MAX_CONCURRENT_TURNS": "9"}, {})
+    assert invalid.requested_enabled is True
+    assert invalid.enabled is False
+    assert invalid.valid is False
+    assert invalid.max_concurrent_turns == 8
+    assert invalid.diagnostics()["issues"] == ["invalid_max_concurrent_turns"]
+
+
+def test_explicit_disable_preserves_legacy_path_setting():
+    settings = load_codex_fast_path_settings({"VO_CODEX_CHAT_FAST_PATH_ENABLED": "0"}, {})
+    assert settings.requested_enabled is False
+    assert settings.enabled is False
+    assert settings.valid is True
+    assert settings.max_concurrent_turns == 8
 
 
 def test_server_load_and_safe_projection_expose_only_bounded_diagnostics(monkeypatch, tmp_path):

@@ -34,9 +34,10 @@ def _safe_suffix(value: str) -> str:
 
 def _bounded_turn_capacity(value: Any) -> int:
     try:
-        return max(1, min(int(value or 1), 4))
+        normalized = 8 if value is None or str(value).strip() == "" else int(value)
+        return max(1, min(normalized, 8))
     except (TypeError, ValueError):
-        return 1
+        return 8
 
 
 @dataclass
@@ -61,7 +62,7 @@ class CodexProvider:
     include_native_agents: bool = True
     register_native_agents: bool = True
     route_approvals_through_vo: bool = False
-    max_concurrent_turns: int = 1
+    max_concurrent_turns: int = 8
 
     provider_kind: str = "codex"
     provider_type: str = "app-server-bridge"
