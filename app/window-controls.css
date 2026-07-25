@@ -1,0 +1,123 @@
+/* Shared close controls for modal and floating-window chrome. */
+:root {
+    --vo-close-size: 32px;
+    --vo-close-radius: 6px;
+    --vo-close-bg: transparent;
+    --vo-close-bg-hover: rgba(244, 67, 54, 0.22);
+    --vo-close-border: transparent;
+    --vo-close-border-hover: #ff6b6b;
+    --vo-close-color: #f44336;
+    --vo-close-color-hover: #ff7b72;
+    --vo-close-focus: #57d7ff;
+}
+
+.close-btn,
+.catalog-close-btn,
+.agent-management-close,
+.sms-header .sms-close,
+.chat-close,
+.chat-secondary-close,
+.browser-close,
+#agent-workspace-close,
+.hr-close,
+.archive-icon-btn,
+.bookshelf-bind-head button {
+    width: var(--vo-close-size);
+    min-width: var(--vo-close-size);
+    height: var(--vo-close-size);
+    min-height: var(--vo-close-size);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
+    margin-left: auto;
+    padding: 0;
+    border: 1px solid var(--vo-close-border);
+    border-radius: var(--vo-close-radius);
+    background: var(--vo-close-bg);
+    color: var(--vo-close-color);
+    box-shadow: none;
+    cursor: pointer;
+    font-family: 'Press Start 2P', cursive;
+    font-size: 18px;
+    font-weight: 400;
+    line-height: 1;
+    text-align: center;
+    text-decoration: none;
+    touch-action: manipulation;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.close-btn:hover,
+.catalog-close-btn:hover,
+.agent-management-close:hover,
+.sms-header .sms-close:hover,
+.chat-close:hover,
+.chat-secondary-close:hover,
+.browser-close:hover,
+#agent-workspace-close:hover,
+.hr-close:hover,
+.archive-icon-btn:hover,
+.bookshelf-bind-head button:hover {
+    border-color: var(--vo-close-border-hover);
+    background: var(--vo-close-bg-hover);
+    color: var(--vo-close-color-hover);
+    box-shadow: inset 0 0 0 1px rgba(255, 107, 107, 0.18);
+}
+
+.close-btn:focus-visible,
+.catalog-close-btn:focus-visible,
+.agent-management-close:focus-visible,
+.sms-header .sms-close:focus-visible,
+.chat-close:focus-visible,
+.chat-secondary-close:focus-visible,
+.browser-close:focus-visible,
+#agent-workspace-close:focus-visible,
+.hr-close:focus-visible,
+.archive-icon-btn:focus-visible,
+.bookshelf-bind-head button:focus-visible {
+    outline: 2px solid var(--vo-close-focus);
+    outline-offset: 2px;
+}
+
+.close-btn:disabled,
+.catalog-close-btn:disabled,
+.agent-management-close:disabled,
+.sms-header .sms-close:disabled,
+.chat-close:disabled,
+.chat-secondary-close:disabled,
+.browser-close:disabled,
+#agent-workspace-close:disabled,
+.hr-close:disabled,
+.archive-icon-btn:disabled,
+.bookshelf-bind-head button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.modal-header .close-btn {
+    align-self: center;
+}
+
+.agent-management-close {
+    justify-self: end;
+}
+
+.browser-close {
+    font-size: 15px;
+}
+
+@media (max-width: 560px) {
+    .chat-close,
+    .chat-secondary-close,
+    .sms-header .sms-close,
+    .browser-close,
+    #agent-workspace-close {
+        width: 28px !important;
+        min-width: 28px !important;
+        height: 28px !important;
+        min-height: 28px !important;
+        border-radius: 6px !important;
+        font-size: 14px;
+    }
+}
