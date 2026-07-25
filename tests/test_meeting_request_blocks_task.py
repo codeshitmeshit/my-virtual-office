@@ -627,6 +627,7 @@ def test_approved_meeting_applies_action_items_before_original_task_resumes():
         finally:
             server._handle_project_execution_start = old_start
             server.threading.Thread = old_thread
+            server._handle_project_execution_start = old_start
             restore_store(old)
 
 

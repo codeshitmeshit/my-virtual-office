@@ -4,7 +4,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 const style = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
-const game = fs.readFileSync(path.join(root, 'app', 'game.js'), 'utf8');
+const meetings = fs.readFileSync(path.join(root, 'app', 'meetings-ui.js'), 'utf8');
 
 assert.ok(
   /\.mtg-card-header\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)\s*auto/s.test(style),
@@ -27,9 +27,9 @@ assert.ok(
   'meeting action buttons should wrap consistently when space is tight'
 );
 assert.ok(
-  game.includes('<div class="mtg-card-header" onclick="openMeetingDetailModal') &&
-    game.includes('<div class="mtg-card-badges">') &&
-    game.includes('<div class="mtg-actions-bar">'),
+  meetings.includes('<div class="mtg-card-header" onclick="openMeetingDetailModal') &&
+    meetings.includes('<div class="mtg-card-badges">') &&
+    meetings.includes('<div class="mtg-actions-bar">'),
   'meeting history cards should still render header, badges, and actions'
 );
 

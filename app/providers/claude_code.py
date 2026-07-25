@@ -78,7 +78,8 @@ class ClaudeCodeProvider:
         self.name = self.name or os.environ.get("VO_CLAUDE_CODE_AGENT_NAME") or "Claude Code"
         self.agent_id = self._safe_suffix(self.agent_id or os.environ.get("VO_CLAUDE_CODE_AGENT_ID") or "local")
         self.model = self.model or os.environ.get("VO_CLAUDE_CODE_MODEL") or ""
-        self.reply_text = self.reply_text if self.reply_text is not None else os.environ.get("VO_CLAUDE_CODE_REPLY_TEXT")
+        if self.reply_text is None and not self.binary:
+            self.reply_text = os.environ.get("VO_CLAUDE_CODE_REPLY_TEXT")
         self.permission_mode = str(self.permission_mode or os.environ.get("VO_CLAUDE_CODE_PERMISSION_MODE") or "acceptEdits")
         self.include_main = _env_bool("VO_CLAUDE_CODE_INCLUDE_MAIN", self.include_main)
         self.include_native_agents = _env_bool("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", self.include_native_agents)
