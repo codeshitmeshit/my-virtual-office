@@ -9,26 +9,27 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1784928732-management-token-layer">
-    <link rel="stylesheet" href="projects.css?v=1784928732-project-board-scroll">
-    <link rel="stylesheet" href="archive-room.css?v=1784928732-phase13">
-    <link rel="stylesheet" href="human-resources.css?v=1784928732-hr-record-dialog">
-    <link rel="stylesheet" href="human-resources-figma.css?v=1784928732-record-dialog">
-    <link rel="stylesheet" href="agent-management.css?v=1784928732-entry-visibility">
+    <link rel="stylesheet" href="style.css?v=1784941200-management-token-layer">
+    <link rel="stylesheet" href="projects.css?v=1784780212-project-board-scroll">
+    <link rel="stylesheet" href="archive-room.css?v=1784780212-phase13">
+    <link rel="stylesheet" href="human-resources.css?v=1784780212-hr-daily-sync">
+    <link rel="stylesheet" href="human-resources-figma.css?v=1784994300-compact-layout">
+    <link rel="stylesheet" href="agent-management.css?v=1784940000-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1784928732-close-controls">
-    <link rel="stylesheet" href="fonts.css?v=1784928732.05.07">
+    <link rel="stylesheet" href="meeting-center.css?v=1784824000-bold-list-title">
+    <link rel="stylesheet" href="fonts.css?v=1784780212.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
-    <script src="i18n.js?v=1784928732-weather-updated-at"></script>
-    <script src="font-scale.js?v=1784928732-font-scale"></script>
+    <script src="i18n.js?v=1784780212-weather-updated-at"></script>
+    <script src="font-scale.js?v=1784780212-font-scale"></script>
     <script>
     (function(){
         var lang='en';
         try{var s=localStorage.getItem('vo-i18n-lang');if(s==='zh')lang='zh';else if(navigator.language&&navigator.language.toLowerCase().indexOf('zh')>=0)lang='zh';}catch(e){}
         var eE=document.getElementById('locale-en'),eZ=document.getElementById('locale-zh');
-        function load(l,el){fetch('locales/'+l+'.json?v=1784928732-weather-updated-at',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
+        function load(l,el){fetch('locales/'+l+'.json?v=1784780212-weather-updated-at',{cache:'no-store'}).then(function(r){return r.json()}).then(function(d){el.textContent=JSON.stringify(d)}).catch(function(){});}
         load('en',eE);load('zh',eZ);
     })();
     </script>
@@ -662,25 +663,27 @@
     <!-- Meetings Dashboard Modal -->
     <div id="meetingsModal" class="modal hidden">
         <div class="modal-content meetings-modal-content">
-            <div class="modal-header">
-                <span class="modal-emoji">📊</span>
-                <h2 data-i18n="meetings_title">Meetings</h2>
-                <span class="close-btn" onclick="closeMeetingsModal()">&times;</span>
+            <div class="meeting-center-header">
+                <div class="meeting-center-heading">
+                    <h2 data-i18n="meeting_center_title">AI Meeting Center</h2>
+                </div>
+                <span id="meeting-center-status" class="meeting-center-status" aria-live="polite"></span>
+                <button class="meeting-center-new" type="button" onclick="toggleNewMeetingForm()">＋ <span data-i18n="new_meeting">New Meeting</span></button>
+                <button class="meeting-center-close" type="button" onclick="closeMeetingsModal()" aria-label="Close">&times;</button>
             </div>
             <div class="mtg-tabs">
                 <button class="mtg-tab active" data-tab="active" onclick="switchMtgTab('active')" data-i18n="active">Active</button>
                 <button class="mtg-tab" data-tab="requests" onclick="switchMtgTab('requests')" data-i18n="meeting_ai_requests">AI Requests</button>
                 <button class="mtg-tab" data-tab="completed" onclick="switchMtgTab('completed')" data-i18n="history">History</button>
             </div>
-            <div class="mtg-bulk-actions">
-                <button class="mtg-btn" onclick="toggleNewMeetingForm()">➕ <span id="new-mtg-btn-label" data-i18n="new_meeting">New Meeting</span></button>
-                <button class="mtg-btn" onclick="mtgExpandAll()" data-i18n="sidebar_expand_all">▼ Expand All</button>
-                <button class="mtg-btn" onclick="mtgCollapseAll()" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
-            </div>
             <div id="mtg-history-tools" class="mtg-history-tools hidden">
                 <input id="mtg-history-search" class="mtg-search-input" type="search" oninput="setMeetingHistorySearch(this.value)" data-i18n-placeholder="meeting_history_search_placeholder" placeholder="Search meeting history">
             </div>
-            <div id="mtg-cards" class="mtg-cards"></div>
+            <div id="mtg-cards" class="meeting-center-workspace">
+                <aside id="meeting-center-list" class="meeting-center-list" aria-label="Meetings and requests"></aside>
+                <main id="meeting-center-main" class="meeting-center-main"></main>
+                <aside id="meeting-center-controls" class="meeting-center-controls" aria-label="Human controls"></aside>
+            </div>
         </div>
     </div>
 
@@ -1130,20 +1133,21 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
-    <script src="internal-bubble.js?v=1784928732"></script>
-    <script src="game.js?v=1784928732-weather-updated-at"></script>
-    <script src="agent-guide.js?v=1784928732-agent-guide-skill-md"></script>
-    <script src="dashboard-realtime.js?v=1784928732-dashboard-realtime"></script>
-    <script src="browser-viewer-url.js?v=1784928732-viewer-proxy"></script>
-    <script src="browser-panel.js?v=1784928732-viewer-reload"></script>
-    <script src="projects.js?v=1784928732-project-authoring-review"></script>
-    <script src="archive-room.js?v=1784928732-phase13"></script>
-    <script src="human-resources.js?v=1784928732-raw-report-only"></script>
-    <script src="agent-appearance-preview.js?v=1784928732-pixel-preview"></script>
-    <script src="agent-appearance-dropdown.js?v=1784928732-upward-dropdown"></script>
+    <script src="internal-bubble.js?v=1784780212"></script>
+    <script src="game.js?v=1784823000-history-layout"></script>
+    <script src="meeting-center.js?v=1784823000-history-layout"></script>
+    <script src="agent-guide.js?v=1784780212-agent-guide-skill-md"></script>
+    <script src="dashboard-realtime.js?v=1784780212-dashboard-realtime"></script>
+    <script src="browser-viewer-url.js?v=1784780212-viewer-proxy"></script>
+    <script src="browser-panel.js?v=1784780212-viewer-reload"></script>
+    <script src="projects.js?v=1784780212-project-authoring-review"></script>
+    <script src="archive-room.js?v=1784780212-phase13"></script>
+    <script src="human-resources.js?v=1784994300-compact-layout"></script>
+    <script src="agent-appearance-preview.js?v=1784944200-pixel-preview"></script>
+    <script src="agent-appearance-dropdown.js?v=1784986200-upward-dropdown"></script>
     <script src="agent-management-adapters.js?v=1784928732-eager-configuration"></script>
     <script src="agent-configuration.js?v=1784928732-unregistered-preview"></script>
-    <script src="agent-management.js?v=1784928732-unregistered-preview"></script>
+    <script src="agent-management.js?v=1784994300-hr-registration"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};

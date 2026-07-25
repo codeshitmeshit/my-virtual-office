@@ -297,7 +297,7 @@ http://localhost:8090/setup
 | `VO_PC_METRICS_ENABLED` | `true` | 是否启用本机性能面板 |
 | `VO_PC_METRICS_URL` | `http://127.0.0.1:8099` | 性能监控服务地址 |
 | `VO_API_USAGE` | `false` | 是否启用 API usage 面板 |
-| `VO_WEATHER_LOCATION` | 空 | 天气位置 |
+| `VO_WEATHER_LOCATION` | `北京市,海淀区` | 天气位置 |
 
 更多示例见 [.env.example](.env.example)。
 

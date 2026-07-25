@@ -268,6 +268,7 @@
                             '<h3>' + esc(profile.name || profile.aiId) + '</h3>' +
                             '<p>' + esc(profile.aiId + ' · ' + role) + '</p></div>' +
                             '<span class="ac-active">● ' + esc(isPreview ? stateLabel : tr('agent_active_short', 'ACTIVE')) + '</span></section>' +
+                            '<span class="ac-active">● ' + esc(isPreview ? stateLabel : tr('agent_active_short', 'ACTIVE')) + '</span></section>' +
                         '<section class="ac-card ac-identity-card" data-section="identity"><h4>' +
                             esc(tr('agent_identity_bilingual', 'Identity / IDENTITY')) + '</h4>' +
                             textField(tr('agent_name', 'Name'), 'name', profile.name, editable, false) +

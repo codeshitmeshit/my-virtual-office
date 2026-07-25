@@ -17119,6 +17119,26 @@ function _mtgProjectSelectHtml(id, selectedProjectId, allowEmpty) {
 }
 
 function _mtgRender() {
+    if (window.MeetingCenterUI && typeof window.MeetingCenterUI.render === 'function') {
+        window.MeetingCenterUI.render({
+            currentTab: _mtgCurrentTab,
+            data: _mtgData,
+            agentMap: _mtgAgentMap,
+            mergeLiveMeeting: _mtgMergeLiveMeeting,
+            filterMeetingHistory: _mtgFilterMeetingHistory,
+            sortRequests: _mtgSortRequestsByStatusThenTime,
+            requestProposal: _mtgRequestProposal,
+            renderRequestDetail: _mtgRenderRequestDetail,
+            updateRequestModeratorOptions: _mtgUpdateRequestModeratorOptions,
+            renderMeetingDetail: _mtgRenderMeetingDetail,
+            renderMeetingTranscript: _mtgRenderTranscript,
+            meetingStageLabel: _mtgMeetingStageLabel,
+            structuredValue: _mtgStructuredValue,
+            hydratePendingCall: _mtgHydratePendingCall,
+            requestRender: _mtgRender
+        });
+        return;
+    }
     var container = document.getElementById('mtg-cards');
     var searchTools = document.getElementById('mtg-history-tools');
     if (searchTools) searchTools.classList.toggle('hidden', _mtgCurrentTab !== 'completed');
@@ -17357,6 +17377,9 @@ function _mtgParticipantDescription(info) {
 }
 
 function _mtgRenderParticipantRow(pKey, meeting, opts) {
+    if (window.MeetingCenterUI && typeof window.MeetingCenterUI.renderParticipantRow === 'function') {
+        return window.MeetingCenterUI.renderParticipantRow(pKey, _mtgAgentMap);
+    }
     opts = opts || {};
     var info = _mtgAgentMap[pKey] || { emoji: '🤖', name: pKey, role: '' };
     var desc = _mtgParticipantDescription(info);
@@ -18679,6 +18702,9 @@ function _mtgRenderContributionText(text) {
 }
 
 function _mtgRenderStructuredTurn(structured) {
+    if (window.MeetingCenterUI && typeof window.MeetingCenterUI.renderStructuredTurn === 'function') {
+        return window.MeetingCenterUI.renderStructuredTurn(structured, _mtgStructuredValue);
+    }
     var fields = [
         ['position', 'meeting_turn_position', 'Position'],
         ['reasoning', 'meeting_turn_reasoning', 'Reasoning'],
@@ -19054,13 +19080,17 @@ function _mtgParticipantSelectorHtml(opts) {
     var allowed = _mtgAssignableParticipantSet();
     var selected = new Set((opts.selected || []).map(function(item) { return String(item); }).filter(function(key) { return allowed.has(key); }));
     var byBranch = {};
-    getBranchList().forEach(function(branch) { byBranch[branch.id] = []; });
+    var participantBranches = getBranchList().slice();
+    participantBranches.forEach(function(branch) { byBranch[branch.id] = []; });
     _mtgMeetingAgents().forEach(function(agent) {
         var branchId = _mtgParticipantBranchId(agent);
         if (!byBranch[branchId]) byBranch[branchId] = [];
         byBranch[branchId].push(agent);
     });
-    var branchHtml = getBranchList().map(function(branch) {
+    if ((byBranch.UNASSIGNED || []).length && !participantBranches.some(function(branch) { return branch.id === 'UNASSIGNED'; })) {
+        participantBranches.push({ id: 'UNASSIGNED', name: _mtgT('branch_unassigned', 'Unassigned'), emoji: '🏢' });
+    }
+    var branchHtml = participantBranches.map(function(branch) {
         var branchAgents = byBranch[branch.id] || [];
         if (!branchAgents.length) return '';
         return '<label class="mtg-label" style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;margin-top:4px;">' +
@@ -19068,7 +19098,7 @@ function _mtgParticipantSelectorHtml(opts) {
             _escMtg(_mtgBranchDisplayLabel(branch)) +
             '</label>';
     }).join('');
-    var agentHtml = getBranchList().map(function(branch) {
+    var agentHtml = participantBranches.map(function(branch) {
         var branchAgents = byBranch[branch.id] || [];
         if (!branchAgents.length) return '';
         var items = branchAgents.map(function(agent) {
@@ -19431,7 +19461,8 @@ async function _mtgAfterMeetingRefresh() {
     _mtgRefreshDetailModal();
 }
 
-function _mtgRenderMeetingDetail(m) {
+function _mtgRenderMeetingDetail(m, options) {
+    options = options || {};
     var participants = m.participants || m.agents || [];
     var isActive = m.status === 'active';
     var html = '';
@@ -19482,7 +19513,7 @@ function _mtgRenderMeetingDetail(m) {
         html += _mtgRenderInterventionForm(m);
     }
 
-    if (m.executableMeeting && ((Array.isArray(m.transcript) && m.transcript.length) || (Array.isArray(m.pendingCalls) && m.pendingCalls.length))) {
+    if (options.includeTranscript !== false && m.executableMeeting && ((Array.isArray(m.transcript) && m.transcript.length) || (Array.isArray(m.pendingCalls) && m.pendingCalls.length))) {
         html += _mtgRenderTranscript(m);
     }
 
