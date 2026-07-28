@@ -9,6 +9,13 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from .project_orchestration import is_marked_project
+from .project_scheduling_orchestration import (
+    marked_project_all_tasks_completed,
+    marked_project_scheduling_satisfaction,
+    marked_task_cron_skip_reason,
+)
+
 
 Project = dict[str, Any]
 Binding = dict[str, Any]
@@ -421,17 +428,6 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
         return {"ok": True, "status": "paused", "reason": "project_cron_paused", "projectId": project_id, "id": cron_id}
     target_type = binding.get("targetType") or "projectWorkflow"
     task_id = binding.get("taskId")
-    active = ports.active_task(project) if ports.execution_enabled(project) else None
-    if active:
-        ports.update_binding_status(
-            cron_id, "skipped", "Another task is already active for this project",
-            {"activeTaskId": active.get("id")},
-        )
-        record("skipped", "project_active")
-        return {
-            "ok": True, "status": "skipped", "reason": "project_active",
-            "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id,
-        }
 
     if target_type == "projectTask":
         task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
@@ -439,6 +435,25 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
             ports.update_binding_status(cron_id, "missing_target", "Task not found")
             record("skipped", "task_missing")
             return {"ok": True, "status": "skipped", "reason": "task_missing", "projectId": project_id, "id": cron_id}
+        if is_marked_project(project):
+            reason = marked_task_cron_skip_reason(project, task)
+            ports.update_binding_status(cron_id, "skipped", reason, {"taskId": task_id})
+            record("skipped", reason)
+            return {
+                "ok": True, "status": "skipped", "reason": reason,
+                "projectId": project_id, "id": cron_id, "taskId": task_id,
+            }
+        active = ports.active_task(project) if ports.execution_enabled(project) else None
+        if active:
+            ports.update_binding_status(
+                cron_id, "skipped", "Another task is already active for this project",
+                {"activeTaskId": active.get("id")},
+            )
+            record("skipped", "project_active")
+            return {
+                "ok": True, "status": "skipped", "reason": "project_active",
+                "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id,
+            }
         if task.get("completedAt") and task.get("scheduledRepeatEnabled") is not True:
             ports.update_binding_status(cron_id, "disengaged_completed", "Task completed, cron disengaged")
             record("skipped", "task_completed_cron_disengaged")
@@ -472,11 +487,14 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
         tasks = project.get("tasks", []) or []
         all_completed = False
         if target_type == "projectWorkflow" and tasks:
-            done_columns = ports.done_column_ids(project)
-            all_completed = not any(
-                task.get("columnId") not in done_columns and not task.get("completedAt")
-                for task in tasks
-            )
+            if is_marked_project(project):
+                all_completed = marked_project_all_tasks_completed(project)
+            else:
+                done_columns = ports.done_column_ids(project)
+                all_completed = not any(
+                    task.get("columnId") not in done_columns and not task.get("completedAt")
+                    for task in tasks
+                )
         if all_completed:
             ports.update_binding_status(cron_id, "disengaged_completed", "All tasks completed; cron disengaged")
             record("skipped", "project_all_tasks_completed")
@@ -498,11 +516,38 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
                 "ok": True, "status": "skipped", "reason": "project_all_tasks_completed",
                 "projectId": project_id, "id": cron_id, "allCompleted": True, "cronDisabled": True,
             }
+        marked_satisfaction = marked_project_scheduling_satisfaction(project)
+        if marked_satisfaction == "already_active":
+            active_ids = [
+                str(task.get("id") or "")
+                for task in project.get("tasks", []) or []
+                if isinstance(task, Mapping) and task.get("activeAttemptId")
+            ]
+            ports.update_binding_status(
+                cron_id, "skipped", "Project orchestration is already active",
+                {"activeTaskIds": active_ids},
+            )
+            record("skipped", "project_active")
+            return {
+                "ok": True, "status": "skipped", "reason": "project_active",
+                "activeTaskIds": active_ids, "projectId": project_id, "id": cron_id,
+            }
+        active = ports.active_task(project) if ports.execution_enabled(project) else None
+        if active:
+            ports.update_binding_status(
+                cron_id, "skipped", "Another task is already active for this project",
+                {"activeTaskId": active.get("id")},
+            )
+            record("skipped", "project_active")
+            return {
+                "ok": True, "status": "skipped", "reason": "project_active",
+                "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id,
+            }
         if ports.execution_enabled(project):
-            result = ports.start_project(project_id, {
-                "mode": project.get("projectExecutionStartMode") or "continuous",
-                "by": "project-cron", "source": source, "skipReviewConfirmed": True,
-            })
+            body = {"by": "project-cron", "source": source, "skipReviewConfirmed": True}
+            if not is_marked_project(project):
+                body["mode"] = project.get("projectExecutionStartMode") or "continuous"
+            result = ports.start_project(project_id, body)
         else:
             result = ports.start_legacy(project_id, {"autoMode": True})
 

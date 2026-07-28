@@ -24,13 +24,13 @@ from services.project_materialization import (
     ProjectMaterializationError,
     materialize_checklist,
 )
+from services.project_orchestration import task_stage
 
 
 PROJECT_TYPES = frozenset({"one_time", "reusable", "recurring"})
 MAINTENANCE_MODES = frozenset({"strict_confirmation", "autonomous"})
 TEMPLATE_MODES = frozenset({"none", "create", "reference"})
 REVIEW_TRIGGERS = frozenset({"high_risk", "cross_team", "critical_delivery"})
-PROJECT_EXECUTION_START_MODES = frozenset({"single", "continuous"})
 IDEMPOTENCY_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 
 
@@ -291,33 +291,20 @@ def _validate_execution_configuration(
         enabled = raw_enabled
     normalized["projectExecutionEnabled"] = enabled
 
-    start_mode = str(draft.get("projectExecutionStartMode") or "continuous").strip()
-    if start_mode not in PROJECT_EXECUTION_START_MODES:
+    if "projectExecutionStartMode" in draft:
         issues.append(DraftValidationIssue(
-            "invalid_project_execution_start_mode",
+            "legacy_project_execution_start_mode",
             "projectExecutionStartMode",
-            "projectExecutionStartMode must be single or continuous",
+            "projectExecutionStartMode is no longer accepted; use executionStage on every task",
         ))
-    normalized["projectExecutionStartMode"] = start_mode
-
-    raw_policy = draft.get("executionPolicy", {"maxActiveTasks": 1})
-    if not isinstance(raw_policy, Mapping):
+        normalized.pop("projectExecutionStartMode", None)
+    if "executionPolicy" in draft:
         issues.append(DraftValidationIssue(
-            "invalid_execution_policy", "executionPolicy",
-            "executionPolicy must be an object",
+            "legacy_execution_policy",
+            "executionPolicy",
+            "executionPolicy is no longer accepted; use executionStage groups to express parallelism",
         ))
-        policy = {"maxActiveTasks": 1}
-    else:
-        policy = copy.deepcopy(dict(raw_policy))
-    max_active = policy.get("maxActiveTasks", 1)
-    if isinstance(max_active, bool) or not isinstance(max_active, int) or max_active < 1:
-        issues.append(DraftValidationIssue(
-            "invalid_max_active_tasks", "executionPolicy.maxActiveTasks",
-            "executionPolicy.maxActiveTasks must be a positive integer",
-        ))
-    else:
-        policy["maxActiveTasks"] = max_active
-    normalized["executionPolicy"] = policy
+        normalized.pop("executionPolicy", None)
 
     default_executor, executor_valid = _validate_default_agent_id(
         draft.get("defaultExecutorAgentId"),
@@ -336,6 +323,38 @@ def _validate_execution_configuration(
     normalized["defaultExecutorAgentId"] = default_executor
     normalized["defaultReviewerAgentId"] = default_reviewer
     return enabled and executor_valid
+
+
+def _positive_execution_stage(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        stage = int(value)
+    except (TypeError, ValueError):
+        return None
+    return stage if stage > 0 else None
+
+
+def _validate_contiguous_task_stages(
+    normalized_tasks: list[dict[str, Any]],
+    *,
+    issues: list[DraftValidationIssue],
+) -> None:
+    stages = []
+    for task in normalized_tasks:
+        stage = task_stage(task)
+        if stage is not None:
+            stages.append(stage)
+    if not stages:
+        return
+    expected = list(range(1, max(stages) + 1))
+    actual = sorted(set(stages))
+    if actual != expected:
+        issues.append(DraftValidationIssue(
+            "non_contiguous_execution_stages",
+            "tasks",
+            "Task executionStage assignments must occupy every stage from 1 without gaps",
+        ))
 
 
 def validate_project_draft(
@@ -421,10 +440,23 @@ def validate_project_draft(
         item = copy.deepcopy(task)
         item["title"] = _text(task.get("title"), path=f"{path}.title", issues=issues, required=True, maximum=300)
         item["description"] = _text(task.get("description"), path=f"{path}.description", issues=issues, required=False, maximum=20000)
-        try:
-            item["executionOrder"] = int(task.get("executionOrder") or index + 1)
-        except (TypeError, ValueError):
-            item["executionOrder"] = index + 1
+        if "executionOrder" in task:
+            issues.append(DraftValidationIssue(
+                "legacy_execution_order",
+                f"{path}.executionOrder",
+                "executionOrder is no longer accepted; use executionStage",
+            ))
+            item.pop("executionOrder", None)
+        stage = _positive_execution_stage(task.get("executionStage"))
+        if stage is None:
+            issues.append(DraftValidationIssue(
+                "invalid_execution_stage",
+                f"{path}.executionStage",
+                "executionStage must be a positive integer",
+            ))
+            item.pop("executionStage", None)
+        else:
+            item["executionStage"] = stage
         try:
             item["checklist"] = materialize_checklist(task.get("checklist"))
         except ProjectMaterializationError as exc:
@@ -485,6 +517,7 @@ def validate_project_draft(
                 ))
         normalized_tasks.append(item)
     normalized["tasks"] = normalized_tasks
+    _validate_contiguous_task_stages(normalized_tasks, issues=issues)
     normalized["template"] = _validate_template(
         draft.get("template"), project_type=project_type, issues=issues,
     )

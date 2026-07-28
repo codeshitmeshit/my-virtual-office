@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.project_actors import task_actor_references
+from services.project_task_final_result import FINAL_RESULT_FILENAME, render_task_final_result_markdown
 
 PROJECTS_DIRNAME = "projects-md"
 LEGACY_PROJECTS_FILENAME = "projects.json"
@@ -38,7 +39,8 @@ COMPLEX_JSON_FIELDS = {
     "authoringSource_json", "templateRef_json", "recurrence_json", "recurrenceRef_json",
     "responsibleActor_json", "executorActor_json", "reviewerActor_json",
     "reviewerRecommendation_json",
-    "maintenanceHistory_json",
+    "maintenanceHistory_json", "orchestration_json", "orchestrationSkip_json",
+    "finalResult_json",
 }
 
 
@@ -138,6 +140,24 @@ def _parse_frontmatter(text: str) -> Tuple[Dict[str, Any], str]:
         else:
             result[key] = _parse_scalar(rest)
     return result, body.lstrip("\n")
+
+
+def _dict_or_empty(value: Any) -> Dict[str, Any]:
+    return copy.deepcopy(value) if isinstance(value, dict) else {}
+
+
+def _positive_int_or_none(value: Any) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _copy_present(source: Dict[str, Any], target: Dict[str, Any], keys: Tuple[str, ...]) -> None:
+    for key in keys:
+        if key in source:
+            target[key] = copy.deepcopy(source.get(key))
 
 
 def _atomic_write(path: str, content: str):
@@ -349,10 +369,30 @@ class MarkdownProjectStore:
             self._mark_written()
 
     def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
-        data = self.load_all()
-        for p in data.get("projects", []):
-            if p.get("id") == project_id:
-                return p
+        target_id = str(project_id or "")
+        with self.lock:
+            self._migrate_legacy_if_needed()
+            for entry in sorted(os.listdir(self.projects_dir)):
+                project_dir = os.path.join(self.projects_dir, entry)
+                project_md = os.path.join(project_dir, "project.md")
+                if not os.path.isfile(project_md):
+                    continue
+                try:
+                    with open(project_md, "r", encoding="utf-8") as project_file:
+                        meta, _ = _parse_frontmatter(project_file.read())
+                    if str(meta.get("id") or "") == target_id:
+                        return self._read_project_dir(project_dir)
+                except Exception:
+                    continue
+            if os.path.isfile(self.legacy_json):
+                try:
+                    with open(self.legacy_json, "r", encoding="utf-8") as f:
+                        legacy = json.load(f)
+                    for project in legacy.get("projects", []) or []:
+                        if isinstance(project, dict) and str(project.get("id") or "") == target_id:
+                            return copy.deepcopy(project)
+                except Exception:
+                    return None
         return None
 
     def delete_project(self, project_id: str) -> bool:
@@ -492,6 +532,8 @@ class MarkdownProjectStore:
         os.makedirs(tasks_dir, exist_ok=True)
         tasks = project.pop("tasks", [])
         activity = project.pop("activity", [])
+        marked_pipeline = project.get("executionModel") == "stage_pipeline_v1"
+        self._prepare_task_final_result_paths(tasks_dir, project, tasks)
         meta = {
             "id": project.get("id"),
             "title": project.get("title", ""),
@@ -516,19 +558,12 @@ class MarkdownProjectStore:
             "workspaceCreatedAt": project.get("workspaceCreatedAt"),
             "defaultExecutorAgentId": project.get("defaultExecutorAgentId"),
             "defaultReviewerAgentId": project.get("defaultReviewerAgentId"),
-            "projectExecutionStartMode": project.get("projectExecutionStartMode", "continuous"),
-            "projectExecutionFlowActive": project.get("projectExecutionFlowActive", False),
-            "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason"),
+            "executionModel": project.get("executionModel"),
+            "orchestration_json": project.get("orchestration", {}),
             "scheduledCronPaused": project.get("scheduledCronPaused", False),
             "scheduledCronHistory_json": project.get("scheduledCronHistory", []),
-            "executionPolicy_json": project.get("executionPolicy", {"maxActiveTasks": 1}),
             "executionDirtyConfirmations_json": project.get("executionDirtyConfirmations", []),
             "feishuNotifications_json": project.get("feishuNotifications", {}),
-            "workflowActive": project.get("workflowActive", False),
-            "workflowPhase": project.get("workflowPhase", "idle"),
-            "activeTaskId": project.get("activeTaskId"),
-            "activeAgent": project.get("activeAgent"),
-            "autoMode": project.get("autoMode", False),
             "template": project.get("template", False),
             "columns_json": project.get("columns", []),
             "templates_json": project.get("templates", []),
@@ -540,6 +575,24 @@ class MarkdownProjectStore:
             "recurrence_json": project.get("recurrence", {}),
             "recurrenceRef_json": project.get("recurrenceRef", {}),
         }
+        if not marked_pipeline:
+            _copy_present(
+                project,
+                meta,
+                (
+                    "projectExecutionStartMode",
+                    "projectExecutionFlowActive",
+                    "projectExecutionFlowStopReason",
+                    "executionPolicy",
+                    "workflowActive",
+                    "workflowPhase",
+                    "activeTaskId",
+                    "activeAgent",
+                    "autoMode",
+                ),
+            )
+        if "executionPolicy" in meta:
+            meta["executionPolicy_json"] = meta.pop("executionPolicy")
         body_lines = [
             "# Project",
             project.get("description", "") or "_No description_",
@@ -556,18 +609,52 @@ class MarkdownProjectStore:
             body_lines.append("- No activity yet")
         _atomic_write(os.path.join(project_dir, "project.md"), _dump_frontmatter(meta) + "\n" + "\n".join(body_lines) + "\n")
         for task in tasks:
-            self._write_task_file(tasks_dir, task)
+            self._write_task_file(tasks_dir, task, marked_pipeline=marked_pipeline)
 
-    def _write_task_file(self, tasks_dir: str, task: Dict[str, Any]):
+    def _task_storage_paths(self, tasks_dir: str, task: Dict[str, Any]) -> Tuple[str, str]:
+        task_id = str(task.get("id") or self.new_id())
+        title_slug = _slugify(task.get("title", "task"))
+        suffix = f"{_slugify(task_id)[:8]}-{hashlib.sha256(task_id.encode()).hexdigest()[:10]}"
+        stem = f"{title_slug}--{suffix}"
+        return os.path.join(tasks_dir, f"{stem}.md"), os.path.join(tasks_dir, stem, FINAL_RESULT_FILENAME)
+
+    def _prepare_task_final_result_paths(self, tasks_dir: str, project: Dict[str, Any], tasks: List[Dict[str, Any]]) -> None:
+        paths_by_task_id: Dict[str, str] = {}
+        for task in tasks:
+            final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
+            if not final_result:
+                continue
+            _, sidecar_path = self._task_storage_paths(tasks_dir, task)
+            relative = os.path.relpath(sidecar_path, self.status_dir).replace(os.sep, "/")
+            final_result["markdownPath"] = relative
+            task_id = str(task.get("id") or "")
+            if task_id:
+                paths_by_task_id[task_id] = relative
+        orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), dict) else {}
+        handoffs = orchestration.get("stageHandoffs") if isinstance(orchestration.get("stageHandoffs"), dict) else {}
+        for handoff in handoffs.values():
+            if not isinstance(handoff, dict):
+                continue
+            for item in handoff.get("tasks") or []:
+                if not isinstance(item, dict):
+                    continue
+                task_id = str(item.get("taskId") or "")
+                if task_id in paths_by_task_id:
+                    item["markdownPath"] = paths_by_task_id[task_id]
+
+    def _write_task_file(self, tasks_dir: str, task: Dict[str, Any], *, marked_pipeline: bool = False):
         task = copy.deepcopy(task)
         try:
             actors = task_actor_references(task)
         except ValueError:
             actors = {}
         task_id = str(task.get("id") or self.new_id())
-        title_slug = _slugify(task.get("title", "task"))
-        suffix = f"{_slugify(task_id)[:8]}-{hashlib.sha256(task_id.encode()).hexdigest()[:10]}"
-        path = os.path.join(tasks_dir, f"{title_slug}--{suffix}.md")
+        path, sidecar_path = self._task_storage_paths(tasks_dir, task)
+        final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
+        if final_result:
+            final_result = copy.deepcopy(final_result)
+            final_result["markdownPath"] = os.path.relpath(sidecar_path, self.status_dir).replace(os.sep, "/")
+            task["finalResult"] = final_result
         comments = task.pop("comments", [])
         attachments = task.pop("attachments", [])
         review_check = task.pop("reviewCheck", None)
@@ -577,7 +664,9 @@ class MarkdownProjectStore:
             "title": task.get("title", ""),
             "columnId": task.get("columnId"),
             "order": task.get("order", 0),
-            "executionOrder": task.get("executionOrder"),
+            "executionStage": task.get("executionStage"),
+            "stageRunId": task.get("stageRunId"),
+            "orchestrationSkip_json": task.get("orchestrationSkip", {}),
             "priority": task.get("priority", "medium"),
             "assignee": task.get("assignee"),
             "assigneeBranch": task.get("assigneeBranch"),
@@ -595,6 +684,7 @@ class MarkdownProjectStore:
             "activeAttemptId": task.get("activeAttemptId"),
             "attempts_json": task.get("attempts", []),
             "evidence_json": task.get("evidence", {}),
+            "finalResult_json": task.get("finalResult", {}),
             "reviewResult_json": task.get("reviewResult", {}),
             "reviewHistory_json": task.get("reviewHistory", []),
             "acceptanceHistory_json": task.get("acceptanceHistory", []),
@@ -622,6 +712,8 @@ class MarkdownProjectStore:
             "completedAt": task.get("completedAt"),
             "source_json": task.get("source", {}),
         }
+        if not marked_pipeline:
+            _copy_present(task, meta, ("executionOrder",))
         body_lines = [
             "## Description",
             task.get("description", "") or "_No description_",
@@ -650,6 +742,8 @@ class MarkdownProjectStore:
             for item in last_review_check:
                 body_lines.append(f"- {item.get('status', 'pending')}: {item.get('text', '')}")
         _atomic_write(path, _dump_frontmatter(meta) + "\n" + "\n".join(body_lines).rstrip() + "\n")
+        if final_result:
+            _atomic_write(sidecar_path, render_task_final_result_markdown(None, task))
 
     def _read_all_projects(self) -> List[Dict[str, Any]]:
         projects: List[Dict[str, Any]] = []
@@ -692,20 +786,13 @@ class MarkdownProjectStore:
             "workspaceCreatedAt": meta.get("workspaceCreatedAt"),
             "defaultExecutorAgentId": meta.get("defaultExecutorAgentId"),
             "defaultReviewerAgentId": meta.get("defaultReviewerAgentId"),
-            "projectExecutionStartMode": meta.get("projectExecutionStartMode", "continuous"),
-            "projectExecutionFlowActive": meta.get("projectExecutionFlowActive", False),
-            "projectExecutionFlowStopReason": meta.get("projectExecutionFlowStopReason"),
+            "executionModel": meta.get("executionModel"),
+            "orchestration": _dict_or_empty(meta.get("orchestration_json")),
             "scheduledCronPaused": meta.get("scheduledCronPaused", False),
             "scheduledCronHistory": meta.get("scheduledCronHistory_json", []),
-            "executionPolicy": meta.get("executionPolicy_json", {"maxActiveTasks": 1}),
             "executionDirtyConfirmations": meta.get("executionDirtyConfirmations_json", []),
             "feishuNotifications": meta.get("feishuNotifications_json", {}),
             "columns": meta.get("columns_json", []),
-            "workflowActive": meta.get("workflowActive", False),
-            "workflowPhase": meta.get("workflowPhase", "idle"),
-            "activeTaskId": meta.get("activeTaskId"),
-            "activeAgent": meta.get("activeAgent"),
-            "autoMode": meta.get("autoMode", False),
             "template": meta.get("template", False),
             "templates": meta.get("templates_json", []),
             "agentMaintenanceMode": meta.get("agentMaintenanceMode", "strict_confirmation"),
@@ -718,17 +805,35 @@ class MarkdownProjectStore:
             "activity": self._parse_activity(self._extract_section(body, "Activity")),
             "tasks": [],
         }
+        marked_pipeline = project.get("executionModel") == "stage_pipeline_v1"
+        if not marked_pipeline:
+            _copy_present(
+                meta,
+                project,
+                (
+                    "projectExecutionStartMode",
+                    "projectExecutionFlowActive",
+                    "projectExecutionFlowStopReason",
+                    "workflowActive",
+                    "workflowPhase",
+                    "activeTaskId",
+                    "activeAgent",
+                    "autoMode",
+                ),
+            )
+        if "executionPolicy_json" in meta and not marked_pipeline:
+            project["executionPolicy"] = copy.deepcopy(meta.get("executionPolicy_json"))
         tasks_dir = os.path.join(project_dir, "tasks")
         if os.path.isdir(tasks_dir):
             for name in sorted(os.listdir(tasks_dir)):
                 if not name.endswith(".md"):
                     continue
-                task = self._read_task_file(os.path.join(tasks_dir, name))
+                task = self._read_task_file(os.path.join(tasks_dir, name), marked_pipeline=marked_pipeline)
                 if task:
                     project["tasks"].append(task)
         return project
 
-    def _read_task_file(self, path: str) -> Optional[Dict[str, Any]]:
+    def _read_task_file(self, path: str, *, marked_pipeline: bool = False) -> Optional[Dict[str, Any]]:
         with open(path, "r", encoding="utf-8") as f:
             meta, body = _parse_frontmatter(f.read())
         description = self._extract_section(body, "Description")
@@ -741,7 +846,9 @@ class MarkdownProjectStore:
             "description": description if description and description != "_No description_" else "",
             "columnId": meta.get("columnId"),
             "order": meta.get("order", 0),
-            "executionOrder": meta.get("executionOrder"),
+            "executionStage": _positive_int_or_none(meta.get("executionStage")),
+            "stageRunId": meta.get("stageRunId"),
+            "orchestrationSkip": _dict_or_empty(meta.get("orchestrationSkip_json")),
             "priority": meta.get("priority", "medium"),
             "assignee": meta.get("assignee"),
             "assigneeBranch": meta.get("assigneeBranch"),
@@ -759,6 +866,7 @@ class MarkdownProjectStore:
             "activeAttemptId": meta.get("activeAttemptId"),
             "attempts": meta.get("attempts_json", []),
             "evidence": meta.get("evidence_json", {}),
+            "finalResult": _dict_or_empty(meta.get("finalResult_json")),
             "reviewResult": meta.get("reviewResult_json", {}),
             "reviewHistory": meta.get("reviewHistory_json", []),
             "acceptanceHistory": meta.get("acceptanceHistory_json", []),
@@ -784,6 +892,8 @@ class MarkdownProjectStore:
             "completedAt": meta.get("completedAt"),
             "source": meta.get("source_json", {}),
         }
+        if not marked_pipeline:
+            _copy_present(meta, task, ("executionOrder",))
         review_check = meta.get("reviewCheck_json", [])
         if review_check:
             task["reviewCheck"] = review_check

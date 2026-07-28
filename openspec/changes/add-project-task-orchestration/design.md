@@ -217,13 +217,40 @@ If cancellation partially fails or the process restarts during `pausing`, recove
 - Project workflow chat must accept an explicit task scope when multiple tasks are active. The project-level default may select the most recently updated active task only for display, never as execution authority.
 - Notifications include project, stage, task, and run IDs so parallel completion and failures are diagnosable.
 
-### 10. Figma is the visual source of truth, with one approved delta
+### 10. Task final results and stage handoff indexes preserve upstream conclusions
+
+Every accepted task writes a fixed default artifact named `TASK_FINAL_RESULT.md` in the task's canonical Markdown directory. The artifact is generated even when the user did not request an explicit file deliverable. Its content summarizes the final conclusion, completed work, changed files, verification, key decisions, artifact references, risks, and notes useful to later-stage tasks.
+
+The task record stores a compact `finalResult` index rather than treating the Markdown body as the only authority:
+
+```text
+finalResult:
+  status: available | missing | skipped
+  summary: <short human-readable conclusion>
+  markdownPath: projects-md/<project>/tasks/<task>/TASK_FINAL_RESULT.md
+  sourceAttemptId: <attempt id|null>
+  executionStage: <integer|null>
+  generatedAt: <timestamp>
+  artifactRefs: [{kind, path, title}]
+```
+
+The Markdown file is a generated canonical sidecar: `MarkdownProjectStore` rewrites it together with the task Markdown so store rewrites do not delete or stale the result. Direct ad hoc writes outside the store are not an authority.
+
+Stage reconciliation builds `orchestration.stageHandoffs[stage]` from the completed or skipped tasks in that stage. A handoff contains each task's result summary, status, Markdown path, attempt ID, and artifact refs. It is an index, not a merged stage narrative; parallel tasks keep independent outputs.
+
+When starting or resuming a later stage, execution prompts include a prior-stage result index for every earlier stage, with the immediately preceding stage first. The prompt instructs agents to inspect `TASK_FINAL_RESULT.md` paths or artifact refs when the current task depends on prior work, including dependencies on stage 1 from stage 3+. The prompt does not inline every result Markdown body by default, avoiding context bloat.
+
+If a task reaches accepted terminal state without an agent-authored result, the system generates a fallback Markdown from attempt evidence and checklist/test data. Approved orchestration skips produce `finalResult.status=skipped` and appear in the handoff without pretending to be a completed output.
+
+### 11. Figma is the visual source of truth, with one approved delta
 
 The implementation uses Figma frame `147:2` for the full overlay composition and node `148:3` for modal geometry. Reference dimensions include the 1512×742 viewport, 1220×560 modal, and 1184×350 pipeline canvas. Existing `Press Start 2P` loading is reused; generated code or Tailwind is not copied into the application.
 
 Visual tokens and layout are expressed as scoped CSS variables and semantic classes in `project-orchestration.css`. Cards and parallel groups are data-driven DOM, but their computed dimensions, typography, colors, borders, and spacing must match the reference. The bottom save action is removed, and the remaining footer spacing is adjusted without introducing a replacement start action.
 
 Acceptance uses deterministic fixture data matching the 9-task/5-stage reference plus screenshots at the reference viewport. Interaction tests cover drag/drop, auto-save success/conflict/failure, add-task default stage, fit-canvas, close/reopen persistence, and locked/paused states.
+
+Manual acceptance refined the authoring affordance after the Figma baseline: ordinary blank-canvas drops must keep tasks within existing stages so parallel grouping is predictable, and adding a later stage must use an explicit dashed drop target rendered after the current rightmost stage. A completed drag updates the local arrangement immediately and saves in the background; rejected persistence must still replace the optimistic status with an error or conflict state.
 
 ## Risks / Trade-offs
 
@@ -237,6 +264,8 @@ Acceptance uses deterministic fixture data matching the 9-task/5-stage reference
 - **[Authorization ambiguity] The product says owner/manager but the app has no general project RBAC.** → Map browser management to the existing management token and retain Agent project-authorization checks; do not invent a parallel role store.
 - **[Overlapping OpenSpec changes] Active project-authoring and workflow-chat work touches the same modules.** → Re-read those changes before each implementation task, preserve their confirmed behavior, and stop for a spec update if contracts conflict.
 - **[Visual drift] The reference Figma may change after implementation begins.** → Record the referenced node IDs and acceptance screenshots in evidence; any later design change is a specification change requiring renewed confirmation.
+- **[Context bloat] Later stages may have many prior outputs.** → Inject compact result indexes into prompts and provide stable Markdown paths for details instead of inlining every result body.
+- **[Generated sidecar drift] Store rewrites could delete task sidecars.** → Generate `TASK_FINAL_RESULT.md` from `finalResult` during canonical Markdown writes and persist the compact index in task frontmatter.
 
 ## Migration Plan
 
@@ -257,7 +286,7 @@ Rollback requires stopping the service, restoring the previous code revision, an
 - Timings: stage preflight, reservation commit, queue wait, task attempt duration, stage duration, and project duration.
 - Structured audit fields: project ID, task ID, execution stage, run ID, attempt ID, orchestration revision, actor, transition, and reason.
 - Alert conditions: queue rejection, project stuck in `starting`/`pausing`, current-stage tasks with mismatched run IDs, later-stage active task, duplicate attempt suppression spikes, and recovery loops.
-- Required tests: pure state-machine tables, repository concurrency, duplicate start/terminal callback idempotency, bounded-queue failure, restart recovery, authorization, stale revision, storage round-trip, every materialization source, route contracts, realtime projections, workflow-chat multi-active selection, full regressions, and Figma screenshot/interaction acceptance.
+- Required tests: pure state-machine tables, repository concurrency, duplicate start/terminal callback idempotency, bounded-queue failure, restart recovery, authorization, stale revision, storage round-trip, every materialization source, route contracts, realtime projections, workflow-chat multi-active selection, task final-result sidecar generation, prior-stage prompt index injection, full regressions, and Figma screenshot/interaction acceptance.
 
 ## Open Questions
 

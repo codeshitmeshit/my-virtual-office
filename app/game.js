@@ -5270,7 +5270,11 @@ function applyStatusSnapshot(data, opts) {
 }
 window.dashboardApplyStatusSnapshot = applyStatusSnapshot;
 
+var _statusPollInFlight = false;
 async function pollStatus() {
+    if (typeof document.hidden === 'boolean' && document.hidden) return;
+    if (_statusPollInFlight) return;
+    _statusPollInFlight = true;
     try {
         if (window.dashboardRealtime && window.dashboardRealtime.isSseFresh && window.dashboardRealtime.isSseFresh(12000)) {
             return; // realtime SSE owns this refresh while it is healthy
@@ -5280,11 +5284,16 @@ async function pollStatus() {
         const data = await res.json();
         applyStatusSnapshot(data, { logRoutine: false });
     } catch (e) { /* Status unavailable */ }
+    finally { _statusPollInFlight = false; }
 }
-setInterval(pollStatus, 5000);
-pollStatus();
-setInterval(pollAgentChat, 3000);
-pollAgentChat();
+setTimeout(function () {
+    pollStatus();
+    setInterval(pollStatus, 5000);
+}, 1200);
+setTimeout(function () {
+    pollAgentChat();
+    setInterval(pollAgentChat, 3000);
+}, 2600);
 
 // --- GLOBAL LOG (persisted to localStorage) ---
 function _saveLog() {
@@ -8706,11 +8715,13 @@ function _agentWorkspaceProjectMeta(t, compact) {
 
 function _agentWorkspaceProjectBadges(t) {
     var badges = [];
+    var markedPipeline = t.executionModel === 'stage_pipeline_v1';
     if (t.completed) badges.push('done');
     if (t.activeAttemptId) badges.push('active');
     if (t.meetingBlocker && t.meetingBlocker.status) badges.push('meeting ' + t.meetingBlocker.status);
-    if (t.projectExecutionFlowActive) badges.push('flow active');
-    if (t.projectExecutionFlowStopReason) badges.push(t.projectExecutionFlowStopReason);
+    if (markedPipeline && t.pauseReason) badges.push(t.pauseReason);
+    if (!markedPipeline && t.projectExecutionFlowActive) badges.push('flow active');
+    if (!markedPipeline && t.projectExecutionFlowStopReason) badges.push(t.projectExecutionFlowStopReason);
     if (t.blockedReason) badges.push('blocked');
     return badges.length ? '<div class="agent-workspace-badges">' + badges.map(function(label) {
         return '<span>' + escHtml(label) + '</span>';
@@ -9580,6 +9591,7 @@ function getAgentChatCachedImage(url) {
     return img;
 }
 var lastChatPoll = 0;
+var _agentChatPollInFlight = false;
 var chatLastMsg = {}; // agentKey -> last seen message text
 var chatTypewriterState = {};
 var chatMinimized = {}; // agentKey -> bool
@@ -9684,9 +9696,12 @@ function getAgentChatActivitySignature(msg) {
 }
 
 function pollAgentChat() {
+    if (typeof document.hidden === 'boolean' && document.hidden) return;
+    if (_agentChatPollInFlight) return;
     var now = Date.now();
     if (now - lastChatPoll < 3000) return;
     lastChatPoll = now;
+    _agentChatPollInFlight = true;
     fetch('/agent-chat').then(function(res) {
         if (!res.ok) return;
         return res.json();
@@ -9758,7 +9773,9 @@ function pollAgentChat() {
         }
         agentChatData = data;
         _chatInitialLoad = false;
-    }).catch(function(e) {});
+    }).catch(function(e) {}).finally(function() {
+        _agentChatPollInFlight = false;
+    });
 }
 
 function wrapChatText(text, maxW) {

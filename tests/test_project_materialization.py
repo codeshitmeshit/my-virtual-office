@@ -27,6 +27,11 @@ from services.project_materialization import (
     materialize_project_base,
     materialize_task_base,
 )
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+    default_skip_state,
+)
 
 
 NOW = "2026-07-23T08:00:00+00:00"
@@ -137,16 +142,10 @@ def test_materialize_project_base_supplies_complete_canonical_defaults():
         "workspaceCreatedAt": None,
         "defaultExecutorAgentId": None,
         "defaultReviewerAgentId": None,
-        "projectExecutionStartMode": "continuous",
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None,
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": default_orchestration_state(),
         "scheduledCronPaused": False,
-        "executionPolicy": {"maxActiveTasks": 1},
         "executionDirtyConfirmations": [],
-        "workflowActive": False,
-        "workflowPhase": "idle",
-        "activeTaskId": None,
-        "activeAgent": None,
         "columns": columns,
         "tasks": [],
         "activity": [],
@@ -170,9 +169,7 @@ def test_materialize_project_base_uses_resolved_values_and_copies_mutables():
         "projectExecutionEnabled": False,
         "defaultExecutorAgentId": "builder",
         "defaultReviewerAgentId": "reviewer",
-        "projectExecutionStartMode": "single_task",
         "scheduledCronPaused": True,
-        "executionPolicy": {"maxActiveTasks": 2, "gates": ["review"]},
     }
     columns = [{"id": "column-1", "title": "Backlog", "metadata": {"lane": 1}}]
     tasks = [{"id": "task-1", "title": "Build", "checklist": [{"text": "done"}]}]
@@ -226,16 +223,22 @@ def test_materialize_project_base_uses_resolved_values_and_copies_mutables():
     assert project["workspaceCreatedAt"] == "2026-07-23T07:59:00+00:00"
     assert project["defaultExecutorAgentId"] == "builder"
     assert project["defaultReviewerAgentId"] == "reviewer"
-    assert project["projectExecutionStartMode"] == "single_task"
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
     assert project["scheduledCronPaused"] is True
-    assert project["executionPolicy"] == {"maxActiveTasks": 2, "gates": ["review"]}
+    assert "projectExecutionStartMode" not in project
+    assert "projectExecutionFlowActive" not in project
+    assert "projectExecutionFlowStopReason" not in project
+    assert "executionPolicy" not in project
+    assert "workflowActive" not in project
+    assert "workflowPhase" not in project
+    assert "activeTaskId" not in project
+    assert "activeAgent" not in project
     assert (configuration, columns, tasks, workspace) == originals
 
-    configuration["executionPolicy"]["gates"].append("acceptance")
     columns[0]["metadata"]["lane"] = 9
     tasks[0]["checklist"][0]["text"] = "changed"
     workspace["workspaceStatus"]["details"].append("changed")
-    assert project["executionPolicy"]["gates"] == ["review"]
     assert project["columns"][0]["metadata"] == {"lane": 1}
     assert project["tasks"][0]["checklist"] == [{"text": "done"}]
     assert project["workspaceStatus"]["details"] == ["ready"]
@@ -311,7 +314,9 @@ def test_materialize_task_base_supplies_complete_defaults_and_backlog_fallback()
         "description": "",
         "columnId": "backlog",
         "order": 0,
-        "executionOrder": 1,
+        "executionStage": 1,
+        "stageRunId": None,
+        "orchestrationSkip": default_skip_state(),
         "priority": "medium",
         "responsibleActor": None,
         "executorActor": None,
@@ -353,7 +358,7 @@ def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():
         "description": {"rich": ["description"]},
         "columnId": "review",
         "order": 8,
-        "executionOrder": 4,
+        "executionStage": 4,
         "priority": "critical",
         "responsibleActor": {"kind": "agent", "id": "owner"},
         "executorActor": {"kind": "agent", "id": "builder"},
@@ -391,7 +396,9 @@ def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():
     assert task["id"] == "deterministic-task"
     assert task["columnId"] == "review"
     assert task["order"] == 3
-    assert task["executionOrder"] == 4
+    assert task["executionStage"] == 4
+    assert task["stageRunId"] is None
+    assert task["orchestrationSkip"] == default_skip_state()
     assert task["priority"] == "critical"
     assert task["responsibleActor"] == {"kind": "agent", "id": "owner"}
     assert task["executorActor"] == {"kind": "agent", "id": "builder"}
@@ -427,6 +434,19 @@ def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():
     assert task["source"] == {"kind": "template", "path": ["snapshot"]}
 
 
+def test_materialize_task_base_does_not_infer_initial_stage_from_board_order():
+    task = materialize_task_base(
+        {"title": "Ordered card", "columnId": "backlog"},
+        columns=[{"id": "backlog", "title": "Backlog"}],
+        new_id=_ids("ordered-card"),
+        now=lambda: NOW,
+        order=7,
+    )
+
+    assert task["order"] == 7
+    assert task["executionStage"] == 1
+
+
 def test_materialize_task_base_falls_back_to_first_column_or_none():
     first = materialize_task_base(
         {"title": "First fallback", "columnId": "missing"},
@@ -450,9 +470,9 @@ def test_materialize_task_base_computes_next_order_after_column_fallback():
         {"title": "Fallback order", "columnId": "missing"},
         columns=[{"id": "backlog", "title": "Backlog"}, {"id": "done", "title": "Done"}],
         existing_tasks=[
-            {"columnId": "backlog", "order": 1, "executionOrder": 1},
-            {"columnId": "done", "order": 8, "executionOrder": 2},
-            {"columnId": "backlog", "order": 4, "executionOrder": 3},
+            {"columnId": "backlog", "order": 1, "executionStage": 1},
+            {"columnId": "done", "order": 8, "executionStage": 2},
+            {"columnId": "backlog", "order": 4, "executionStage": 3},
         ],
         new_id=_ids("ordered-task"),
         now=lambda: NOW,
@@ -460,7 +480,22 @@ def test_materialize_task_base_computes_next_order_after_column_fallback():
 
     assert task["columnId"] == "backlog"
     assert task["order"] == 5
-    assert task["executionOrder"] == 4
+    assert task["executionStage"] == 4
+
+
+def test_materialize_task_base_rejects_invalid_explicit_execution_stage():
+    for value in (0, -1, "not-a-stage"):
+        try:
+            materialize_task_base(
+                {"title": "Invalid stage", "executionStage": value},
+                columns=[{"id": "backlog", "title": "Backlog"}],
+                new_id=_ids("invalid-task"),
+                now=lambda: NOW,
+            )
+        except ValueError as exc:
+            assert "executionStage must be a positive integer" in str(exc)
+        else:
+            raise AssertionError(f"expected invalid executionStage to fail for {value!r}")
 
 
 def _overlay_base() -> dict:

@@ -16,6 +16,7 @@ os.environ["VO_STATUS_DIR"] = tempfile.mkdtemp(prefix="vo-project-dashboard-stat
 os.environ["VO_OPENCLAW_PATH"] = tempfile.mkdtemp(prefix="vo-project-dashboard-openclaw-")
 
 import server
+from services.project_orchestration import EXECUTION_MODEL_STAGE_PIPELINE_V1, default_orchestration_state
 
 
 def fake_project():
@@ -42,6 +43,46 @@ def fake_project():
         ],
         "columns": [],
     }
+
+
+def fake_marked_project():
+    project = fake_project()
+    project.update({
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            **default_orchestration_state(),
+            "state": "running",
+            "currentStage": 1,
+            "currentRunId": "run-1",
+            "pauseReason": None,
+        },
+        "activeTaskId": "legacy-active",
+        "activeAgent": "legacy-agent",
+        "projectExecutionFlowActive": True,
+    })
+    project["tasks"] = [
+        {
+            "id": "t-1",
+            "title": "并行任务 A",
+            "executionStage": 1,
+            "stageRunId": "run-1",
+            "executionState": "executing",
+            "activeAttemptId": "attempt-a",
+            "attempts": [{"id": "attempt-a", "status": "executing", "stageRunId": "run-1"}],
+            "executorAgentId": "codex-local",
+        },
+        {
+            "id": "t-2",
+            "title": "并行任务 B",
+            "executionStage": 1,
+            "stageRunId": "run-1",
+            "executionState": "reviewing",
+            "activeAttemptId": "attempt-b",
+            "attempts": [{"id": "attempt-b", "status": "reviewing", "stageRunId": "run-1"}],
+            "reviewerAgentId": "claude-code-local",
+        },
+    ]
+    return project
 
 
 def install_project_fixture(project):
@@ -143,6 +184,44 @@ def test_project_list_summary_exposes_active_execution():
         assert summary["activeTaskTitle"] == "实现验收项"
         assert summary["activeAgent"] == "codex-local"
         assert summary["activeTaskCount"] == 1
+    finally:
+        restore_project_fixture(old)
+
+
+def test_marked_project_list_summary_uses_orchestration_projection():
+    old = install_project_fixture(fake_marked_project())
+    try:
+        result = server._handle_projects_list("status=active")
+        summary = result["projects"][0]
+
+        assert summary["projectExecutionActive"] is True
+        assert summary["projectExecutionPhase"] == "running"
+        assert summary["activeTaskIds"] == ["t-1", "t-2"]
+        assert summary["activeTaskCount"] == 2
+        assert summary["currentStage"] == 1
+        assert summary["orchestrationState"] == "running"
+        assert summary["pauseReason"] is None
+        assert "activeTaskId" not in summary
+        assert "activeAgent" not in summary
+        assert "activeTaskTitle" not in summary
+        assert "projectExecutionFlowActive" not in summary
+    finally:
+        restore_project_fixture(old)
+
+
+def test_marked_project_detail_response_uses_orchestration_projection_without_singular_active_fields():
+    old = install_project_fixture(fake_marked_project())
+    try:
+        result = server._handle_project_get("p-1")
+        project = result["project"]
+
+        assert project["activeTaskIds"] == ["t-1", "t-2"]
+        assert project["activeTaskCount"] == 2
+        assert project["currentStage"] == 1
+        assert project["orchestrationState"] == "running"
+        assert "activeTaskId" not in project
+        assert "activeAgent" not in project
+        assert "projectExecutionFlowActive" not in project
     finally:
         restore_project_fixture(old)
 

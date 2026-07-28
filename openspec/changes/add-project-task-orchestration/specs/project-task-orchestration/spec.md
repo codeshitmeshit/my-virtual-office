@@ -1,11 +1,11 @@
 ## ADDED Requirements
 
 ### Requirement: Marked new projects use mandatory orchestration
-Every project created under the new project contract SHALL persist an internal orchestration marker in its JSONL project record, and every task in such a project MUST belong to exactly one execution stage before the project can start. The marker SHALL NOT require a user-visible "new project" or "orchestration project" badge.
+Every project created under the new project contract SHALL persist an internal orchestration marker in its canonical Markdown project frontmatter, and every task in such a project MUST belong to exactly one execution stage before the project can start. The marker SHALL NOT require a user-visible "new project" or "orchestration project" badge.
 
 #### Scenario: A new project is created
 - **WHEN** any supported project-creation path materializes a project under the new contract
-- **THEN** the persisted JSONL project record SHALL contain the internal orchestration marker
+- **THEN** the persisted canonical Markdown project record SHALL contain the internal orchestration marker
 - **AND** the project SHALL use stage orchestration rather than free or single-task progression
 
 #### Scenario: A marked project contains an unassigned task
@@ -44,6 +44,11 @@ Accepted orchestration edits SHALL persist automatically without a save action, 
 - **THEN** the new orchestration SHALL be persisted automatically
 - **AND** the project SHALL remain unstarted
 
+#### Scenario: A drag edit is accepted locally
+- **WHEN** an authorized user completes a valid drag before project start
+- **THEN** the orchestration workspace SHALL update the visible task arrangement immediately
+- **AND** persistence SHALL continue in the background without requiring a manual save action
+
 #### Scenario: Persistence rejects an edit
 - **WHEN** an orchestration edit cannot be persisted
 - **THEN** the interface SHALL NOT present the rejected arrangement as durably saved
@@ -66,6 +71,16 @@ Every task in an editable marked project MUST have exactly one positive executio
 - **WHEN** two or more tasks have the same execution-stage number
 - **THEN** the orchestration workspace SHALL represent them as a parallel group
 - **AND** their task identities and ordering within the group SHALL remain stable across persistence and reload
+
+#### Scenario: A task is dropped on the ordinary canvas
+- **WHEN** a user drops a task on the blank pipeline canvas outside the explicit new-stage target
+- **THEN** the task SHALL be assigned to the nearest existing stage
+- **AND** the drop SHALL NOT create a new stage
+
+#### Scenario: A task is dropped on the new-stage target
+- **WHEN** a user drops a task onto the dashed new-stage target at the right edge of the pipeline
+- **THEN** the task SHALL move to one stage after the current maximum occupied stage
+- **AND** the visible stage numbers SHALL remain complete and contiguous after normalization
 
 ### Requirement: Explicit project start locks orchestration
 Starting a project SHALL be an explicit project-level action separate from orchestration editing. A successful start SHALL lock the active pipeline against ordinary edits and SHALL begin stage 1.
@@ -152,3 +167,35 @@ The project SHALL become completed automatically when every task in its final st
 - **WHEN** the project requires a human acceptance decision before completion
 - **THEN** that acceptance SHALL be modeled as a task in an execution stage
 - **AND** the project SHALL not complete until that task has an accepted terminal outcome
+
+### Requirement: Task final results are recorded as default artifacts
+Every task that reaches an accepted terminal outcome SHALL expose a default final-result artifact named `TASK_FINAL_RESULT.md` and a compact task-record index pointing to that artifact.
+
+#### Scenario: A task completes without an explicit file deliverable
+- **WHEN** a marked project task reaches an accepted terminal outcome
+- **THEN** the task SHALL have `finalResult.status` set to `available`
+- **AND** the canonical task directory SHALL contain `TASK_FINAL_RESULT.md`
+- **AND** the Markdown file SHALL include the final conclusion, completed work, changed files or artifacts, verification, risks, and later-stage notes
+
+#### Scenario: A task is skipped through orchestration approval
+- **WHEN** an orchestration skip is approved as the task's accepted terminal outcome
+- **THEN** the task SHALL have `finalResult.status` set to `skipped`
+- **AND** downstream handoff indexes SHALL identify the task as skipped rather than completed
+
+#### Scenario: Canonical project storage is rewritten
+- **WHEN** the Markdown project store rewrites a project that contains task `finalResult` data
+- **THEN** the store SHALL preserve the task-record final-result index
+- **AND** regenerate `TASK_FINAL_RESULT.md` in the task's canonical directory
+
+### Requirement: Later stages can discover previous-stage results
+When a later orchestration stage starts, each task prompt SHALL include a compact index of prior task final results so the agent can discover upstream conclusions and artifacts without guessing storage locations.
+
+#### Scenario: Stage 3 starts after stages 1 and 2 completed
+- **WHEN** a stage 3 task execution prompt is built
+- **THEN** the prompt SHALL include result indexes for stages 1 and 2
+- **AND** each index item SHALL include task title, stage, status, summary, and `TASK_FINAL_RESULT.md` path
+
+#### Scenario: A later-stage task depends on earlier work
+- **WHEN** the later-stage agent needs context from an earlier task
+- **THEN** the prompt SHALL instruct the agent to inspect the referenced result Markdown or artifact refs before relying on that prior work
+- **AND** the system SHALL NOT inline every prior result body by default

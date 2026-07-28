@@ -9,6 +9,7 @@ APP = Path(__file__).resolve().parents[1] / "app"
 if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
+from services.project_orchestration import EXECUTION_MODEL_STAGE_PIPELINE_V1, default_orchestration_state
 from services.project_workflow_chat import ProjectWorkflowChatPorts, ProjectWorkflowChatService
 
 
@@ -79,6 +80,121 @@ def test_most_recent_legacy_task_selection_is_unchanged():
     }
     resolved = service([project]).resolve_scope("project").scope
     assert resolved and resolved.task_id == "new" and resolved.agent_id == "new-agent"
+
+
+def marked_project(tasks):
+    state = default_orchestration_state()
+    state.update({"state": "running", "currentStage": 1, "currentRunId": "run-1"})
+    return {
+        "id": "project",
+        "projectExecutionEnabled": True,
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": state,
+        "tasks": tasks,
+        "columns": [],
+    }
+
+
+def active_stage_task(task_id, agent_id, *, updated_at):
+    return {
+        "id": task_id,
+        "executionStage": 1,
+        "executionState": "executing",
+        "activeAttemptId": f"attempt-{task_id}",
+        "executorAgentId": agent_id,
+        "updatedAt": updated_at,
+    }
+
+
+def test_marked_multi_active_requires_explicit_task_scope_without_reading_messages():
+    calls = []
+    project = marked_project([
+        active_stage_task("old", "old-agent", updated_at="1"),
+        active_stage_task("new", "new-agent", updated_at="2"),
+    ])
+
+    result = service([project], calls=calls).read("project")
+
+    assert result == {
+        "ok": True,
+        "messages": [],
+        "agent": None,
+        "phase": "running",
+        "taskId": None,
+        "displayTaskId": "new",
+        "activeTaskIds": ["old", "new"],
+        "activeTaskCount": 2,
+        "requiresTaskScope": True,
+        "code": "task_scope_required",
+    }
+    assert calls == []
+
+
+def test_marked_multi_active_explicit_task_scope_is_execution_authority():
+    calls = []
+    project = marked_project([
+        active_stage_task("old", "old-agent", updated_at="1"),
+        active_stage_task("new", "new-agent", updated_at="2"),
+    ])
+
+    result = service([project], calls=calls).read("project", task_scope="old")
+
+    assert result["ok"] is True
+    assert result["taskId"] == "old"
+    assert result["agent"] == "old-agent"
+    assert result["phase"] == "executing"
+    assert result["messages"] == [{"text": "message"}]
+    assert calls[0] == ("messages", "old-agent", "project", "attempt-old", "attempt-old")
+    assert calls[1] == ("active", "old-agent", "project", "attempt-old")
+
+
+def test_marked_multi_active_rejects_scope_outside_active_tasks_without_reading_messages():
+    calls = []
+    project = marked_project([
+        active_stage_task("active", "agent", updated_at="2"),
+        {
+            "id": "inactive",
+            "executionStage": 2,
+            "executionState": "pending",
+            "executorAgentId": "other-agent",
+            "updatedAt": "3",
+        },
+    ])
+
+    result = service([project], calls=calls).read("project", task_scope="inactive")
+
+    assert result["ok"] is False
+    assert result["_status"] == 409
+    assert result["code"] == "invalid_task_scope"
+    assert result["taskId"] is None
+    assert result["activeTaskIds"] == ["active"]
+    assert calls == []
+
+
+def test_marked_single_active_task_can_resolve_without_explicit_scope():
+    calls = []
+    project = marked_project([active_stage_task("only", "agent", updated_at="1")])
+
+    result = service([project], calls=calls).read("project")
+
+    assert result["ok"] is True
+    assert result["taskId"] == "only"
+    assert result["agent"] == "agent"
+    assert calls[0] == ("messages", "agent", "project", "attempt-only", "attempt-only")
+
+
+def test_marked_explicit_scope_reads_non_working_active_attempt_states():
+    calls = []
+    task = active_stage_task("awaiting", "agent", updated_at="1")
+    task["executionState"] = "awaiting_user_acceptance"
+    project = marked_project([task])
+
+    result = service([project], calls=calls).read("project", task_scope="awaiting")
+
+    assert result["ok"] is True
+    assert result["taskId"] == "awaiting"
+    assert result["phase"] == "awaiting_user_acceptance"
+    assert calls[0] == ("messages", "agent", "project", "attempt-awaiting", "attempt-awaiting")
 
 
 def test_service_has_no_server_dependency():

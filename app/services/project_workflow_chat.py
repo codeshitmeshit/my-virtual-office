@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
+from .project_orchestration import active_task_ids, is_marked_project, orchestration_state, task_is_active
+
 
 WORKING_STATES = frozenset({"validating", "executing", "retrying", "reworking", "reviewing"})
 
@@ -41,11 +43,49 @@ class ScopeResolution:
     empty_payload: Mapping[str, Any] | None = None
 
 
+def _find_task(project: Mapping[str, Any], task_id: str) -> Mapping[str, Any] | None:
+    return next(
+        (
+            item
+            for item in project.get("tasks", [])
+            if isinstance(item, Mapping) and str(item.get("id") or "") == task_id
+        ),
+        None,
+    )
+
+
+def _most_recent_task(tasks: list[Mapping[str, Any]]) -> Mapping[str, Any] | None:
+    if not tasks:
+        return None
+    return sorted(tasks, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)[0]
+
+
+def _marked_scope_payload(project: Mapping[str, Any], phase: str, *, code: str = "task_scope_required") -> dict[str, Any]:
+    ids = list(active_task_ids(project))
+    display_task = _most_recent_task([
+        task for task in project.get("tasks", [])
+        if isinstance(task, Mapping) and str(task.get("id") or "") in set(ids)
+    ])
+    return {
+        "ok": True,
+        "messages": [],
+        "agent": None,
+        "phase": phase,
+        "taskId": None,
+        "displayTaskId": str((display_task or {}).get("id") or "") or None,
+        "activeTaskIds": ids,
+        "activeTaskCount": len(ids),
+        "requiresTaskScope": len(ids) > 1,
+        "code": code,
+    }
+
+
 class ProjectWorkflowChatService:
     def __init__(self, ports: ProjectWorkflowChatPorts) -> None:
         self._ports = ports
 
-    def resolve_scope(self, project_id: str) -> ScopeResolution:
+    def resolve_scope(self, project_id: str, *, task_scope: str | None = None) -> ScopeResolution:
+        explicit_task_id = str(task_scope or "").strip()
         workflow = dict(self._ports.workflow_state(project_id) or {})
         persisted = dict(self._ports.persisted_state(project_id) or {})
         current_task_id = workflow.get("currentTaskId") or persisted.get("currentTaskId")
@@ -56,6 +96,21 @@ class ProjectWorkflowChatService:
             return ScopeResolution(None, {"ok": True, "messages": [], "agent": None})
 
         execution_enabled = bool(self._ports.project_execution_enabled(project))
+        if execution_enabled and is_marked_project(project):
+            orchestration_phase = str(orchestration_state(project).get("state") or "")
+            if orchestration_phase and phase in {"", "idle", "stopped"}:
+                phase = orchestration_phase
+            ids = list(active_task_ids(project))
+            if explicit_task_id:
+                if explicit_task_id not in ids:
+                    payload = _marked_scope_payload(project, phase, code="invalid_task_scope")
+                    return ScopeResolution(None, {**payload, "ok": False, "_status": 409})
+                current_task_id = explicit_task_id
+            elif len(ids) > 1:
+                return ScopeResolution(None, _marked_scope_payload(project, phase))
+            elif len(ids) == 1:
+                current_task_id = ids[0]
+
         project_execution_active = execution_enabled and project.get("workflowActive") and project.get("activeTaskId")
         agent_id = project.get("activeAgent") if project_execution_active else None
         task_id = project.get("activeTaskId") if project_execution_active else current_task_id
@@ -63,18 +118,18 @@ class ProjectWorkflowChatService:
         task = None
 
         if task_id:
-            task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+            task = _find_task(project, str(task_id))
             if task:
                 task_execution_active = (
                     execution_enabled
                     and task.get("activeAttemptId")
-                    and str(task.get("executionState") or "") in WORKING_STATES
+                    and task_is_active(task)
                 )
                 if project_execution_active or task_execution_active:
                     phase = project.get("workflowPhase") or phase
                     conversation_id = str(task.get("activeAttemptId") or "")
                     agent_id = agent_id or self._ports.task_agent_id(project, task)
-                    if task_execution_active and phase in {"", "idle", "stopped"}:
+                    if task_execution_active and (explicit_task_id or phase in {"", "idle", "stopped", "running", "starting"}):
                         phase = str(task.get("executionState") or "executing")
                 agent_id = agent_id or task.get("assignee")
 
@@ -87,7 +142,7 @@ class ProjectWorkflowChatService:
             execution_tasks = [
                 item
                 for item in project.get("tasks", [])
-                if item.get("activeAttemptId") and str(item.get("executionState") or "") in WORKING_STATES
+                if item.get("activeAttemptId") and task_is_active(item)
             ] if execution_enabled else []
             active_tasks = execution_tasks or [item for item in project.get("tasks", []) if item.get("columnId") in column_ids]
             if active_tasks:
@@ -124,8 +179,8 @@ class ProjectWorkflowChatService:
             )
         )
 
-    def read(self, project_id: str) -> dict[str, Any]:
-        resolution = self.resolve_scope(project_id)
+    def read(self, project_id: str, *, task_scope: str | None = None) -> dict[str, Any]:
+        resolution = self.resolve_scope(project_id, task_scope=task_scope)
         if resolution.scope is None:
             return dict(resolution.empty_payload or {"ok": True, "messages": [], "agent": None})
         scope = resolution.scope

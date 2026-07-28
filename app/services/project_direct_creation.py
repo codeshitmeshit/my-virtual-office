@@ -36,14 +36,20 @@ _CONFIRMED_PROPOSAL_REQUIRED_MARKERS = (
     "默认执行 Agent：",
     "Reviewer 默认策略：",
     "创建后状态：",
-    "启动模式：",
     "任务清单：",
-    "| # | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |",
     "模板/复用配置：",
     "周期配置：",
     "周期执行模式：",
     "需要你确认的点：",
     "请确认是否按以上方案创建真实项目。",
+)
+_CONFIRMED_PROPOSAL_ORCHESTRATION_MARKERS = (
+    "阶段编排：",
+    "启动模式：",
+)
+_CONFIRMED_PROPOSAL_TASK_TABLE_MARKERS = (
+    "| # | 阶段 | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |",
+    "| # | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |",
 )
 
 
@@ -214,7 +220,11 @@ class DirectProjectCreationService:
                 "confirmation.summaryText must contain the exact user-confirmed proposal",
                 400,
             )
-        if any(marker not in summary_text for marker in _CONFIRMED_PROPOSAL_REQUIRED_MARKERS):
+        if (
+            any(marker not in summary_text for marker in _CONFIRMED_PROPOSAL_REQUIRED_MARKERS)
+            or not any(marker in summary_text for marker in _CONFIRMED_PROPOSAL_ORCHESTRATION_MARKERS)
+            or not any(marker in summary_text for marker in _CONFIRMED_PROPOSAL_TASK_TABLE_MARKERS)
+        ):
             raise DirectProjectCreationError(
                 "invalid_confirmation_summary_format",
                 "confirmation.summaryText must use the VO project confirmation template",

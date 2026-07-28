@@ -19,6 +19,11 @@ from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
 )
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+    default_skip_state,
+)
 
 
 CLI_PROJECT_KEYS = set(CANONICAL_PROJECT_BASE_FIELDS)
@@ -121,9 +126,14 @@ def test_cli_create_empty_project_arguments_output_and_persistence(tmp_path: Pat
     }
     assert project["projectType"] == "one_time"
     assert project["projectExecutionEnabled"] is False
-    assert project["projectExecutionFlowActive"] is False
-    assert project["workflowActive"] is False
-    assert project["workflowPhase"] == "idle"
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
+    assert "projectExecutionStartMode" not in project
+    assert "projectExecutionFlowActive" not in project
+    assert "projectExecutionFlowStopReason" not in project
+    assert "executionPolicy" not in project
+    assert "workflowActive" not in project
+    assert "workflowPhase" not in project
 
 
 def test_cli_create_builtin_template_materializes_template_columns_and_tasks(tmp_path: Path):
@@ -163,6 +173,9 @@ def test_cli_create_builtin_template_materializes_template_columns_and_tasks(tmp
     assert all(set(task) == CLI_TASK_KEYS for task in project["tasks"])
     assert all(task["columnId"] == project["columns"][0]["id"] for task in project["tasks"])
     assert [task["order"] for task in project["tasks"]] == [0, 0, 0]
+    assert [task["executionStage"] for task in project["tasks"]] == [1, 1, 1]
+    assert all(task["stageRunId"] is None for task in project["tasks"])
+    assert all(task["orchestrationSkip"] == default_skip_state() for task in project["tasks"])
     assert all(task["createdAt"] == project["createdAt"] for task in project["tasks"])
     assert all(task["updatedAt"] == project["createdAt"] for task in project["tasks"])
     assert all(
@@ -265,6 +278,9 @@ def test_cli_add_task_preserves_column_order_arguments_and_output(tmp_path: Path
     assert first_task["reviewerActor"] is None
     assert first_task["reviewerRecommendation"] == {}
     assert first_task["executionState"] == "backlog"
+    assert first_task["executionStage"] == 1
+    assert first_task["stageRunId"] is None
+    assert first_task["orchestrationSkip"] == default_skip_state()
     assert first_task["attempts"] == []
     assert first_task["evidence"] == {}
     assert first_task["source"] == {}
@@ -274,6 +290,7 @@ def test_cli_add_task_preserves_column_order_arguments_and_output(tmp_path: Path
     assert first_task["meetingRecords"] == []
     assert second_task["columnId"] == first_task["columnId"]
     assert second_task["order"] == 1
+    assert second_task["executionStage"] == 2
     assert second_task["priority"] == "medium"
     assert second_task["assignee"] is None
     assert second_task["description"] == ""

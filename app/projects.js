@@ -32,7 +32,39 @@
         pendingActions: new Map(),
         duplicateActionToastAt: {},
         _projectSummarySignature: '',
+        listProjectsAbort: null,
+        sidebarProjectsAbort: null,
     };
+
+    const STAGE_PIPELINE_EXECUTION_MODEL = 'stage_pipeline_v1';
+
+    function isStagePipelineProject(project) {
+        return !!(project && project.executionModel === STAGE_PIPELINE_EXECUTION_MODEL);
+    }
+
+    function projectActiveTaskIds(project) {
+        return Array.isArray(project && project.activeTaskIds)
+            ? project.activeTaskIds.map(String).filter(Boolean)
+            : [];
+    }
+
+    function syncWorkflowFromProject(project) {
+        if (!project) return;
+        if (isStagePipelineProject(project)) {
+            const activeIds = projectActiveTaskIds(project);
+            state.workflow.active = !!(project.projectExecutionActive || activeIds.length);
+            state.workflow.phase = project.projectExecutionPhase || project.orchestrationState || 'idle';
+            state.workflow.currentTaskId = activeIds.length === 1 ? activeIds[0] : null;
+            state.workflow.flowStopReason = project.pauseReason || null;
+            state.workflow.startMode = null;
+            return;
+        }
+        state.workflow.active = !!project.workflowActive;
+        state.workflow.phase = project.workflowPhase || 'idle';
+        state.workflow.currentTaskId = project.activeTaskId || null;
+        state.workflow.startMode = project.projectExecutionStartMode || state.workflow.startMode || 'continuous';
+        state.workflow.flowStopReason = project.projectExecutionFlowStopReason || null;
+    }
 
     const _t = (key, params) => {
         const value = typeof i18n !== 'undefined' ? i18n.t(key, params) : key;
@@ -229,14 +261,33 @@
 
     // ── API ────────────────────────────────────────────────────────
     const projectMutationFetch = (input, init) => window.i18n.managementFetch(input, init);
+    async function parseProjectJson(response, fallbackMessage) {
+        let payload = {};
+        try {
+            payload = await response.json();
+        } catch (err) {
+            const status = response && typeof response.status === 'number' ? response.status : 0;
+            return {
+                ok: false,
+                error: `${fallbackMessage || '请求失败'}：服务端返回了非 JSON 响应${status ? ` (HTTP ${status})` : ''}`,
+                code: 'invalid_json_response',
+                status,
+            };
+        }
+        if (!response.ok && payload && !payload.error) {
+            payload.error = `${fallbackMessage || '请求失败'}${response.status ? ` (HTTP ${response.status})` : ''}`;
+        }
+        return payload && typeof payload === 'object' ? payload : {};
+    }
     const api = {
-        async listProjects(status) {
+        async listProjects(status, opts = {}) {
             const qs = status ? `?status=${status}` : '';
-            const r = await fetch(`/api/projects${qs}`);
+            const r = await fetch(`/api/projects${qs}`, opts);
             return r.json();
         },
-        async getProject(id) {
-            const r = await fetch(`/api/projects/${id}`);
+        async getProject(id, opts = {}) {
+            const fetchOpts = Object.assign({ priority: 'high' }, opts || {});
+            const r = await fetch(`/api/projects/${id}`, fetchOpts);
             return r.json();
         },
         async createProject(body) {
@@ -329,8 +380,9 @@
             const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/review-check`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reviewCheck }) });
             return r.json();
         },
-        async workflowChat(projectId) {
-            const r = await fetch(`/api/projects/${projectId}/workflow/chat`);
+        async workflowChat(projectId, taskId) {
+            const scope = taskId ? `?taskId=${encodeURIComponent(taskId)}` : '';
+            const r = await fetch(`/api/projects/${projectId}/workflow/chat${scope}`);
             return r.json();
         },
         async projectExecutionValidateWorkspace(projectId, workspacePath) {
@@ -342,7 +394,19 @@
             return r.json();
         },
         async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
-            const r = await projectMutationFetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: mode || 'continuous', dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, restartPipeline: !!opts.restartPipeline }) });
+            const body = {
+                dirtyFingerprint: dirtyFingerprint || '',
+                skipReviewConfirmed: !!opts.skipReviewConfirmed,
+            };
+            if (opts.stagePipeline !== true) {
+                body.mode = mode || 'continuous';
+                body.restartPipeline = !!opts.restartPipeline;
+            }
+            const r = await projectMutationFetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            return r.json();
+        },
+        async projectOrchestrationCreateTask(projectId, body) {
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
             return r.json();
         },
         async projectExecutionCancel(projectId, taskId, attemptId) {
@@ -367,20 +431,20 @@
             return r.json();
         },
         async listArtifacts(projectId) {
-            const r = await fetch(`/api/projects/${projectId}/artifacts`);
-            return r.json();
+            const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts`);
+            return parseProjectJson(r, '读取项目产物失败');
         },
         async readArtifact(projectId, path) {
-            const r = await fetch(`/api/projects/${projectId}/artifacts/read?path=${encodeURIComponent(path)}`);
-            return r.json();
+            const r = await fetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts/read?path=${encodeURIComponent(path)}`);
+            return parseProjectJson(r, '读取产物内容失败');
         },
         async deleteArtifact(projectId, path) {
-            const r = await projectMutationFetch(`/api/projects/${projectId}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
-            return r.json();
+            const r = await projectMutationFetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts?path=${encodeURIComponent(path)}`, { method: 'DELETE' });
+            return parseProjectJson(r, '删除产物失败');
         },
         async deleteArtifactDir(projectId, dir) {
-            const r = await projectMutationFetch(`/api/projects/${projectId}/artifacts?dir=${encodeURIComponent(dir || '')}`, { method: 'DELETE' });
-            return r.json();
+            const r = await projectMutationFetch(`/api/projects/${encodeURIComponent(projectId)}/artifacts?dir=${encodeURIComponent(dir || '')}`, { method: 'DELETE' });
+            return parseProjectJson(r, '删除产物目录失败');
         },
         async listMeetingRequests(projectId, taskId) {
             const qs = taskId ? `?projectId=${encodeURIComponent(projectId)}&taskId=${encodeURIComponent(taskId)}` : `?projectId=${encodeURIComponent(projectId)}`;
@@ -534,6 +598,39 @@
         if (assignees.size === 0) return '';
         // We'll populate async, return a container
         return `<div class="proj-scoreboard" id="proj-board-scoreboard"></div>`;
+    }
+
+    function scheduleProjectIdleWork(fn, delay = 0) {
+        const run = () => {
+            try {
+                const result = fn();
+                if (result && typeof result.catch === 'function') result.catch(() => {});
+            } catch (e) { /* non-fatal background work */ }
+        };
+        if (delay > 0) {
+            setTimeout(run, delay);
+            return;
+        }
+        if (window.requestIdleCallback) {
+            window.requestIdleCallback(run, { timeout: 1200 });
+            return;
+        }
+        setTimeout(run, 0);
+    }
+
+    function abortController(controller) {
+        if (controller && typeof controller.abort === 'function') {
+            try { controller.abort(); } catch (e) { /* non-fatal */ }
+        }
+    }
+
+    function isAbortError(error) {
+        const abortCode = typeof DOMException !== 'undefined' ? DOMException.ABORT_ERR : 20;
+        return !!(error && (error.name === 'AbortError' || error.code === abortCode));
+    }
+
+    function nextAbortController() {
+        return typeof AbortController !== 'undefined' ? new AbortController() : null;
     }
 
     async function populateBoardScoreboard() {
@@ -708,6 +805,9 @@
 
     // ── LIST VIEW ─────────────────────────────────────────────────
     async function showListView() {
+        abortController(state.listProjectsAbort);
+        const controller = nextAbortController();
+        state.listProjectsAbort = controller;
         state.view = 'list';
         state.currentProject = null;
         closeDetailPanel();
@@ -715,14 +815,18 @@
         if (!mc) return;
         mc.innerHTML = renderListSkeleton();
         try {
-            const d = await api.listProjects();
+            const d = await api.listProjects(null, controller ? { signal: controller.signal } : {});
+            if (state.listProjectsAbort !== controller || state.view !== 'list') return;
             state.projects = d.projects || [];
             state._projectSummarySignature = projectSummarySignature(state.projects);
             mc.innerHTML = renderListView();
             bindListEvents();
             updateSidebar();
         } catch (e) {
+            if (isAbortError(e) || state.view !== 'list') return;
             mc.innerHTML = `<div class="proj-loading"><div>${_t('proj_failed_to_load')}</div><div style="font-size:10px;color:#555">${escHtml(String(e))}</div></div>`;
+        } finally {
+            if (state.listProjectsAbort === controller) state.listProjectsAbort = null;
         }
     }
 
@@ -892,6 +996,8 @@
 
     // ── PROJECT BOARD ─────────────────────────────────────────────
     async function openProject(id) {
+        abortController(state.listProjectsAbort);
+        abortController(state.sidebarProjectsAbort);
         state.view = 'board';
         const mc = getMainContent();
         if (!mc) return;
@@ -902,31 +1008,33 @@
             state.currentProject = d.project;
             state.currentProject.scheduledCronLoading = true;
             state.meetingRequestsByTask = {};
-            state.workflow.active = !!state.currentProject.workflowActive;
-            state.workflow.phase = state.currentProject.workflowPhase || 'idle';
-            state.workflow.currentTaskId = state.currentProject.activeTaskId || null;
-            state.workflow.startMode = state.currentProject.projectExecutionStartMode || state.workflow.startMode || 'continuous';
-            state.workflow.flowStopReason = state.currentProject.projectExecutionFlowStopReason || null;
+            syncWorkflowFromProject(state.currentProject);
             mc.innerHTML = renderBoardView();
             bindBoardEvents();
-            populateBoardScoreboard();
-            loadProjectBoardAuxiliaryData(id);
+            scheduleProjectIdleWork(populateBoardScoreboard);
+            scheduleProjectIdleWork(() => loadProjectBoardAuxiliaryData(id), 80);
         } catch (e) {
             mc.innerHTML = `<div class="proj-loading">${_t('proj_failed_to_load_project')}</div>`;
         }
     }
 
-    async function loadProjectBoardAuxiliaryData(projectId) {
-        const p = state.currentProject;
-        if (!p || p.id !== projectId) return;
-        const jobs = [
-            loadScheduledCronForCurrentProject(projectId),
-            loadProjectMeetingRequests(projectId),
-            checkWorkflowOnOpen(projectId)
-        ];
-        await Promise.allSettled(jobs);
+    function refreshBoardAfterAuxiliary(projectId) {
         if (!state.currentProject || state.currentProject.id !== projectId || state.view !== 'board') return;
         rerenderProjectBoard({ lightweight: true });
+    }
+
+    function loadProjectBoardAuxiliaryData(projectId) {
+        const p = state.currentProject;
+        if (!p || p.id !== projectId) return;
+        loadScheduledCronForCurrentProject(projectId)
+            .then(() => refreshBoardAfterAuxiliary(projectId))
+            .catch(() => refreshBoardAfterAuxiliary(projectId));
+        loadProjectMeetingRequests(projectId)
+            .then(() => refreshBoardAfterAuxiliary(projectId))
+            .catch(() => refreshBoardAfterAuxiliary(projectId));
+        checkWorkflowOnOpen(projectId)
+            .then(() => refreshBoardAfterAuxiliary(projectId))
+            .catch(() => refreshBoardAfterAuxiliary(projectId));
     }
 
     function rerenderProjectBoard(opts = {}) {
@@ -966,8 +1074,11 @@
         if (!p) return '';
         const cols = (p.columns || []).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const tasks = p.tasks || [];
-        const executionOrderByTaskId = projectExecutionOrderMap(tasks);
-        const canRestartProjectPipeline = tasks.length > 0 && tasks.every(t => t.scheduledRepeatEnabled === true);
+        const markedPipeline = isStagePipelineProject(p);
+        const executionOrderByTaskId = markedPipeline ? new Map() : projectExecutionOrderMap(tasks);
+        const canRestartProjectPipeline = !markedPipeline && tasks.length > 0 && tasks.every(t => t.scheduledRepeatEnabled === true);
+        const projectExecutionPhase = p.projectExecutionPhase || p.orchestrationState || '';
+        const projectExecutionActive = markedPipeline ? !!p.projectExecutionActive : !!p.workflowActive;
 
         return `
         <div class="proj-toolbar proj-board-toolbar">
@@ -977,16 +1088,16 @@
             <span class="proj-badge badge-${p.priority || 'medium'}">${p.priority || _t('proj_priority_medium')}</span>
             <div class="proj-toolbar-spacer"></div>
             ${p.projectExecutionEnabled ? `<div class="proj-exec-project-state">
-                <div class="proj-exec-mode-group">
+                ${markedPipeline ? `<button class="proj-btn proj-btn-sm proj-btn-orchestration" id="proj-orchestration-open-btn" onclick="ProjMgr.openProjectOrchestration()">编排</button>` : `<div class="proj-exec-mode-group">
                     <label class="proj-exec-mode"><input type="radio" name="proj-exec-start-mode" value="single" ${(p.projectExecutionStartMode || 'continuous') === 'single' ? 'checked' : ''} onchange="ProjMgr.setProjectExecutionStartMode(this.value)">启动下一个任务</label>
                     <label class="proj-exec-mode"><input type="radio" name="proj-exec-start-mode" value="continuous" ${(p.projectExecutionStartMode || 'continuous') !== 'single' ? 'checked' : ''} onchange="ProjMgr.setProjectExecutionStartMode(this.value)">连续启动任务</label>
-                </div>
+                </div>`}
                 <div class="proj-exec-primary-actions">
                     <button class="proj-btn proj-btn-sm proj-btn-start" id="proj-exec-start-btn" onclick="ProjMgr.projectExecutionProjectStart()">▶ 启动项目</button>
                     ${canRestartProjectPipeline ? `<button class="proj-btn proj-btn-sm" id="proj-exec-restart-btn" onclick="ProjMgr.projectExecutionProjectRestart()">重启流水线</button>` : ''}
                     <button class="proj-btn proj-btn-sm proj-btn-stop hidden" id="proj-exec-stop-btn" onclick="ProjMgr.projectExecutionCancelActive()">停止当前任务</button>
                 </div>
-                <span class="proj-wf-status ${p.workflowActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(p.workflowPhase || '')}</span>
+                <span class="proj-wf-status ${projectExecutionActive ? 'wf-active' : ''}" id="wf-status-badge">${escHtml(projectExecutionPhase)}</span>
                 ${p.workspacePath
                     ? `<button class="proj-exec-workspace" title="点击复制：${escHtml(p.workspacePath)}" onclick="ProjMgr.copyWorkspacePath(event, '${escHtml(p.workspacePath)}')"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">${escHtml(p.workspacePath)}</span></button>`
                     : `<span class="proj-exec-workspace"><span>${p.workspaceKind === 'git' ? 'Git' : 'DIR'} · </span><span class="proj-exec-workspace-path">未配置工作区</span></span>`}
@@ -1249,7 +1360,7 @@
     function renderColumn(col, allTasks, executionOrderByTaskId = new Map()) {
         const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
-        const backlogOrderButton = isBacklogColumn(col)
+        const backlogOrderButton = !isStagePipelineProject(state.currentProject) && isBacklogColumn(col)
             ? `<button class="proj-col-order-btn" onclick="ProjMgr.showProjectOrderDialog()" title="${escHtml(_tf('proj_project_order_edit_hint', 'Edit project execution order', '编辑项目执行顺序'))}">↕</button>`
             : '';
         return `
@@ -1279,7 +1390,8 @@
     }
 
     function renderTaskCard(task, executionOrder = null) {
-        if (!Number.isFinite(executionOrder) && state.currentProject && Array.isArray(state.currentProject.tasks)) {
+        const markedPipeline = isStagePipelineProject(state.currentProject);
+        if (!markedPipeline && !Number.isFinite(executionOrder) && state.currentProject && Array.isArray(state.currentProject.tasks)) {
             executionOrder = projectExecutionOrderMap(state.currentProject.tasks).get(task.id);
         }
         const pc = priorityColor(task.priority);
@@ -1294,7 +1406,11 @@
         const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(projectExecutionStateLabel(task))}</span>` : '';
         const mtgRequests = state.meetingRequestsByTask[task.id] || [];
         const pendingMtgRequests = mtgRequests.filter(r => r.status === 'pending').length;
-        const orderBadge = Number.isFinite(executionOrder) ? `<span class="proj-task-exec-order" title="${escHtml(_tf('proj_task_execution_order_hint', 'Project execution order', '项目执行顺序'))}">${executionOrder}</span>` : '';
+        const stageValue = Number(task.executionStage);
+        const stageBadge = markedPipeline && Number.isInteger(stageValue) && stageValue > 0
+            ? `<span class="proj-task-exec-order" title="${escHtml(_tf('proj_task_execution_stage_hint', 'Project execution stage', '项目执行阶段'))}">S${stageValue}</span>`
+            : '';
+        const orderBadge = stageBadge || (Number.isFinite(executionOrder) ? `<span class="proj-task-exec-order" title="${escHtml(_tf('proj_task_execution_order_hint', 'Project execution order', '项目执行顺序'))}">${executionOrder}</span>` : '');
         const orderClass = orderBadge ? ' has-exec-order' : '';
         return `
         <div class="proj-task-card${orderClass}" id="task-${task.id}" data-task-id="${task.id}"
@@ -1701,6 +1817,7 @@
         const activity = (p && p.activity || []).filter(a => a.taskId === task.id).slice().reverse().slice(0, 20);
         const meetingRequests = activeTaskMeetingRequests(task, state.meetingRequestsByTask[task.id] || []);
         const projectExecution = !!(p && p.projectExecutionEnabled);
+        const markedPipeline = isStagePipelineProject(p);
         const meetingActionItems = Array.isArray(task.meetingActionItems) ? task.meetingActionItems : [];
         const meetingDiscussionPoints = Array.isArray(task.meetingDiscussionPoints) ? task.meetingDiscussionPoints : [];
         const meetingRecords = taskMeetingRecords(task, meetingDiscussionPoints, meetingActionItems);
@@ -1721,7 +1838,7 @@
             if (task.executionState === 'awaiting_meeting_resolution') return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(projectExecutionStateLabel(task))}</button>`;
             if (task.executionState === 'execution_complete') return `
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">${escHtml(_tf('proj_exec_start_review', 'Start review', '启动审查'))}</button>
-                <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_rerun', 'Run again', '重新执行'))}</button>`;
+                ${markedPipeline ? '' : `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_rerun', 'Run again', '重新执行'))}</button>`}`;
             if (task.executionState === 'awaiting_user_acceptance') {
                 const rejectLabel = reviewResult.status === 'skipped'
                     ? _tf('proj_exec_rework_skipped', 'Return for rework', '退回返工')
@@ -1731,6 +1848,7 @@
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(rejectLabel)}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(_tf('proj_exec_mark_blocked', 'Mark blocked', '标记阻塞'))}</button>`;
             }
+            if (markedPipeline) return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(_tf('proj_exec_stage_start_only', 'Start from project pipeline', '请从项目编排启动'))}</button>`;
             return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_start_task', 'Start this task', '启动此任务'))}</button>`;
         })();
 
@@ -2116,7 +2234,11 @@
     }
 
     function projectExecutionSummaryLabel(project) {
-        const phase = String(project && (project.projectExecutionPhase || project.workflowPhase || '') || '').trim();
+        const phase = String(project && (
+            isStagePipelineProject(project)
+                ? (project.projectExecutionPhase || project.orchestrationState || '')
+                : (project.projectExecutionPhase || project.workflowPhase || '')
+        ) || '').trim();
         const active = !!(project && project.projectExecutionActive);
         if (!active) return '';
         const labels = {
@@ -3487,6 +3609,7 @@
                 truncated: !!d.truncated,
                 selected: null,
                 selectedContent: '',
+                contentByPath: {},
                 sourceMode: 'preview',
             };
             mc.innerHTML = renderArtifactManager(state._artifactModel);
@@ -3557,7 +3680,7 @@
         const dirs = Array.from(node.dirs.values()).sort((a, b) => a.name.localeCompare(b.name));
         const files = node.files.slice().sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || '') || String(a.name || a.path).localeCompare(String(b.name || b.path)));
         const fileHtml = files.map(a => `
-            <div class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" style="--artifact-depth:${depth}" role="button" tabindex="0" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'));}">
+            <div class="proj-artifact-row ${selected && selected.path === a.path ? 'active' : ''}" data-artifact-path="${escHtml(a.path)}" style="--artifact-depth:${depth}" role="button" tabindex="0" onclick="ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'))" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();ProjMgr.openArtifact('${model.projectId}', decodeURIComponent('${encodeURIComponent(a.path)}'));}">
                 <div class="proj-artifact-head">
                     <div>
                         <div class="proj-artifact-name">${escHtml(a.name || a.path)}</div>
@@ -3592,12 +3715,37 @@
         return simpleMarkdown(content || '');
     }
 
+    function renderArtifactViewer(model) {
+        const selected = model.selected;
+        const sourceMode = model.sourceMode || 'preview';
+        const content = model.selectedContent || '';
+        const readError = model.readError || '';
+        const loading = !!model.loadingPath;
+        return `
+            <div class="proj-artifact-viewer">
+                ${selected ? `
+                    <div class="proj-artifact-viewer-head">
+                        <div>
+                            <div class="proj-artifact-name">${escHtml(selected.path)}</div>
+                            ${selected.truncated ? `<div class="proj-artifact-warn">文件较大，内容已截断。</div>` : ''}
+                            ${readError ? `<div class="proj-artifact-error compact">${escHtml(readError)}</div>` : ''}
+                        </div>
+                        <div class="proj-desc-tabs">
+                            <button class="proj-desc-tab ${sourceMode === 'preview' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('preview')">Preview</button>
+                            <button class="proj-desc-tab ${sourceMode === 'source' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('source')">Source</button>
+                        </div>
+                    </div>
+                    <div class="proj-artifact-content ${sourceMode === 'source' ? 'source' : ''}">
+                        ${loading ? `<div class="proj-artifact-empty">正在加载产物内容...</div>` : (sourceMode === 'source' ? `<pre>${escHtml(content)}</pre>` : renderMarkdownPreview(content))}
+                    </div>
+                ` : `<div class="proj-artifact-empty">${escHtml((model.labels || {}).selectPrompt || '选择一个 Markdown 产物查看内容。')}</div>`}
+            </div>`;
+    }
+
     function renderArtifactManager(model) {
         const artifacts = model.artifacts || [];
         const context = model.context || {};
         const selected = model.selected;
-        const sourceMode = model.sourceMode || 'preview';
-        const content = model.selectedContent || '';
         const labels = model.labels || {};
         const title = context.title || labels.contextFallback || 'Project';
         const itemLabel = labels.itemPlural || 'Markdown 产物';
@@ -3625,55 +3773,79 @@
                 ${!model.error && artifacts.length === 0 ? `<div class="proj-artifact-empty">${escHtml(labels.empty || '当前上下文没有 Markdown 产物。')}</div>` : ''}
                 ${renderArtifactTreeNode(artifactTree, model, selected)}
             </div>
-            <div class="proj-artifact-viewer">
-                ${selected ? `
-                    <div class="proj-artifact-viewer-head">
-                        <div>
-                            <div class="proj-artifact-name">${escHtml(selected.path)}</div>
-                            ${selected.truncated ? `<div class="proj-artifact-warn">文件较大，内容已截断。</div>` : ''}
-                        </div>
-                        <div class="proj-desc-tabs">
-                            <button class="proj-desc-tab ${sourceMode === 'preview' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('preview')">Preview</button>
-                            <button class="proj-desc-tab ${sourceMode === 'source' ? 'active' : ''}" onclick="ProjMgr.switchArtifactMode('source')">Source</button>
-                        </div>
-                    </div>
-                    <div class="proj-artifact-content ${sourceMode === 'source' ? 'source' : ''}">
-                        ${sourceMode === 'source' ? `<pre>${escHtml(content)}</pre>` : renderMarkdownPreview(content)}
-                    </div>
-                ` : `<div class="proj-artifact-empty">${escHtml(labels.selectPrompt || '选择一个 Markdown 产物查看内容。')}</div>`}
-            </div>
+            ${renderArtifactViewer(model)}
         </div>`;
+    }
+
+    function artifactByPath(model, path) {
+        return (model.artifacts || []).find(a => a.path === path) || null;
+    }
+
+    function updateArtifactActiveRows(path) {
+        const mc = getMainContent();
+        if (!mc) return;
+        mc.querySelectorAll('.proj-artifact-row').forEach(row => {
+            row.classList.toggle('active', row.getAttribute('data-artifact-path') === path);
+        });
+    }
+
+    function updateArtifactViewer(model) {
+        const mc = getMainContent();
+        if (!mc) return;
+        const viewer = mc.querySelector('.proj-artifact-viewer');
+        if (viewer) viewer.outerHTML = renderArtifactViewer(model);
+        updateArtifactActiveRows(model.selected && model.selected.path || '');
     }
 
     async function openArtifact(projectId, path) {
         const mc = getMainContent();
         if (!mc) return;
+        const model = state._artifactModel;
+        if (!model || model.projectId !== projectId) {
+            await showArtifacts(projectId);
+            if (!state._artifactModel || state._artifactModel.projectId !== projectId) return;
+            return openArtifact(projectId, path);
+        }
+        const contentByPath = model.contentByPath || {};
+        const selectedMeta = artifactByPath(model, path) || { path, name: path };
+        model.selected = selectedMeta;
+        model.sourceMode = 'preview';
+        model.readError = '';
+        if (Object.prototype.hasOwnProperty.call(contentByPath, path)) {
+            model.loadingPath = '';
+            model.selectedContent = contentByPath[path] || '';
+            updateArtifactViewer(model);
+            return;
+        }
+        model.loadingPath = path;
+        model.selectedContent = '';
+        updateArtifactViewer(model);
         try {
-            const list = await api.listArtifacts(projectId);
             const d = await api.readArtifact(projectId, path);
             if (d.error) throw new Error(d.error);
+            if (state._artifactModel !== model || model.projectId !== projectId || model.loadingPath !== path) return;
             const artifact = d.artifact || {};
-            const selected = (list.artifacts || []).find(a => a.path === artifact.path) || artifact;
-            state._artifactModel = {
-                projectId,
-                context: list.context || {},
-                artifacts: list.artifacts || [],
-                truncated: !!list.truncated,
-                selected: { ...selected, truncated: artifact.truncated },
-                selectedContent: artifact.content || '',
-                sourceMode: 'preview',
-            };
-            mc.innerHTML = renderArtifactManager(state._artifactModel);
+            const resolvedPath = artifact.path || path;
+            const selected = artifactByPath(model, resolvedPath) || { ...artifact, path: resolvedPath };
+            model.contentByPath = { ...contentByPath, [resolvedPath]: artifact.content || '' };
+            model.selected = { ...selected, truncated: artifact.truncated };
+            model.selectedContent = artifact.content || '';
+            model.loadingPath = '';
+            updateArtifactViewer(model);
         } catch (e) {
+            if (state._artifactModel === model) {
+                model.loadingPath = '';
+                model.readError = String(e.message || e);
+                updateArtifactViewer(model);
+            }
             toast(String(e.message || e), 'error');
         }
     }
 
     function switchArtifactMode(mode) {
-        const mc = getMainContent();
-        if (!mc || !state._artifactModel) return;
+        if (!state._artifactModel) return;
         state._artifactModel.sourceMode = mode === 'source' ? 'source' : 'preview';
-        mc.innerHTML = renderArtifactManager(state._artifactModel);
+        updateArtifactViewer(state._artifactModel);
     }
 
     function setArtifactDirs(open) {
@@ -3701,6 +3873,7 @@
             truncated: !!list.truncated,
             selected,
             selectedContent: selected ? previous.selectedContent : '',
+            contentByPath: previous.contentByPath || {},
             sourceMode: previous.sourceMode || 'preview',
         };
         const mc = getMainContent();
@@ -3950,16 +4123,25 @@
     }
 
     // Init sidebar on load
-    (async function initSidebar() {
+    async function initSidebar() {
+        abortController(state.sidebarProjectsAbort);
+        const controller = nextAbortController();
+        state.sidebarProjectsAbort = controller;
         try {
-            const d = await api.listProjects('active');
+            const d = await api.listProjects('active', controller ? { signal: controller.signal } : {});
+            if (state.sidebarProjectsAbort !== controller) return;
             state.projects = d.projects || [];
             updateSidebar();
             // Also load agent roster for leaderboard names
             await loadAgentRoster();
             refreshLeaderboard();
-        } catch (e) { /* non-fatal */ }
-    })();
+        } catch (e) {
+            if (!isAbortError(e)) { /* non-fatal */ }
+        } finally {
+            if (state.sidebarProjectsAbort === controller) state.sidebarProjectsAbort = null;
+        }
+    }
+    scheduleProjectIdleWork(initSidebar, 700);
 
     // ── GLOBAL KEYBOARD ───────────────────────────────────────────
     function handleGlobalKeys(e) {
@@ -4041,24 +4223,195 @@
     async function setProjectExecutionStartModeAction(mode) {
         const p = state.currentProject;
         if (!p) return;
+        if (isStagePipelineProject(p)) {
+            toast('编排项目不支持旧启动模式', 'error');
+            return;
+        }
         p.projectExecutionStartMode = mode === 'single' ? 'single' : 'continuous';
         try {
             await api.updateProject(p.id, { projectExecutionStartMode: p.projectExecutionStartMode });
         } catch (e) { toast(_t('proj_save_failed'), 'error'); }
     }
 
+    async function refreshProjectOrchestrationModal(selectedTaskId) {
+        const openSession = window.ProjectOrchestration && window.ProjectOrchestration.current ? window.ProjectOrchestration.current() : null;
+        await refreshProjectExecutionProject(selectedTaskId || null, { lightweight: true });
+        if (openSession && state.currentProject && isStagePipelineProject(state.currentProject)) {
+            openProjectOrchestrationAction({ preserveExisting: true });
+        }
+    }
+
+    function projectOrchestrationApiAdapter() {
+        const base = window.ProjectOrchestrationAPI || {};
+        const wrap = (method, selectedTask) => {
+            if (typeof base[method] !== 'function') return undefined;
+            return async (payload) => {
+                const result = await base[method](payload);
+                await refreshProjectExecutionProject((selectedTask && selectedTask(payload, result)) || null, { lightweight: true, skipAuxiliary: true });
+                return result.project ? result : { ...result, project: state.currentProject };
+            };
+        };
+        return {
+            saveCompletedDrag: wrap('saveCompletedDrag'),
+            pauseProject: wrap('pauseProject'),
+            resumeProject: wrap('resumeProject'),
+            requestTaskSkip: wrap('requestTaskSkip', (payload) => payload && payload.taskId),
+            decideTaskSkip: wrap('decideTaskSkip', (payload) => payload && payload.taskId),
+        };
+    }
+
+    function projectOrchestrationDialogAgents() {
+        return Array.isArray(state.agentRoster) ? state.agentRoster.map(agent => ({
+            id: String((agent && (agent.id || agent.agentId || agent.name)) || '').trim(),
+            label: String((agent && (agent.displayName || agent.name || agent.label || agent.id)) || '').trim(),
+        })).filter(agent => agent.id) : [];
+    }
+
+    function openProjectOrchestrationTaskDialog({ executionStage }) {
+        return new Promise(resolve => {
+            const overlay = document.createElement('div');
+            overlay.className = 'project-orchestration-task-dialog-overlay';
+            overlay.setAttribute('role', 'dialog');
+            overlay.setAttribute('aria-modal', 'true');
+            overlay.innerHTML = `
+                <section class="project-orchestration-task-dialog">
+                    <header class="project-orchestration-task-dialog-header">
+                        <h3 class="project-orchestration-task-dialog-title">添加阶段任务</h3>
+                        <p class="project-orchestration-task-dialog-subtitle">阶段 ${escHtml(executionStage)} · 新任务</p>
+                    </header>
+                    <div class="project-orchestration-task-dialog-form">
+                        <label class="project-orchestration-task-dialog-field">
+                            <span>标题</span>
+                            <input class="project-orchestration-task-dialog-input" type="text" placeholder="输入任务标题">
+                        </label>
+                        <label class="project-orchestration-task-dialog-field">
+                            <span>描述</span>
+                            <textarea class="project-orchestration-task-dialog-textarea" placeholder="补充目标、验收标准或依赖信息"></textarea>
+                        </label>
+                        <div class="project-orchestration-task-dialog-row">
+                            <label class="project-orchestration-task-dialog-field">
+                                <span>优先级</span>
+                                <select class="project-orchestration-task-dialog-input" data-field="priority">
+                                    <option value="medium">MEDIUM</option>
+                                    <option value="high">HIGH</option>
+                                    <option value="critical">CRITICAL</option>
+                                    <option value="low">LOW</option>
+                                </select>
+                            </label>
+                            <label class="project-orchestration-task-dialog-field">
+                                <span>执行人</span>
+                                <select class="project-orchestration-task-dialog-input" data-field="assignee">
+                                    <option value="">Unassigned</option>
+                                    ${projectOrchestrationDialogAgents().map(agent => `<option value="${escHtml(agent.id)}">${escHtml(agent.label || agent.id)}</option>`).join('')}
+                                </select>
+                            </label>
+                        </div>
+                        <p class="project-orchestration-task-dialog-error"></p>
+                    </div>
+                    <footer class="project-orchestration-task-dialog-actions">
+                        <button type="button" class="project-orchestration-task-dialog-button is-cancel">取消</button>
+                        <button type="button" class="project-orchestration-task-dialog-button is-submit">创建任务</button>
+                    </footer>
+                </section>
+            `;
+            const finish = result => {
+                overlay.remove();
+                resolve(result || { ok: false, cancelled: true });
+            };
+            const submit = () => {
+                const titleInput = overlay.querySelector('input');
+                const descriptionInput = overlay.querySelector('textarea');
+                const priorityInput = overlay.querySelector('[data-field="priority"]');
+                const assigneeInput = overlay.querySelector('[data-field="assignee"]');
+                const title = (titleInput.value || '').trim();
+                if (!title) {
+                    overlay.querySelector('.project-orchestration-task-dialog-error').textContent = '请输入任务标题';
+                    titleInput.focus();
+                    return;
+                }
+                const assignee = (assigneeInput.value || '').trim();
+                finish({
+                    ok: true,
+                    task: {
+                        title,
+                        description: (descriptionInput.value || '').trim(),
+                        priority: priorityInput.value || 'medium',
+                        assignee: assignee || undefined,
+                        executorAgentId: assignee || undefined,
+                        executionStage,
+                    },
+                });
+            };
+            overlay.querySelector('.is-cancel').addEventListener('click', () => finish({ ok: false, cancelled: true }));
+            overlay.querySelector('.is-submit').addEventListener('click', submit);
+            overlay.addEventListener('keydown', event => {
+                if (event.key === 'Escape') finish({ ok: false, cancelled: true });
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) submit();
+            });
+            document.body.appendChild(overlay);
+            overlay.querySelector('input').focus();
+        });
+    }
+
+    function openProjectOrchestrationAction(opts = {}) {
+        const p = state.currentProject;
+        if (!p || !isStagePipelineProject(p)) {
+            toast('当前项目不是阶段编排项目', 'error');
+            return;
+        }
+        if (!window.ProjectOrchestration || typeof window.ProjectOrchestration.open !== 'function') {
+            toast('项目编排视图未加载', 'error');
+            return;
+        }
+        const opener = opts.preserveExisting && typeof window.ProjectOrchestration.reopen === 'function'
+            ? window.ProjectOrchestration.reopen
+            : window.ProjectOrchestration.open;
+        opener(p, {
+            api: projectOrchestrationApiAdapter(),
+            onAddTask: async ({ executionStage }) => {
+                let taskBody = { title: `阶段 ${executionStage} 任务`, executionStage };
+                const taskDialog = window.ProjectOrchestrationTaskDialog && typeof window.ProjectOrchestrationTaskDialog.open === 'function'
+                    ? window.ProjectOrchestrationTaskDialog
+                    : { open: openProjectOrchestrationTaskDialog };
+                if (taskDialog && typeof taskDialog.open === 'function') {
+                    const draft = await taskDialog.open({
+                        project: p,
+                        executionStage,
+                        agents: state.agentRoster,
+                        defaultTitle: '',
+                    });
+                    if (!draft || draft.cancelled) return { ok: false, cancelled: true };
+                    if (!draft.ok || !draft.task) return { ok: false, error: (draft && draft.error) || '添加任务失败' };
+                    taskBody = { ...draft.task, executionStage };
+                }
+                const d = await api.projectOrchestrationCreateTask(p.id, taskBody);
+                if (d.error) {
+                    toast(d.error, 'error');
+                    return { ok: false, error: d.error, code: d.code };
+                }
+                refreshProjectExecutionProject((d.task || {}).id || null, { lightweight: true, skipAuxiliary: true }).catch(() => {});
+                return d;
+            },
+            onClose: () => {
+                refreshProjectExecutionProject(null, { lightweight: true }).catch(() => {});
+            },
+        });
+    }
+
     async function projectExecutionProjectStartAction(dirtyFingerprint, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
-        const mode = projectExecutionSelectedStartMode();
-        const restartPipeline = opts.restartPipeline === true;
+        const markedPipeline = isStagePipelineProject(p);
+        const mode = markedPipeline ? null : projectExecutionSelectedStartMode();
+        const restartPipeline = !markedPipeline && opts.restartPipeline === true;
         const actionKey = opts.actionKey || (restartPipeline ? `project-exec-project-restart:${p.id}` : `project-exec-project-start:${p.id}`);
         if (!opts._guarded) {
             return runActionOnce(actionKey, () => projectExecutionProjectStartAction(dirtyFingerprint, { ...opts, _guarded: true, actionKey }), opts);
         }
         const confirmedDirtyFingerprint = dirtyFingerprint || opts.dirtyFingerprint || '';
         try {
-            const d = await api.projectExecutionProjectStart(p.id, mode, confirmedDirtyFingerprint, opts);
+            const startOpts = markedPipeline ? { ...opts, stagePipeline: true, restartPipeline: false } : opts;
+            const d = await api.projectExecutionProjectStart(p.id, mode, confirmedDirtyFingerprint, startOpts);
             if (d.confirmationRequired) {
                 if (d.code === 'reviewer_skip_confirmation_required') {
                     const taskTitle = (d.selectedTask || {}).title || '';
@@ -4102,19 +4455,23 @@
                 }
                 return;
             }
-            toast(restartPipeline ? `项目流水线已重启，已重置 ${d.resetTaskCount || 0} 个任务` : (mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动'), 'success');
+            toast(markedPipeline ? '项目编排流水线已启动' : (restartPipeline ? `项目流水线已重启，已重置 ${d.resetTaskCount || 0} 个任务` : (mode === 'continuous' ? '项目连续任务流已启动' : '项目任务已启动')), 'success');
             state.workflow.active = true;
             state.workflow.phase = 'executing';
-            state.workflow.currentTaskId = d.taskId;
-            state.workflow.startMode = mode;
+            state.workflow.currentTaskId = markedPipeline ? null : d.taskId;
+            state.workflow.startMode = markedPipeline ? null : mode;
             startProjectExecutionPolling();
-            await refreshProjectExecutionProject(d.taskId);
+            await refreshProjectExecutionProject(markedPipeline ? null : d.taskId);
         } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
     }
 
     async function projectExecutionProjectRestartAction(dirtyFingerprint, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        if (isStagePipelineProject(p)) {
+            toast('编排项目不支持旧的重启流水线入口', 'error');
+            return;
+        }
         const actionKey = opts.actionKey || `project-exec-project-restart:${p.id}`;
         if (!opts._guarded) {
             return runActionOnce(actionKey, () => projectExecutionProjectRestartAction(dirtyFingerprint, { ...opts, _guarded: true, actionKey }), opts);
@@ -4141,7 +4498,11 @@
     async function projectExecutionCancelActiveAction() {
         const p = state.currentProject;
         if (!p) return;
-        const taskId = state.workflow.currentTaskId || p.activeTaskId;
+        const activeIds = projectActiveTaskIds(p);
+        const selected = state.currentTask && activeIds.includes(String(state.currentTask.id || '')) ? state.currentTask.id : '';
+        const taskId = isStagePipelineProject(p)
+            ? (selected || (activeIds.length === 1 ? activeIds[0] : ''))
+            : (state.workflow.currentTaskId || p.activeTaskId);
         const task = (p.tasks || []).find(t => t.id === taskId);
         if (!task) { toast('没有正在执行的任务', 'info'); return; }
         await projectExecutionCancelAction(task.id, task.activeAttemptId || '');
@@ -4383,6 +4744,7 @@
             scheduledCronLoadError: p.scheduledCronLoadError,
             scheduledCronLoading: p.scheduledCronLoading,
         };
+        syncWorkflowFromProject(state.currentProject);
         const taskId = selectedTaskId || (state.currentTask && state.currentTask.id);
         if (taskId) state.currentTask = (state.currentProject.tasks || []).find(t => t.id === taskId) || null;
         const mc = getMainContent();
@@ -4392,11 +4754,13 @@
         }
         if (state.currentTask && !detailPanelActiveEditor()) renderDetailPanel(state.currentTask, { preserveScroll: opts.lightweight === true });
         updateWorkflowUI();
-        loadProjectMeetingRequests(state.currentProject.id).then(function () {
-            if (state.currentProject && state.currentProject.id === p.id && state.view === 'board') {
-                rerenderProjectBoard({ lightweight: true });
-            }
-        });
+        if (!opts.skipAuxiliary) {
+            scheduleProjectIdleWork(() => loadProjectMeetingRequests(state.currentProject.id).then(function () {
+                if (state.currentProject && state.currentProject.id === p.id && state.view === 'board') {
+                    rerenderProjectBoard({ lightweight: true });
+                }
+            }), 80);
+        }
     }
 
     function startProjectExecutionPolling() {
@@ -4405,16 +4769,19 @@
             const p = state.currentProject;
             if (!p) return stopWorkflowPolling();
             try {
-                const d = await api.projectExecutionStatus(p.id);
-                state.workflow.active = d.active;
-                state.workflow.phase = d.phase || 'idle';
-                state.workflow.currentTaskId = d.currentTaskId;
-                state.workflow.startMode = d.startMode || 'continuous';
-                state.workflow.flowStopReason = d.flowStopReason || null;
+                let d = null;
+                if (!isStagePipelineProject(p)) {
+                    d = await api.projectExecutionStatus(p.id);
+                    state.workflow.active = d.active;
+                    state.workflow.phase = d.phase || 'idle';
+                    state.workflow.currentTaskId = d.currentTaskId;
+                    state.workflow.startMode = d.startMode || 'continuous';
+                    state.workflow.flowStopReason = d.flowStopReason || null;
+                }
                 const openTaskId = state.currentTask && state.currentTask.id;
                 await refreshProjectExecutionProject(openTaskId || null, { lightweight: true });
                 pollWorkflowChat();
-                if (!d.active && !projectExecutionHasRunningTask(state.currentProject)) stopWorkflowPolling();
+                if (!(d ? d.active : state.workflow.active) && !projectExecutionHasRunningTask(state.currentProject)) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
         }, 2500);
     }
@@ -4639,9 +5006,19 @@
         const p = state.currentProject;
         if (!p) return;
         try {
-            const d = await api.workflowChat(p.id);
+            const d = await api.workflowChat(p.id, workflowChatTaskScope(p));
             renderWorkflowChat(d);
         } catch (e) { /* silent */ }
+    }
+
+    function workflowChatTaskScope(project) {
+        if (!isStagePipelineProject(project)) return '';
+        const activeIds = projectActiveTaskIds(project);
+        if (activeIds.length <= 1) return activeIds[0] || '';
+        const selected = state.currentTask && String(state.currentTask.id || '');
+        if (selected && activeIds.includes(selected)) return selected;
+        const current = state.workflow.currentTaskId && String(state.workflow.currentTaskId || '');
+        return current && activeIds.includes(current) ? current : '';
     }
 
     function renderWorkflowChat(data) {
@@ -4723,7 +5100,21 @@
         // Clear all active indicators
         document.querySelectorAll('.proj-col-header').forEach(h => h.classList.remove('col-active-work'));
 
-        if (!state.workflow.active || !state.workflow.currentTaskId || !state.currentProject) return;
+        if (!state.workflow.active || !state.currentProject) return;
+
+        if (isStagePipelineProject(state.currentProject)) {
+            const activeIds = new Set(projectActiveTaskIds(state.currentProject));
+            if (!activeIds.size) return;
+            (state.currentProject.tasks || []).forEach(task => {
+                if (!activeIds.has(String(task.id || ''))) return;
+                const colEl = document.getElementById(`col-${task.columnId}`);
+                const header = colEl && colEl.querySelector('.proj-col-header');
+                if (header) header.classList.add('col-active-work');
+            });
+            return;
+        }
+
+        if (!state.workflow.currentTaskId) return;
 
         // Find which column the current task is in
         const task = state.currentProject.tasks.find(t => t.id === state.workflow.currentTaskId);
@@ -4835,17 +5226,21 @@
         if (!p || (projectId && p.id !== projectId)) return;
         if (p.projectExecutionEnabled) {
             try {
-                const d = await api.projectExecutionStatus(p.id);
-                if (!state.currentProject || state.currentProject.id !== p.id) return;
-                state.workflow.active = d.active;
-                state.workflow.phase = d.phase || 'idle';
-                state.workflow.currentTaskId = d.currentTaskId;
-                state.workflow.startMode = d.startMode || 'continuous';
-                state.workflow.flowStopReason = d.flowStopReason || null;
-                p.projectExecutionStartMode = d.startMode || p.projectExecutionStartMode || 'continuous';
+                if (isStagePipelineProject(p)) {
+                    syncWorkflowFromProject(p);
+                } else {
+                    const d = await api.projectExecutionStatus(p.id);
+                    if (!state.currentProject || state.currentProject.id !== p.id) return;
+                    state.workflow.active = d.active;
+                    state.workflow.phase = d.phase || 'idle';
+                    state.workflow.currentTaskId = d.currentTaskId;
+                    state.workflow.startMode = d.startMode || 'continuous';
+                    state.workflow.flowStopReason = d.flowStopReason || null;
+                    p.projectExecutionStartMode = d.startMode || p.projectExecutionStartMode || 'continuous';
+                }
                 updateWorkflowUI();
                 pollWorkflowChat();
-                if (d.active || projectExecutionHasRunningTask(p)) startProjectExecutionPolling();
+                if (state.workflow.active || projectExecutionHasRunningTask(p)) startProjectExecutionPolling();
             } catch (e) { /* non-fatal */ }
             return;
         }
@@ -4960,6 +5355,7 @@
         projectExecutionStart: projectExecutionStartAction,
         projectExecutionProjectStart: projectExecutionProjectStartAction,
         projectExecutionProjectRestart: projectExecutionProjectRestartAction,
+        openProjectOrchestration: openProjectOrchestrationAction,
         setProjectExecutionStartMode: setProjectExecutionStartModeAction,
         projectExecutionCancelActive: projectExecutionCancelActiveAction,
         copyWorkspacePath: copyWorkspacePathAction,

@@ -64,6 +64,24 @@ def dispatch(method, path, body=None):
     return handler.status, payload
 
 
+class FakeOpenedArtifact:
+    def __init__(self, content=b"artifact"):
+        self.stream = io.BytesIO(content)
+        self.relative_path = "docs/report.md"
+        self.size = len(content)
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+        self.stream.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+
+
 def test_notifications_route_uses_config_handler(monkeypatch):
     monkeypatch.setattr(server, "_feishu_notification_config_response", lambda: {"ok": True, "feishuEnabled": True})
     status, payload = dispatch("GET", "/api/feishu-notification/config")
@@ -104,6 +122,41 @@ def test_projects_put_route_uses_read_json(monkeypatch):
     assert calls == [("p1", {"title": "Updated"})]
 
 
+def test_projects_orchestration_put_route_uses_orchestration_handler(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "_handle_project_orchestration_update",
+        lambda project_id, body: calls.append((project_id, body)) or {"ok": True, "assignments": body["assignments"]},
+    )
+    status, payload = dispatch("PUT", "/api/projects/p1/orchestration", {
+        "revision": 0,
+        "assignments": [{"taskId": "t1", "executionStage": 1}],
+    })
+    assert status == 200
+    assert payload == {"ok": True, "assignments": [{"taskId": "t1", "executionStage": 1}]}
+    assert calls == [("p1", {"revision": 0, "assignments": [{"taskId": "t1", "executionStage": 1}]})]
+
+
+def test_projects_artifact_file_route_streams_opened_artifact(monkeypatch):
+    opened = FakeOpenedArtifact(b"# report")
+    calls = []
+
+    def handle(project_id, query):
+        calls.append((project_id, query))
+        return {"ok": True, "opened": opened}
+
+    monkeypatch.setattr(server, "_handle_project_artifact_file", handle)
+    handler = FakeHandler("/api/projects/p1/artifacts/file?path=docs%2Freport.md")
+    handled = server_routes.dispatch(handler, "GET", urllib.parse.urlparse(handler.path))
+
+    assert handled is True
+    assert handler.status == 200
+    assert handler.wfile.getvalue() == b"# report"
+    assert opened.closed is True
+    assert calls == [("p1", "path=docs%2Freport.md")]
+
+
 def test_workflow_route_uses_workflow_service_compatibility(monkeypatch):
     calls = []
     monkeypatch.setattr(server, "_handle_workflow_status", lambda project_id: calls.append(project_id) or {"ok": True, "phase": "idle"})
@@ -111,6 +164,20 @@ def test_workflow_route_uses_workflow_service_compatibility(monkeypatch):
     assert status == 200
     assert payload == {"ok": True, "phase": "idle"}
     assert calls == ["p1"]
+
+
+def test_workflow_chat_route_passes_explicit_task_scope(monkeypatch):
+    calls = []
+
+    def handle(project_id, task_scope=None):
+        calls.append((project_id, task_scope))
+        return {"ok": True, "taskId": task_scope}
+
+    monkeypatch.setattr(server, "_handle_workflow_chat", handle)
+    status, payload = dispatch("GET", "/api/projects/p1/workflow/chat?taskId=t2")
+    assert status == 200
+    assert payload == {"ok": True, "taskId": "t2"}
+    assert calls == [("p1", "t2")]
 
 
 def test_archive_room_route_uses_archive_service_compatibility(monkeypatch):

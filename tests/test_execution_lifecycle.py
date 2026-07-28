@@ -14,6 +14,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from services import execution_lifecycle
+from services.project_orchestration import EXECUTION_MODEL_STAGE_PIPELINE_V1, default_orchestration_state
 from services.project_repository import ProjectRepository
 
 
@@ -205,6 +206,92 @@ def test_runner_discards_cancel_flag_when_provider_raises():
     with pytest.raises(RuntimeError, match="provider failed"):
         execution_lifecycle.run_attempt("p1", "t1", "attempt-1", flag, ports=ports)
     assert registry.get("attempt-1") is None
+
+
+def test_marked_project_terminal_attempt_reconciles_instead_of_scheduling_legacy_continue():
+    project = {
+        "id": "p1",
+        "title": "Project",
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            **default_orchestration_state(),
+            "state": "running",
+            "currentStage": 1,
+            "currentRunId": "run-1",
+        },
+        "projectExecutionEnabled": True,
+        "workspacePath": "/workspace",
+        "tasks": [{
+            "id": "t1",
+            "title": "Task",
+            "executionStage": 1,
+            "stageRunId": "run-1",
+            "executionState": "executing",
+            "activeAttemptId": "attempt-1",
+            "attempts": [{
+                "id": "attempt-1",
+                "status": "executing",
+                "stageRunId": "run-1",
+                "workspacePath": "/workspace",
+                "executor": {"id": "executor", "providerKind": "test"},
+                "skipReview": True,
+                "requiresUserAcceptance": False,
+                "autoReviewAfterExecution": False,
+                "projectFlow": True,
+            }],
+            "checklist": [{"id": "done", "text": "Done", "done": True}],
+        }],
+    }
+    scheduled = []
+    reconciled = []
+
+    def find(project_id, task_id):
+        task = project["tasks"][0]
+        return {"projects": [project]}, project, task
+
+    ports = type("Ports", (), {
+        "repository": type("Repo", (), {"get": staticmethod(lambda project_id: copy.deepcopy(project))})(),
+        "build_prompt": staticmethod(lambda *args: "prompt"),
+        "provider": staticmethod(lambda *args, **kwargs: {"ok": True, "reply": "done", "status": "completed"}),
+        "git_snapshot": staticmethod(lambda path: {"files": [], "dirty": False}),
+        "find": staticmethod(find),
+        "find_attempt": staticmethod(lambda task, attempt_id: next(item for item in task["attempts"] if item["id"] == attempt_id)),
+        "apply_checklist_updates": staticmethod(lambda task, result: False),
+        "apply_meeting_discussion_points": staticmethod(lambda task, result: False),
+        "redact": staticmethod(lambda value: str(value or "")),
+        "now": staticmethod(lambda: "now"),
+        "acceptance_checklist": staticmethod(lambda task: task.get("checklist") or []),
+        "test_evidence": staticmethod(lambda result: []),
+        "transition": staticmethod(lambda project, task, state, actor, reason, attempt_id: task.update({"executionState": state})),
+        "notify_intervention": staticmethod(lambda *args, **kwargs: None),
+        "mark_meeting_actions_completed": staticmethod(lambda *args, **kwargs: None),
+        "move_task_to_column": staticmethod(lambda *args, **kwargs: None),
+        "backlog_column": staticmethod(lambda project: {"id": "backlog"}),
+        "commit_projects": staticmethod(lambda *args, **kwargs: True),
+        "cancel_registry": execution_lifecycle.CancelRegistry(flags={"attempt-1": threading.Event()}),
+        "has_pending_meeting_actions": staticmethod(lambda task: False),
+        "launcher": staticmethod(lambda callback: callback()),
+        "start_task": staticmethod(lambda *args, **kwargs: {"ok": True}),
+        "attempt_requires_acceptance": staticmethod(lambda task, attempt: False),
+        "stage_acceptance": staticmethod(lambda *args, **kwargs: ""),
+        "deliver_notification": staticmethod(lambda *args, **kwargs: None),
+        "mark_done": staticmethod(lambda project, task, actor, reason, attempt_id: task.update({"executionState": "done", "completedAt": "now"}) or {"ok": True}),
+        "continue_incomplete_checklist": staticmethod(lambda *args, **kwargs: {"continued": False}),
+        "schedule_continue": staticmethod(lambda project_id, reason: scheduled.append((project_id, reason))),
+        "transient_failure_reason": staticmethod(lambda result: None),
+        "schedule_transient_retry": staticmethod(lambda *args, **kwargs: False),
+        "start_review": staticmethod(lambda *args, **kwargs: None),
+        "finalize_cancel": staticmethod(lambda *args, **kwargs: False),
+        "is_stage_pipeline": staticmethod(lambda project: True),
+        "reconcile_terminal": staticmethod(lambda project_id, task_id, attempt_id, reason: reconciled.append((project_id, task_id, attempt_id, reason))),
+    })()
+
+    execution_lifecycle.run_attempt("p1", "t1", "attempt-1", threading.Event(), ports=ports)
+
+    assert scheduled == []
+    assert reconciled == [("p1", "t1", "attempt-1", "review_skipped")]
+    assert project["tasks"][0]["executionState"] == "done"
+    assert project.get("projectExecutionFlowActive") is None
 
 
 def test_lifecycle_module_has_no_server_or_http_dependency():

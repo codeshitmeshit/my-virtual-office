@@ -79,7 +79,7 @@ The change MUST preserve route stability, authorization, project/task identity, 
 
 #### Scenario: Project state is persisted
 - **WHEN** a marked project is created or its orchestration state changes
-- **THEN** its JSONL representation SHALL preserve the orchestration marker, valid task stages, current execution stage, pause state, and durable attempt history required for restart recovery
+- **THEN** its canonical Markdown project representation SHALL preserve the orchestration marker, valid task stages, current execution stage, pause state, and durable attempt history required for restart recovery
 - **AND** it SHALL omit obsolete properties whose only purpose was selecting or maintaining free or single-task progression
 
 ## ADDED Requirements

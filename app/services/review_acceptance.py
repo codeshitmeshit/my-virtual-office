@@ -167,6 +167,8 @@ class AcceptancePorts:
     runner: Callable[[str, str, str, Any], Any]
     schedule_continue: Callable[[str, str], Any]
     notify_intervention: Callable[..., Any]
+    is_stage_pipeline: Callable[[Project], bool] = lambda project: False
+    reconcile_terminal: Callable[[str, str, str, str], Any] = lambda project_id, task_id, attempt_id, reason: None
 
 
 @dataclass(frozen=True)
@@ -193,6 +195,8 @@ class ReviewRunnerPorts:
     new_id: Callable[[], str]
     launch_rework: Callable[[str, str, str], Any]
     discard_review: Callable[[str], Any]
+    is_stage_pipeline: Callable[[Project], bool] = lambda project: False
+    reconcile_terminal: Callable[[str, str, str, str], Any] = lambda project_id, task_id, attempt_id, reason: None
 
 
 def run_review(
@@ -207,6 +211,7 @@ def run_review(
     notification_key: str | None = None
     rework_launch: str | None = None
     continue_reason: str | None = None
+    reconcile_reason: str | None = None
     interventions: list[tuple[Any, str | None, str, str]] = []
     try:
         _data, project, task = ports.find(project_id, task_id)
@@ -240,6 +245,7 @@ def run_review(
         if not attempt or task.get("activeAttemptId") != review_id:
             return
         commit_baseline = copy.deepcopy(project)
+        stage_pipeline = ports.is_stage_pipeline(project)
         review = ports.normalize(result, reviewer, attempt_id, review_id)
         attempt["review"] = review
         attempt["reviewedAt"] = review["reviewedAt"]
@@ -252,8 +258,9 @@ def run_review(
             task.update({"blockedReason": None, "lastError": None})
             attempt["status"] = "review_passed"
             if ports.attempt_requires_acceptance(task, attempt):
-                project["projectExecutionFlowActive"] = False
-                project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
+                if not stage_pipeline:
+                    project["projectExecutionFlowActive"] = False
+                    project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                 ports.transition(
                     project, task, "awaiting_user_acceptance", reviewer.get("id") or "reviewer",
                     "Reviewer passed; waiting for explicit user acceptance.", attempt_id,
@@ -262,6 +269,8 @@ def run_review(
                     project, task, attempt_id,
                     "Reviewer passed; waiting for explicit user acceptance.",
                 )
+                if stage_pipeline:
+                    reconcile_reason = "awaiting_user_acceptance"
             else:
                 done_result = ports.mark_done(
                     project, task, reviewer.get("id") or "reviewer",
@@ -279,9 +288,12 @@ def run_review(
                             ports.transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                         interventions.append((task["blockedReason"], attempt_id, "blocked", "warning"))
                 elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
-                    project["projectExecutionFlowActive"] = True
-                    project["projectExecutionFlowStopReason"] = None
-                    continue_reason = "review_passed"
+                    if stage_pipeline:
+                        reconcile_reason = "review_passed"
+                    else:
+                        project["projectExecutionFlowActive"] = True
+                        project["projectExecutionFlowStopReason"] = None
+                        continue_reason = "review_passed"
         elif review["status"] == "needs_more_work":
             attempt["status"] = "review_needs_more_work"
             prior_reworks = int(task.get("reworkCount") or 0)
@@ -358,6 +370,8 @@ def run_review(
         _deliver_review_interventions(project_id, task_id, interventions, ports.deliver_intervention)
         if notification_key:
             ports.deliver_notification(project_id, task_id, attempt_id, notification_key)
+        if reconcile_reason:
+            ports.reconcile_terminal(project_id, task_id, attempt_id, reconcile_reason)
         if continue_reason:
             ports.schedule_continue(project_id, continue_reason)
         if rework_launch:
@@ -410,6 +424,7 @@ def acceptance(
         return {"error": "Project or task not found", "_status": 404}
     if not ports.enabled(snapshot):
         return {"error": "Project Execution is not enabled for this project", "_status": 409}
+    stage_pipeline = ports.is_stage_pipeline(snapshot)
     review_snapshot = task_snapshot.get("reviewResult") if isinstance(task_snapshot.get("reviewResult"), dict) else {}
     review_attempt_id = str(review_snapshot.get("attemptId") or "")
     if task_snapshot.get("executionState") != "awaiting_user_acceptance" or review_snapshot.get("status") not in {"pass", "skipped"}:
@@ -494,18 +509,28 @@ def acceptance(
                 "at": ports.now(), "by": context.actor, "source": context.source,
             })
             task["acceptanceHistory"] = task["acceptanceHistory"][-50:]
-            should_continue = project.get("projectExecutionStartMode") == "continuous"
-            project.update({
+            should_continue = (not stage_pipeline) and project.get("projectExecutionStartMode") == "continuous"
+            project_update = {
                 "workflowActive": False, "workflowPhase": "done",
                 "activeTaskId": None, "activeAgent": None, "updatedAt": ports.now(),
-                "projectExecutionFlowActive": should_continue,
-                "projectExecutionFlowStopReason": None if should_continue else "user_acceptance_completed",
-            })
+            }
+            if not stage_pipeline:
+                project_update.update({
+                    "projectExecutionFlowActive": should_continue,
+                    "projectExecutionFlowStopReason": None if should_continue else "user_acceptance_completed",
+                })
+            project.update(project_update)
             ports.log_activity(
                 project, "project_execution_user_accepted", context.actor,
                 f"User accepted Project Execution task '{task.get('title', '')}'", task_id,
             )
-            outcome.update({"ok": True, "status": "done", "task": copy.deepcopy(task), "flowContinues": should_continue})
+            outcome.update({
+                "ok": True,
+                "status": "done",
+                "task": copy.deepcopy(task),
+                "flowContinues": should_continue,
+                "stageReconcile": stage_pipeline,
+            })
             return
         safe_feedback = ports.redact(feedback)
         task.setdefault("acceptanceHistory", []).append({
@@ -562,7 +587,9 @@ def acceptance(
         return {"error": "Project or task not found", "_status": 404}
     except CommandError as exc:
         return _error(exc)
-    if action == "accept" and outcome.get("flowContinues"):
+    if action == "accept" and outcome.get("stageReconcile"):
+        ports.reconcile_terminal(project_id, task_id, attempt_id, "user_accepted")
+    elif action == "accept" and outcome.get("flowContinues"):
         ports.schedule_continue(project_id, "user_accepted")
     elif action == "reject_and_rework":
         cancel_flag = ports.create_cancel_flag(rework_attempt_id)

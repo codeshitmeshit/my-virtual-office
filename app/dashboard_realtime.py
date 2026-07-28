@@ -155,12 +155,16 @@ def _project_summary_projection(projects: list[Any]) -> list[JsonDict]:
             "taskCount": int(project.get("taskCount") or 0),
             "taskDone": int(project.get("taskDone") or 0),
             "projectExecutionActive": bool(project.get("projectExecutionActive")),
-            "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
             "projectExecutionPhase": project.get("projectExecutionPhase") or "",
-            "activeTaskId": project.get("activeTaskId") or "",
-            "activeTaskTitle": project.get("activeTaskTitle") or "",
-            "activeAgent": project.get("activeAgent") or "",
+            "activeTaskIds": [
+                str(item)
+                for item in (project.get("activeTaskIds") if isinstance(project.get("activeTaskIds"), list) else [])
+                if str(item or "")
+            ],
             "activeTaskCount": int(project.get("activeTaskCount") or 0),
+            "currentStage": project.get("currentStage"),
+            "orchestrationState": project.get("orchestrationState") or "",
+            "pauseReason": project.get("pauseReason"),
             "scheduledCronAlertCount": int(project.get("scheduledCronAlertCount") or 0),
             "scheduledCronAlerts": project.get("scheduledCronAlerts") if isinstance(project.get("scheduledCronAlerts"), list) else [],
         })

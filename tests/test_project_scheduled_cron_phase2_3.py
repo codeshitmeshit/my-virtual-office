@@ -109,6 +109,13 @@ def create_project_with_task(project_execution_enabled=True):
     return project, task
 
 
+def unmark_project_for_legacy_task_cron(project_id):
+    data, stored = server._project_find(project_id)
+    stored.pop("executionModel", None)
+    stored.pop("orchestration", None)
+    server._save_projects(data)
+
+
 def test_global_project_cron_overview_enriches_project_context():
     with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as status_dir:
         old = with_store(status_dir)
@@ -202,6 +209,7 @@ def test_dispatch_project_task_uses_selected_task():
         server._handle_project_execution_start = lambda project_id, task_id, body=None: calls.append((project_id, task_id, body or {})) or {"ok": True, "status": "started", "taskId": task_id}
         try:
             project, task = create_project_with_task(project_execution_enabled=True)
+            unmark_project_for_legacy_task_cron(project["id"])
             created = server._handle_project_scheduled_cron_create(project["id"], {
                 "name": "Dispatch selected task",
                 "schedule": {"kind": "every", "everyMs": 120000},
@@ -216,6 +224,88 @@ def test_dispatch_project_task_uses_selected_task():
             restore_store(old)
 
 
+def test_marked_project_workflow_cron_starts_pipeline_without_legacy_mode():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        fake_gateway = FakeCronGateway()
+        calls = []
+        server._gateway_rpc_call = fake_gateway
+        server._handle_project_execution_project_start = lambda project_id, body=None: calls.append((project_id, body or {})) or {
+            "ok": True, "status": "stage_started", "runId": "run-1",
+        }
+        try:
+            project, _ = create_project_with_task(project_execution_enabled=True)
+            _, stored = server._project_find(project["id"])
+            assert stored["executionModel"] == "stage_pipeline_v1"
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "name": "Dispatch marked pipeline",
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectWorkflow",
+                "enabled": True,
+            })
+            dispatched = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
+
+            assert dispatched["status"] == "started"
+            assert calls == [(
+                project["id"],
+                {"by": "project-cron", "source": "manual", "skipReviewConfirmed": True},
+            )]
+        finally:
+            restore_store(old)
+
+
+def test_marked_project_task_cron_skips_later_stage_without_task_start():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        fake_gateway = FakeCronGateway()
+        task_calls = []
+        server._gateway_rpc_call = fake_gateway
+        server._handle_project_execution_start = lambda *args: task_calls.append(args) or {
+            "ok": False, "_status": 500, "code": "task_start_should_not_be_called",
+        }
+        try:
+            project, first_task = create_project_with_task(project_execution_enabled=True)
+            second_task = server._handle_task_create(project["id"], {
+                "title": "Later stage cron target",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+            })["task"]
+            data, stored = server._project_find(project["id"])
+            assert first_task["id"] != second_task["id"]
+            stored["orchestration"].update({"state": "running", "currentStage": 1, "currentRunId": "run-1"})
+            stage_one = next(task for task in stored["tasks"] if task["id"] == first_task["id"])
+            stage_two = next(task for task in stored["tasks"] if task["id"] == second_task["id"])
+            assert stage_one["executionStage"] == 1
+            assert stage_two["executionStage"] == 2
+            stage_one.update({
+                "stageRunId": "run-1",
+                "activeAttemptId": "attempt-1",
+                "executionState": "executing",
+                "attempts": [{"id": "attempt-1", "status": "executing", "stageRunId": "run-1"}],
+            })
+            server._save_projects(data)
+            created = server._handle_project_scheduled_cron_create(project["id"], {
+                "name": "Later stage task cron",
+                "schedule": {"kind": "every", "everyMs": 120000},
+                "targetType": "projectTask",
+                "taskId": second_task["id"],
+                "enabled": True,
+            })
+
+            dispatched = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
+
+            assert dispatched["status"] == "skipped"
+            assert dispatched["reason"] == "marked_task_not_current_stage"
+            assert dispatched["taskId"] == second_task["id"]
+            assert task_calls == []
+            binding = server._load_project_cron_bindings()["bindings"][created["id"]]
+            assert binding["lastStatus"] == "skipped"
+            _, saved = server._project_find(project["id"])
+            assert saved["scheduledCronHistory"][-1]["reason"] == "marked_task_not_current_stage"
+        finally:
+            restore_store(old)
+
+
 def test_project_task_cron_reopens_completed_task_for_repeat_execution():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_store(status_dir)
@@ -225,6 +315,7 @@ def test_project_task_cron_reopens_completed_task_for_repeat_execution():
         server._handle_project_execution_start = lambda project_id, task_id, body=None: calls.append((project_id, task_id, body or {})) or {"ok": True, "status": "started", "taskId": task_id}
         try:
             project, task = create_project_with_task(project_execution_enabled=True)
+            unmark_project_for_legacy_task_cron(project["id"])
             done_col = next(c for c in project["columns"] if c["title"].lower() == "done")
             data, stored = server._project_find(project["id"])
             stored_task = next(t for t in stored["tasks"] if t["id"] == task["id"])
@@ -266,6 +357,7 @@ def test_completed_task_cron_skips_when_repeat_not_enabled():
         server._handle_project_execution_start = lambda project_id, task_id, body=None: calls.append((project_id, task_id, body or {})) or {"ok": True, "status": "started", "taskId": task_id}
         try:
             project, task = create_project_with_task(project_execution_enabled=True)
+            unmark_project_for_legacy_task_cron(project["id"])
             done_col = next(c for c in project["columns"] if c["title"].lower() == "done")
             data, stored = server._project_find(project["id"])
             stored_task = next(t for t in stored["tasks"] if t["id"] == task["id"])

@@ -398,8 +398,12 @@
   }
 
   // ─── Periodic URL check ───────────────────────────────────────────────────
+  let _browserUrlPollInFlight = false;
   async function pollCurrentUrl() {
+    if (typeof document.hidden === 'boolean' && document.hidden) return;
     if (!_browserCdpAvailable) return;
+    if (_browserUrlPollInFlight) return;
+    _browserUrlPollInFlight = true;
     try {
       const res = await fetch('/browser-tabs');
       const data = await res.json();
@@ -424,13 +428,18 @@
       }
     } catch (e) {
       // Silent
+    } finally {
+      _browserUrlPollInFlight = false;
     }
   }
 
   // Always poll (not just when open) so auto-open can trigger
-  setInterval(() => {
+  setTimeout(() => {
     pollCurrentUrl();
-  }, 3000);
+    setInterval(() => {
+      pollCurrentUrl();
+    }, 3000);
+  }, 2200);
 
   // ─── Poll agent controller identity ─────────────────────────────────────
   // Agent names loaded dynamically — see _loadAgentNames()
@@ -441,9 +450,13 @@
   let currentController = null;
   let lastControllerTs = null;
   let controllerInitialized = false;
+  let _browserControllerPollInFlight = false;
 
   async function pollBrowserController() {
+    if (typeof document.hidden === 'boolean' && document.hidden) return;
     if (userHasControl) return; // Don't override when user has control
+    if (_browserControllerPollInFlight) return;
+    _browserControllerPollInFlight = true;
     try {
       const res = await fetch('/browser-controller');
       const data = await res.json();
@@ -474,9 +487,13 @@
         controllerInitialized = true;
       }
     } catch (e) { /* silent */ }
+    finally { _browserControllerPollInFlight = false; }
   }
 
-  setInterval(pollBrowserController, 3000);
+  setTimeout(() => {
+    pollBrowserController();
+    setInterval(pollBrowserController, 3000);
+  }, 3200);
 
   // ─── Init: load config + agent names ───────────────────────────────────────
   async function _initBrowserPanel() {
@@ -511,7 +528,7 @@
     } catch (e) { /* use fallback */ }
   }
 
-  _initBrowserPanel();
+  setTimeout(_initBrowserPanel, 1400);
 
   // ─── Expose globally ──────────────────────────────────────────────────────
   window.openBrowserPanel  = openBrowserPanel;

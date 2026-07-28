@@ -23,6 +23,10 @@ from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
 )
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+)
 from services.project_authoring_store import (
     GRANTS_KEY,
     IDEMPOTENCY_KEY,
@@ -66,6 +70,31 @@ Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分�
 
 请确认是否按以上方案创建真实项目。"""
 SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
+STAGE_SUMMARY_TEXT = """我准备创建这个 VO 项目，请确认：
+
+项目名称：Direct project
+项目类型：one_time
+项目目标：Created after conversation confirmation
+维护模式：strict_confirmation
+Project Execution：仅跟踪（projectExecutionEnabled=false）
+默认执行 Agent：未指定（使用任务级执行人 builder）
+Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
+创建后状态：确认后会创建真实项目并保持未启动；只有用户显式要求执行才会开始。
+阶段编排：每个任务必须填写正整数 executionStage；同一 stage 并行，stage 必须从 1 连续递增且不能断档。
+
+任务清单：
+
+| # | 阶段 | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | Implement | Backlog | Created after conversation confirmation | Implemented result | Build the confirmed change | 无 | 完成任务 | owner | builder | 不指定 |
+
+模板/复用配置：无
+周期配置：无
+周期执行模式：不适用
+需要你确认的点：无
+
+请确认是否按以上方案创建真实项目。"""
+STAGE_SUMMARY_DIGEST = hashlib.sha256(STAGE_SUMMARY_TEXT.encode("utf-8")).hexdigest()
 
 
 def _project(title="Direct project"):
@@ -80,6 +109,7 @@ def _project(title="Direct project"):
             "title": "Implement",
             "description": "输入：Created after conversation confirmation\n\n输出：Implemented result\n\n执行说明：Build the confirmed change\n\n风险/讨论：无\n\n验收标准：完成任务",
             "columnId": "backlog",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -149,8 +179,10 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
         "confirmationSummaryDigest": SUMMARY_DIGEST,
         "surface": "agent_http",
     }
-    assert project["workflowActive"] is False
-    assert project["projectExecutionFlowActive"] is False
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
+    assert "workflowActive" not in project
+    assert "projectExecutionFlowActive" not in project
     assert [column["title"] for column in project["columns"]] == ["Backlog", "In Progress", "Review", "Done"]
     assert project["tasks"][0]["executionState"] == "backlog"
     assert project["tasks"][0]["columnId"] == "backlog"
@@ -247,8 +279,10 @@ def test_direct_enabled_creation_requires_prepared_workspace_without_downgrade(t
     assert created["project"]["workspaceManagedBy"] == "system"
     assert created["project"]["workspaceCreatedAt"] == "2026-07-18T12:00:00+00:00"
     assert "createdInAttempt" not in created["project"]
-    assert created["project"]["workflowActive"] is False
-    assert created["project"]["projectExecutionFlowActive"] is False
+    assert created["project"]["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert created["project"]["orchestration"] == default_orchestration_state()
+    assert "workflowActive" not in created["project"]
+    assert "projectExecutionFlowActive" not in created["project"]
 
     explicit = _project()
     explicit["projectExecutionEnabled"] = True
@@ -340,6 +374,25 @@ def test_direct_creation_requires_confirmation_and_sha256_summary(tmp_path):
         })
     assert marker_error.value.code == "invalid_confirmation_summary_format"
     assert markdown.load_all()["projects"] == []
+
+
+def test_direct_creation_accepts_stage_orchestration_confirmation_template(tmp_path):
+    markdown, service = _service(tmp_path)
+
+    created = _create(service, confirmation={
+        "confirmed": True,
+        "summaryDigest": STAGE_SUMMARY_DIGEST,
+        "summaryText": STAGE_SUMMARY_TEXT,
+    })
+
+    project = created["project"]
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
+    assert [task["executionStage"] for task in project["tasks"]] == [1]
+    assert "projectExecutionStartMode" not in project
+    assert "executionPolicy" not in project
+    assert "executionOrder" not in project["tasks"][0]
+    assert len(markdown.load_all()["projects"]) == 1
 
 
 def test_direct_creation_rejects_idempotency_key_reuse_for_changed_content(tmp_path):

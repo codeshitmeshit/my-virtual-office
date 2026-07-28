@@ -246,6 +246,8 @@ def _agent_skill_summaries(agent_key, agent):
 
 
 def _agent_project_tasks(agent):
+    from services.project_orchestration import is_marked_project, project_projection
+
     aliases = {
         str(agent.get("id") or ""),
         str(agent.get("statusKey") or ""),
@@ -265,14 +267,11 @@ def _agent_project_tasks(agent):
             blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
             attempts = task.get("attempts") if isinstance(task.get("attempts"), list) else []
             active_attempt = next((a for a in attempts if isinstance(a, dict) and a.get("id") == task.get("activeAttemptId")), None)
-            items.append({
+            item = {
                 "projectId": project.get("id", ""),
                 "projectTitle": project.get("title", ""),
                 "projectStatus": project.get("status", "active"),
                 "projectExecutionEnabled": bool(project.get("projectExecutionEnabled")),
-                "projectWorkflowPhase": project.get("workflowPhase") or "",
-                "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
-                "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason") or "",
                 "taskId": task.get("id", ""),
                 "id": task.get("id", ""),
                 "title": task.get("title", ""),
@@ -305,7 +304,24 @@ def _agent_project_tasks(agent):
                 "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled") is True,
                 "updatedAt": task.get("updatedAt") or project.get("updatedAt", ""),
                 "readOnly": True,
-            })
+            }
+            if is_marked_project(project):
+                projection = project_projection(project)
+                item.update({
+                    "executionModel": projection.get("executionModel") or "",
+                    "projectWorkflowPhase": projection.get("orchestrationState") or "",
+                    "orchestrationState": projection.get("orchestrationState") or "",
+                    "currentStage": projection.get("currentStage"),
+                    "pauseReason": projection.get("pauseReason") or "",
+                    "activeTaskIds": projection.get("activeTaskIds") or [],
+                })
+            else:
+                item.update({
+                    "projectWorkflowPhase": project.get("workflowPhase") or "",
+                    "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
+                    "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason") or "",
+                })
+            items.append(item)
     items.sort(key=lambda x: x.get("updatedAt") or "", reverse=True)
     return items[:25]
 

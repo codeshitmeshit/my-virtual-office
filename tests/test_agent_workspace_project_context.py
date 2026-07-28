@@ -17,6 +17,7 @@ os.environ["VO_STATUS_DIR"] = IMPORT_STATUS_DIR
 
 import server
 from project_store import MarkdownProjectStore
+from services.project_orchestration import EXECUTION_MODEL_STAGE_PIPELINE_V1, default_orchestration_state
 
 
 AGENTS = [
@@ -102,6 +103,62 @@ def test_agent_workspace_project_context_is_read_only_snapshot():
             restore_store(old)
 
 
+def test_agent_workspace_marked_project_context_omits_legacy_flow_fields():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = server._handle_project_create({
+                "title": "Marked Workspace Context",
+                "projectExecutionEnabled": True,
+                "workspacePath": status_dir,
+                "defaultExecutorAgentId": "executor",
+                "defaultReviewerAgentId": "reviewer",
+            })["project"]
+            task = server._handle_task_create(project["id"], {
+                "title": "Parallel task",
+                "columnId": project["columns"][0]["id"],
+                "assignee": "executor",
+                "executorAgentId": "executor",
+                "reviewerAgentId": "reviewer",
+            })["task"]
+
+            data = server._load_projects()
+            stored = next(item for item in data["projects"] if item["id"] == project["id"])
+            stored["executionModel"] = EXECUTION_MODEL_STAGE_PIPELINE_V1
+            stored["orchestration"] = default_orchestration_state()
+            stored["orchestration"].update({
+                "state": "running",
+                "currentStage": 1,
+                "currentRunId": "run-1",
+                "pauseReason": "operator_pause",
+            })
+            stored["workflowPhase"] = "legacy_phase"
+            stored["projectExecutionFlowActive"] = True
+            stored["projectExecutionFlowStopReason"] = "legacy_stop_reason"
+            stored_task = next(item for item in stored["tasks"] if item["id"] == task["id"])
+            stored_task.update({
+                "executionStage": 1,
+                "executionState": "executing",
+                "activeAttemptId": "attempt-1",
+                "attempts": [{"id": "attempt-1", "status": "executing"}],
+            })
+            server._save_projects(data)
+
+            payload = server._get_agent_workspace_payload("executor")
+            item = payload["projectTasks"][0]
+            assert item["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+            assert item["projectWorkflowPhase"] == "running"
+            assert item["orchestrationState"] == "running"
+            assert item["currentStage"] == 1
+            assert item["pauseReason"] == "operator_pause"
+            assert item["activeTaskIds"] == [task["id"]]
+            assert "projectExecutionFlowActive" not in item
+            assert "projectExecutionFlowStopReason" not in item
+        finally:
+            restore_store(old)
+
+
 if __name__ == "__main__":
     test_agent_workspace_project_context_is_read_only_snapshot()
+    test_agent_workspace_marked_project_context_omits_legacy_flow_fields()
     print("test_agent_workspace_project_context.py passed")

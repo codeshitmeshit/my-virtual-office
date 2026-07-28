@@ -104,12 +104,16 @@ class _Connection:
 def _project(title):
     return {
         "title": title,
+        "description": "HTTP contract project",
         "projectType": "one_time",
         "agentMaintenanceMode": "strict_confirmation",
+        "projectExecutionEnabled": True,
         "columns": [{"id": "backlog", "title": "Backlog"}],
         "tasks": [{
             "title": "Implement",
+            "description": "输入：HTTP contract project\n\n输出：Implemented result\n\n执行说明：Build the confirmed change\n\n风险/讨论：无\n\n验收标准：完成任务",
             "columnId": "backlog",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -228,8 +232,12 @@ def test_direct_create_is_atomic_idempotent_unstarted_and_origin_safe(authoring)
     assert root[REQUESTS_KEY] == {}
     assert len(root["projects"]) == 1
     assert root["projects"][0]["tasks"][0]["executionState"] == "backlog"
-    assert root["projects"][0]["workflowActive"] is False
-    assert root["projects"][0]["projectExecutionFlowActive"] is False
+    assert root["projects"][0]["executionModel"] == "stage_pipeline_v1"
+    assert root["projects"][0]["orchestration"]["state"] == "draft"
+    assert root["projects"][0]["orchestration"]["currentRunId"] is None
+    assert root["projects"][0]["tasks"][0]["executionStage"] == 1
+    assert "workflowActive" not in root["projects"][0]
+    assert "projectExecutionFlowActive" not in root["projects"][0]
 
     denied_status, denied = _create(
         _project("Browser attempt"), "author:browser", origin="http://localhost:3000",

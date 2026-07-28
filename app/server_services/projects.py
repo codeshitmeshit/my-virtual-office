@@ -56,6 +56,9 @@ def _wrap_exports():
         globals()[name] = wrapper
 
 
+if "_handle_project_orchestration_update" not in __all__:
+    __all__.append("_handle_project_orchestration_update")
+
 _wrap_exports()
 _hydrate()
 
@@ -992,10 +995,10 @@ def _handle_projects_list(query_string=""):
 
 def _handle_project_get(project_id):
     """GET /api/projects/{id} — return full project."""
-    data = _load_projects()
-    for p in data["projects"]:
-        if p["id"] == project_id:
-            return {"ok": True, "project": p}
+    project = PROJECT_STORE.get_project(project_id)
+    if project is not None:
+        repaired = _project_execution_repair_acceptance_state({"projects": [project], "templates": []})
+        return {"ok": True, "project": (repaired.get("projects") or [project])[0]}
     return {"error": "Project not found", "_status": 404}
 
 def _handle_projects_templates():
@@ -2062,6 +2065,24 @@ def _project_execution_mark_done(project, task, actor, reason, attempt_id=None, 
     _project_execution_transition(project, task, "done", actor, reason, attempt_id)
     task["completedAt"] = _proj_now()
     task["columnId"] = done_col.get("id")
+    try:
+        from services.project_task_final_result import ensure_task_final_result
+
+        ensure_task_final_result(
+            project,
+            task,
+            attempt=_project_execution_attempt(task, attempt_id) if attempt_id else None,
+            evidence=task.get("evidence") if isinstance(task.get("evidence"), dict) else {},
+            status="available",
+            now=task.get("completedAt"),
+        )
+    except Exception as exc:
+        task.setdefault("comments", []).append({
+            "id": _proj_uuid(),
+            "author": "project-execution",
+            "text": f"Final result artifact generation failed: {_project_execution_redact(exc)}",
+            "createdAt": _proj_now(),
+        })
     if not was_completed:
         _archive_trigger_task_completed(project.get("id"), task)
     return {"ok": True}
@@ -3325,6 +3346,17 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
     checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
     archive_context = _archive_context_prompt_block(project, task)
+    try:
+        from services.project_task_final_result import prior_stage_result_prompt_block, task_final_result_prompt_instructions
+
+        prior_stage_context = prior_stage_result_prompt_block(project, task)
+        final_result_instructions = task_final_result_prompt_instructions()
+    except Exception:
+        prior_stage_context = ""
+        final_result_instructions = (
+            "TASK FINAL RESULT REQUIREMENT:\n"
+            "- Include a concise final conclusion, changed files/artifacts, tests, risks, and notes for later stages.\n"
+        )
     meeting_action_block = ""
     if attempt.get("meetingActionPhase"):
         pending_actions = [
@@ -3357,6 +3389,7 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{projectId}/tasks/{taskId}.\n"
         "2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
         "3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.\n"
+        f"{final_result_instructions}"
         "FINAL RESPONSE FORMAT (strict):\n"
         "- First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.\n"
         "- Then output exactly one fenced ```json block containing a single object with these optional fields: checklistUpdates, meetingDiscussionPoints, tests.\n"
@@ -3367,6 +3400,7 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
         f"PROJECT_ID: {project.get('id', '')}\nTASK_ID: {task.get('id', '')}\nTASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
         f"REWORK FEEDBACK: {rework_feedback}\nCHECKLIST:\n{checklist_text}\n"
+        f"{prior_stage_context}"
         f"{meeting_action_block}"
         f"{archive_context}\n"
     )
@@ -3759,10 +3793,19 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
         _handle_project_execution_review_start(project_id, task_id, {"attemptId": attempt_id})
 
 def _handle_project_execution_start(project_id, task_id, body):
+    from services.project_orchestration import is_marked_project
+
     body = body or {}
     data, project, task = _project_execution_find(project_id, task_id)
     if not project or not task:
         return {"error": "Project or task not found", "_status": 404}
+    if is_marked_project(project):
+        return {
+            "ok": False,
+            "code": "marked_project_task_start_forbidden",
+            "error": "Marked stage-pipeline projects must be started at the project level",
+            "_status": 409,
+        }
     if not _project_execution_enabled(project):
         return {"error": "Project Execution is not enabled for this project", "_status": 409}
     workspace = _project_execution_validate_workspace(project.get("workspacePath"))
@@ -3834,10 +3877,31 @@ def _handle_project_execution_start(project_id, task_id, body):
     return {"ok": True, "status": "started", "taskId": task_id, "attemptId": attempt_id, "startMode": start_mode, "requiresUserAcceptance": _project_execution_requires_user_acceptance(task), "reopenedCompletedTask": reopened_completed_task}
 
 def _handle_project_execution_project_start(project_id, body=None):
+    from services.project_orchestration import is_marked_project
+
     body = body or {}
     data, project, _ = _project_execution_find(project_id)
     if not project:
         return {"error": "Project not found", "_status": 404}
+    if is_marked_project(project):
+        server_handler = _server_callable("_handle_marked_project_execution_project_start")
+        if callable(server_handler) and server_handler is not _handle_project_execution_project_start:
+            return server_handler(project_id, body)
+        legacy_keys = [key for key in ("mode", "startMode", "restartPipeline") if key in body]
+        if legacy_keys:
+            return {
+                "ok": False,
+                "code": "marked_project_legacy_start_payload_forbidden",
+                "error": "Marked stage-pipeline projects do not accept legacy start mode or restart payload fields",
+                "fields": legacy_keys,
+                "_status": 400,
+            }
+        return {
+            "ok": False,
+            "code": "marked_project_stage_dispatch_unavailable",
+            "error": "Marked stage-pipeline project start requires the stage dispatcher service",
+            "_status": 503,
+        }
     if not _project_execution_enabled(project):
         return {"error": "Project Execution is not enabled for this project", "_status": 409}
     active = _project_execution_active_task(project)

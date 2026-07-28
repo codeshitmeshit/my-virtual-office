@@ -22,12 +22,20 @@ from project_store import MarkdownProjectStore
 from services import project_commands
 from services.project_authoring import ProjectAuthoringService
 from services.project_authoring_store import ProjectAuthoringRootStore
+from services.project_direct_materialization import materialize_direct_project
 from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
     PERMITTED_PROJECT_OVERLAY_FIELDS,
     PROJECT_CREATION_ACTIVITY_TYPES,
 )
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+    default_skip_state,
+)
+from services.project_recurrence_materialization import materialize_recurrence_occurrence_project
+from services.project_template_materialization import materialize_versioned_template_instance
 from services.project_repository import ProjectRepository
 
 
@@ -67,26 +75,8 @@ SUMMARY_DIGEST = hashlib.sha256(SUMMARY_TEXT.encode("utf-8")).hexdigest()
 CHECKLIST_ID = "checklist-" + hashlib.sha256("complete it".encode("utf-8")).hexdigest()[:12]
 
 
-MANUAL_PROJECT_KEYS = (
-    "activeAgent", "activeTaskId", "activity", "archiveMaintenance", "archiveMaintenanceEnabled",
-    "branch", "columns",
-    "createdAt", "createdBy", "defaultExecutorAgentId", "defaultReviewerAgentId", "description",
-    "dueDate", "executionDirtyConfirmations", "executionPolicy", "highPriorityAiMeetingAutoApprove",
-    "id", "longTermProject", "priority", "projectExecutionEnabled", "projectExecutionFlowActive",
-    "projectExecutionFlowStopReason", "projectExecutionStartMode", "scheduledCronPaused", "status",
-    "projectType", "tags", "tasks", "template", "title", "updatedAt", "workflowActive",
-    "workflowPhase", "workspaceCreatedAt", "workspaceKind", "workspaceManagedBy", "workspacePath",
-    "workspaceStatus",
-)
-MANUAL_TASK_KEYS = (
-    "activeAttemptId", "allowReviewerlessExecution", "assignee", "assigneeBranch", "attachments",
-    "attempts", "blockedReason", "checklist", "columnId", "comments", "completedAt", "createdAt",
-    "description", "dueDate", "evidence", "executionOrder", "executionState", "executorActor", "executorAgentId", "id", "lastError",
-    "meetingActionItems", "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords", "order",
-    "priority", "requiresUserAcceptance", "responsibleActor", "reviewerActor", "reviewerAgentId",
-    "reviewerRecommendation", "scheduledRepeatEnabled", "source", "tags",
-    "title", "updatedAt",
-)
+MANUAL_PROJECT_KEYS = tuple(sorted(CANONICAL_PROJECT_BASE_FIELDS))
+MANUAL_TASK_KEYS = tuple(sorted(CANONICAL_TASK_BASE_FIELDS))
 BROWSER_TEMPLATE_PROJECT_KEYS = MANUAL_PROJECT_KEYS + (
     "authoringSource", "recurrenceRef", "templateRef",
 )
@@ -107,12 +97,13 @@ def _sorted_keys(value: dict[str, Any]) -> tuple[str, ...]:
 def _sensitive_defaults(project: dict[str, Any], task: dict[str, Any]) -> dict[str, Any]:
     project_fields = (
         "archiveMaintenanceEnabled", "archiveMaintenance", "highPriorityAiMeetingAutoApprove",
-        "projectExecutionEnabled", "projectExecutionFlowActive", "projectExecutionFlowStopReason",
-        "workflowActive", "workflowPhase", "scheduledCronPaused", "executionDirtyConfirmations", "template",
+        "projectExecutionEnabled", "executionModel", "orchestration",
+        "scheduledCronPaused", "executionDirtyConfirmations", "template",
         "defaultExecutorAgentId", "defaultReviewerAgentId", "workspaceManagedBy", "workspaceCreatedAt",
     )
     task_fields = (
-        "assigneeBranch", "executionState", "activeAttemptId", "attempts", "evidence", "blockedReason",
+        "assigneeBranch", "executionStage", "stageRunId", "orchestrationSkip",
+        "executionState", "activeAttemptId", "attempts", "evidence", "blockedReason",
         "lastError", "checklist", "source", "comments", "attachments", "meetingActionItems",
         "meetingDecisionHistory", "meetingDiscussionPoints", "meetingRecords",
     )
@@ -190,6 +181,11 @@ def _browser_template_creation(monkeypatch, tmp_path) -> tuple[dict[str, Any], d
             "reviewerRecommendation": {"recommended": False, "triggers": []},
             "assignee": "owner",
             "executorAgentId": "builder",
+        }, {
+            "title": "Browser task two",
+            "columnIndex": 0,
+            "assignee": "owner",
+            "executorAgentId": "builder",
         }],
     }
 
@@ -252,6 +248,7 @@ def _draft(*, project_type="one_time", template_mode="none", recurring=False) ->
         "tasks": [{
             "title": "Authored task",
             "columnId": "backlog",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -318,6 +315,34 @@ def _recurring_creation(tmp_path) -> tuple[dict[str, Any], dict[str, Any]]:
     return project, project["tasks"][0]
 
 
+def _assert_marked_orchestration_contract(project: dict[str, Any]) -> None:
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    orchestration = project["orchestration"]
+    assert isinstance(orchestration.get("revision"), int)
+    assert {
+        **orchestration,
+        "revision": 0,
+    } == default_orchestration_state()
+    for legacy in (
+        "projectExecutionStartMode",
+        "projectExecutionFlowActive",
+        "projectExecutionFlowStopReason",
+        "executionPolicy",
+        "workflowActive",
+        "workflowPhase",
+        "activeTaskId",
+        "activeAgent",
+        "autoMode",
+    ):
+        assert legacy not in project
+    for task in project.get("tasks") or []:
+        assert isinstance(task.get("executionStage"), int)
+        assert task["executionStage"] > 0
+        assert task["stageRunId"] is None
+        assert task["orchestrationSkip"] == default_skip_state()
+        assert "executionOrder" not in task
+
+
 @pytest.mark.parametrize(
     ("case", "creator", "project_keys", "task_keys"),
     (
@@ -340,6 +365,54 @@ def test_creation_paths_preserve_complete_current_field_sets(
 
     assert _sorted_keys(project) == tuple(sorted(project_keys)), case
     assert _sorted_keys(task) == tuple(sorted(task_keys)), case
+    _assert_marked_orchestration_contract(project)
+
+
+def test_multi_task_creation_sources_start_as_one_parallel_stage(monkeypatch, tmp_path):
+    approved = {
+        "title": "Direct multi",
+        "projectExecutionEnabled": False,
+        "columns": [{"id": "backlog", "title": "Backlog"}],
+        "tasks": [
+            {"title": "One", "columnId": "backlog"},
+            {"title": "Two", "columnId": "backlog"},
+        ],
+    }
+    direct = materialize_direct_project(
+        project_id="direct-project",
+        request={"id": "request-1", "requestingAgentId": "author"},
+        approved=approved,
+        workspace={"projectExecutionEnabled": False},
+        template_ref={},
+        recurrence_ref={},
+        now=NOW,
+    )
+    versioned = materialize_versioned_template_instance(
+        project_id="template-project",
+        template_id="template-1",
+        version=1,
+        configuration=approved,
+        workspace={"projectExecutionEnabled": False},
+        actor="author",
+        timestamp=NOW,
+    )
+    recurrence = materialize_recurrence_occurrence_project(
+        project_id="recurrence-project",
+        template_id="template-1",
+        template_version=1,
+        recurrence_id="recurrence-1",
+        occurrence_id="occurrence-1",
+        configuration=approved,
+        workspace={"projectExecutionEnabled": False},
+        actor="author",
+        timestamp=NOW,
+    )
+    browser, _ = _browser_template_creation(monkeypatch, tmp_path)
+
+    for project in (direct, versioned, recurrence, browser):
+        _assert_marked_orchestration_contract(project)
+        assert len(project["tasks"]) >= 2
+        assert [task["executionStage"] for task in project["tasks"][:2]] == [1, 1]
 
 
 def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp_path):
@@ -355,18 +428,20 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         name: _sensitive_defaults(project, task)
         for name, (project, task) in cases.items()
     }
+    manual_orchestration = {
+        **default_orchestration_state(),
+        "revision": 1,
+    }
 
     assert projections["manual"] == {
         "project": {
             "archiveMaintenanceEnabled": True,
             "archiveMaintenance": {"enabled": True, "explicit": False, "updatedAt": NOW, "updatedBy": "user"},
-            "highPriorityAiMeetingAutoApprove": False,
-            "projectExecutionEnabled": False,
-            "projectExecutionFlowActive": False,
-            "projectExecutionFlowStopReason": None,
-            "workflowActive": False,
-            "workflowPhase": "idle",
-            "scheduledCronPaused": False,
+                "highPriorityAiMeetingAutoApprove": False,
+                "projectExecutionEnabled": False,
+                "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+                "orchestration": manual_orchestration,
+                "scheduledCronPaused": False,
             "executionDirtyConfirmations": [],
             "template": False,
             "defaultExecutorAgentId": None,
@@ -375,8 +450,11 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
             "workspaceCreatedAt": None,
         },
         "task": {
-            "assigneeBranch": None,
-            "executionState": "backlog",
+                "assigneeBranch": None,
+                "executionStage": 1,
+                "stageRunId": None,
+                "orchestrationSkip": default_skip_state(),
+                "executionState": "backlog",
             "activeAttemptId": None,
             "attempts": [],
             "evidence": {},
@@ -393,7 +471,10 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         },
     }
     assert projections["browser_template"] == {
-        "project": projections["manual"]["project"],
+        "project": {
+            **projections["manual"]["project"],
+            "orchestration": default_orchestration_state(),
+        },
         "task": projections["manual"]["task"],
     }
     direct_project_defaults = {
@@ -401,10 +482,8 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
         "archiveMaintenance": {"enabled": True, "explicit": False, "updatedAt": NOW, "updatedBy": "author"},
         "highPriorityAiMeetingAutoApprove": False,
         "projectExecutionEnabled": False,
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None,
-        "workflowActive": False,
-        "workflowPhase": "idle",
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": default_orchestration_state(),
         "scheduledCronPaused": False,
         "executionDirtyConfirmations": [],
         "template": False,
@@ -423,7 +502,10 @@ def test_creation_paths_characterize_current_default_divergence(monkeypatch, tmp
     }
 
     assert projections["versioned_template"] == {
-        "project": projections["manual"]["project"],
+        "project": {
+            **projections["manual"]["project"],
+            "orchestration": default_orchestration_state(),
+        },
         "task": direct_task_defaults,
     }
     assert projections["recurrence"] == {
@@ -459,6 +541,10 @@ def test_creation_paths_share_base_defaults_and_only_documented_overlays(monkeyp
         project_projections[source] = {
             field: copy.deepcopy(project[field])
             for field in CANONICAL_PROJECT_BASE_FIELDS - project_content_fields
+        }
+        project_projections[source]["orchestration"] = {
+            **project_projections[source]["orchestration"],
+            "revision": 0,
         }
         task_projections[source] = {
             field: copy.deepcopy(task[field])

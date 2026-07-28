@@ -39,6 +39,8 @@ def _draft(title="Release", description="Ship safely"):
             "description": "Build the change",
             "columnId": "todo",
             "priority": "high",
+            "executionStage": 1,
+            "executionOrder": 4,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerActor": {"type": "agent", "id": "reviewer"},
@@ -63,7 +65,7 @@ def _draft(title="Release", description="Ship safely"):
     }
 
 
-def test_snapshot_contains_complete_blueprints_roles_reviewer_and_execution_policy():
+def test_snapshot_contains_complete_blueprints_roles_reviewer_and_stage_intent():
     snapshot = build_template_snapshot(_draft())
     task = snapshot["tasks"][0]
 
@@ -73,6 +75,8 @@ def test_snapshot_contains_complete_blueprints_roles_reviewer_and_execution_poli
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
     assert task["reviewerActor"] == {"type": "agent", "id": "reviewer"}
     assert task["reviewerRecommendation"]["triggers"] == ["critical_delivery"]
+    assert task["executionStage"] == 1
+    assert "executionOrder" not in task
     assert task["requiresUserAcceptance"] is True
     assert "executionState" not in task
     assert "attempts" not in task
@@ -80,8 +84,6 @@ def test_snapshot_contains_complete_blueprints_roles_reviewer_and_execution_poli
     assert snapshot["agentMaintenanceMode"] == "autonomous"
     assert snapshot["executionSettings"] == {
         "projectExecutionEnabled": True,
-        "projectExecutionStartMode": "continuous",
-        "executionPolicy": {"maxActiveTasks": 2},
         "defaultExecutorAgentId": "builder",
         "defaultReviewerAgentId": "reviewer",
     }
@@ -177,8 +179,10 @@ def test_legacy_browser_template_is_readable_as_implicit_v1_without_mutation():
     assert version["snapshot"]["columns"][0]["id"] == "column-1"
     task = version["snapshot"]["tasks"][0]
     assert task["columnId"] == "column-1"
+    assert task["executionStage"] == 1
     assert task["responsibleActor"] is None
     assert task["executorActor"] is None
+    assert version["snapshot"]["executionSettings"] == {"projectExecutionEnabled": False}
     with pytest.raises(ProjectTemplateError) as missing:
         resolve_template_version({}, [legacy], "legacy-template", 2)
     assert missing.value.code == "template_version_not_found"

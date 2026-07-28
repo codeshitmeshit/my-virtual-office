@@ -12,6 +12,11 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from services import project_commands
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+    default_skip_state,
+)
 from services.system_agent_policy import assignment_error
 from services.project_repository import ProjectRepository
 from services.system_agent_roles import resolve_system_agent_role
@@ -79,14 +84,19 @@ def test_create_project_and_task_preserve_contract_without_http():
     ]
     assert project["activity"][0]["id"] == "id-5"
     assert project["projectType"] == "one_time"
-    assert project["workflowActive"] is False
-    assert project["workflowPhase"] == "idle"
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
+    assert "workflowActive" not in project
+    assert "workflowPhase" not in project
     task_outcome = project_commands.create_task(
         project["id"], {"title": "Task", "assignee": "executor"}, repository=repo, **common
     )
     assert task_outcome.result.status == 200
     task = task_outcome.result.payload["task"]
     assert task["id"] == "id-6"
+    assert task["executionStage"] == 1
+    assert task["stageRunId"] is None
+    assert task["orchestrationSkip"] == default_skip_state()
     assert task["executionState"] == "backlog"
     assert task["responsibleActor"] is None
     assert task["executorActor"] is None
@@ -112,7 +122,7 @@ def test_create_task_uses_canonical_column_checklist_and_atomic_validation():
     task = outcome.result.payload["task"]
     assert task["columnId"] == project["columns"][0]["id"]
     assert task["order"] == 0
-    assert task["executionOrder"] == 1
+    assert task["executionStage"] == 1
     assert task["checklist"][0]["text"] == "Verify output"
     assert task["checklist"][0]["id"].startswith("checklist-")
     assert task["checklist"][1] == {"id": "docs", "text": "Document output", "done": False}
@@ -176,11 +186,28 @@ def test_update_task_rejects_invalid_or_duplicate_execution_order():
     project = create_project(repo, common).result.payload["project"]
     first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
     second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    first_order = project_commands.update_task(
+        project["id"],
+        first["id"],
+        {"executionOrder": 1},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        column_locked=lambda _value: False,
+        checklist_complete=lambda _value: False,
+        can_complete_after_checklist=lambda _value: False,
+        mark_done=lambda *args: {"ok": False},
+        log_activity=common["log_activity"],
+        now=common["now"],
+        is_on_time=lambda _value: False,
+        score_values={"task_completed": 1, "critical": 0, "high": 0, "medium": 0, "on_time": 0, "checklist": 0},
+    )
+    assert first_order.result.status == 200
 
     duplicate = project_commands.update_task(
         project["id"],
         second["id"],
-        {"executionOrder": first["executionOrder"]},
+        {"executionOrder": first_order.result.payload["task"]["executionOrder"]},
         repository=repo,
         system_agent_assignment_error=common["system_agent_assignment_error"],
         execution_enabled=lambda _value: False,
@@ -259,6 +286,145 @@ def test_comment_columns_update_and_delete_use_repository():
     assert project_commands.delete_task(project["id"], task["id"], repository=repo, now=common["now"]).result.status == 404
 
 
+def test_marked_task_creation_defaults_to_next_stage_and_bumps_revision():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+
+    stored = repo.get(project["id"])
+    assert first["executionStage"] == 1
+    assert second["executionStage"] == 2
+    assert stored["orchestration"]["revision"] == 2
+
+
+def test_marked_task_deletion_compacts_empty_stage_and_bumps_revision():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    third = project_commands.create_task(project["id"], {"title": "Third"}, repository=repo, **common).result.payload["task"]
+
+    deleted = project_commands.delete_task(project["id"], second["id"], repository=repo, now=common["now"])
+
+    stored = repo.get(project["id"])
+    assert deleted.result.status == 200
+    assert [(task["id"], task["executionStage"]) for task in stored["tasks"]] == [
+        (first["id"], 1),
+        (third["id"], 2),
+    ]
+    assert stored["orchestration"]["revision"] == 4
+
+
+def test_marked_task_create_and_delete_reject_locked_orchestration_states():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    task = project_commands.create_task(project["id"], {"title": "Task"}, repository=repo, **common).result.payload["task"]
+    before = repo.get(project["id"])
+    repo.update(project["id"], lambda value: value["orchestration"].update({"state": "running"}))
+    locked = repo.get(project["id"])
+
+    created = project_commands.create_task(project["id"], {"title": "Rejected"}, repository=repo, **common)
+    deleted = project_commands.delete_task(project["id"], task["id"], repository=repo, now=common["now"])
+
+    assert created.result.status == 409
+    assert created.result.payload["code"] == "orchestration_structural_edit_locked"
+    assert deleted.result.status == 409
+    assert deleted.result.payload["code"] == "orchestration_structural_edit_locked"
+    assert repo.get(project["id"]) == locked
+    assert locked["tasks"] == before["tasks"]
+
+
+def test_completed_marked_project_allows_appending_new_stage_task_and_reopens_pipeline():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    repo.update(project["id"], lambda value: (
+        value.update({"status": "completed"}),
+        value["orchestration"].update({
+            "state": "completed",
+            "currentStage": 2,
+            "currentRunId": None,
+            "completedAt": "done-at",
+            "revision": 2,
+        }),
+        next(task for task in value["tasks"] if task["id"] == first["id"]).update({"executionState": "done", "completedAt": "first-done"}),
+        next(task for task in value["tasks"] if task["id"] == second["id"]).update({"executionState": "done", "completedAt": "second-done"}),
+    ))
+
+    created = project_commands.create_task(
+        project["id"],
+        {"title": "Follow-up", "executionStage": 1},
+        repository=repo,
+        **common,
+    )
+
+    assert created.result.status == 200
+    task = created.result.payload["task"]
+    assert task["title"] == "Follow-up"
+    assert task["executionStage"] == 3
+    stored = repo.get(project["id"])
+    assert stored["status"] == "active"
+    assert stored["orchestration"]["state"] == "paused"
+    assert stored["orchestration"]["currentStage"] == 3
+    assert stored["orchestration"]["currentRunId"] is None
+    assert stored["orchestration"]["completedAt"] is None
+    assert stored["orchestration"]["pauseReason"] == "new_task_added_after_completion"
+    assert stored["orchestration"]["revision"] == 3
+
+
+def test_completed_marked_project_appends_after_existing_stages_when_tasks_were_reset():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    repo.update(project["id"], lambda value: (
+        value.update({"status": "completed"}),
+        value["orchestration"].update({
+            "state": "completed",
+            "currentStage": 2,
+            "currentRunId": None,
+            "completedAt": "done-at",
+            "revision": 2,
+        }),
+        next(task for task in value["tasks"] if task["id"] == first["id"]).update({"executionState": "backlog", "completedAt": None}),
+        next(task for task in value["tasks"] if task["id"] == second["id"]).update({"executionState": "backlog", "completedAt": None}),
+    ))
+
+    created = project_commands.create_task(project["id"], {"title": "Follow-up"}, repository=repo, **common)
+
+    assert created.result.status == 200
+    task = created.result.payload["task"]
+    assert task["executionStage"] == 3
+    stored = repo.get(project["id"])
+    assert stored["orchestration"]["state"] == "paused"
+    assert stored["orchestration"]["currentStage"] == 3
+
+
+def test_paused_marked_task_deletion_rejects_completed_stage_history():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    first = project_commands.create_task(project["id"], {"title": "First"}, repository=repo, **common).result.payload["task"]
+    second = project_commands.create_task(project["id"], {"title": "Second"}, repository=repo, **common).result.payload["task"]
+    repo.update(project["id"], lambda value: (
+        value["orchestration"].update({"state": "paused"}),
+        next(task for task in value["tasks"] if task["id"] == first["id"]).update({"executionState": "done"}),
+    ))
+    before = repo.get(project["id"])
+
+    completed = project_commands.delete_task(project["id"], first["id"], repository=repo, now=common["now"])
+    unfinished = project_commands.delete_task(project["id"], second["id"], repository=repo, now=common["now"])
+
+    assert completed.result.status == 409
+    assert completed.result.payload["code"] == "completed_stage_locked"
+    assert unfinished.result.status == 200
+    stored = repo.get(project["id"])
+    assert [task["id"] for task in stored["tasks"]] == [first["id"]]
+    assert stored["tasks"][0]["executionStage"] == before["tasks"][0]["executionStage"]
+
+
 def test_update_and_reorder_enforce_execution_column_gates():
     _, repo, common = dependencies()
     project = create_project(repo, common, projectExecutionEnabled=True).result.payload["project"]
@@ -318,8 +484,8 @@ def test_project_update_cannot_forge_execution_flow_state():
     assert outcome.result.status == 200
     stored = repo.get(project["id"])
     assert stored["title"] == "Renamed"
-    assert stored["projectExecutionFlowActive"] is False
-    assert stored["projectExecutionFlowStopReason"] is None
+    assert "projectExecutionFlowActive" not in stored
+    assert "projectExecutionFlowStopReason" not in stored
 
 
 def test_invalid_project_ids_keep_not_found_contract():

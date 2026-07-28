@@ -85,6 +85,78 @@ def test_dashboard_diff_emits_projects_when_project_progress_changes():
     assert events[0][1]["projects"][0]["taskCount"] == 2
 
 
+def test_dashboard_projects_projection_uses_marked_orchestration_fields():
+    snapshot = build_dashboard_snapshot(
+        {"agent-a": {"state": "idle", "task": ""}},
+        [],
+        [],
+        [{
+            "id": "p-1",
+            "title": "Project",
+            "taskCount": 2,
+            "taskDone": 0,
+            "projectExecutionActive": True,
+            "projectExecutionPhase": "running",
+            "activeTaskIds": ["t-1", "t-2"],
+            "activeTaskCount": 2,
+            "currentStage": 1,
+            "orchestrationState": "running",
+            "pauseReason": None,
+            "activeTaskId": "legacy",
+            "activeAgent": "legacy-agent",
+            "projectExecutionFlowActive": True,
+        }],
+    )
+
+    project = snapshot["projects"][0]
+    assert project["activeTaskIds"] == ["t-1", "t-2"]
+    assert project["activeTaskCount"] == 2
+    assert project["currentStage"] == 1
+    assert project["orchestrationState"] == "running"
+    assert project["pauseReason"] is None
+    assert "activeTaskId" not in project
+    assert "activeAgent" not in project
+    assert "projectExecutionFlowActive" not in project
+
+
+def test_dashboard_diff_emits_projects_when_marked_active_task_ids_change():
+    before = build_dashboard_snapshot(
+        {"agent-a": {"state": "idle", "task": ""}},
+        [],
+        [],
+        [{
+            "id": "p-1",
+            "title": "Project",
+            "taskCount": 2,
+            "taskDone": 0,
+            "activeTaskIds": ["t-1"],
+            "activeTaskCount": 1,
+            "currentStage": 1,
+            "orchestrationState": "running",
+        }],
+    )
+    after = build_dashboard_snapshot(
+        {"agent-a": {"state": "idle", "task": ""}},
+        [],
+        [],
+        [{
+            "id": "p-1",
+            "title": "Project",
+            "taskCount": 2,
+            "taskDone": 0,
+            "activeTaskIds": ["t-1", "t-2"],
+            "activeTaskCount": 2,
+            "currentStage": 1,
+            "orchestrationState": "running",
+        }],
+    )
+
+    events = diff_dashboard_events(before, after)
+
+    assert [name for name, _ in events] == ["dashboard.projects"]
+    assert events[0][1]["projects"][0]["activeTaskIds"] == ["t-1", "t-2"]
+
+
 def test_dashboard_diff_emits_meetings_and_actions_when_needed():
     before = build_dashboard_snapshot(
         {"agent-a": {"state": "idle", "task": ""}},

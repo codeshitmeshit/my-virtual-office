@@ -210,6 +210,28 @@ def test_markdown_revision_invalidates_cache_after_external_file_edit():
         assert store.get_project("p1")["title"] == "Two"
 
 
+def test_markdown_get_project_reads_only_target_project_directory(monkeypatch):
+    with tempfile.TemporaryDirectory() as status_dir:
+        store = MarkdownProjectStore(status_dir)
+        store.save_all({
+            "projects": [
+                {"id": "p1", "title": "One", "tasks": [], "activity": []},
+                {"id": "p2", "title": "Two", "tasks": [{"id": "t2", "title": "Task", "activity": []}], "activity": []},
+            ],
+            "templates": [],
+        })
+
+        def fail_full_scan():
+            raise AssertionError("get_project should not read every project")
+
+        monkeypatch.setattr(store, "_read_all_projects", fail_full_scan)
+
+        project = store.get_project("p2")
+
+        assert project["id"] == "p2"
+        assert project["tasks"][0]["id"] == "t2"
+
+
 def test_legacy_snapshots_merge_different_projects_and_same_project_fields():
     _, repo = repository()
     original = repo.load_all()

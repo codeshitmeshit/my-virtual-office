@@ -1,3 +1,4 @@
+import copy
 import os
 import sys
 
@@ -8,6 +9,7 @@ if APP_DIR not in sys.path:
     sys.path.insert(0, APP_DIR)
 
 from services import review_acceptance
+from services.project_orchestration import EXECUTION_MODEL_STAGE_PIPELINE_V1, default_orchestration_state
 
 
 def test_normalize_review_fails_closed_and_redacts_all_text_fields():
@@ -63,3 +65,78 @@ def test_stable_notification_intent_is_staged_once_and_sanitized():
     local = review_acceptance.notification_intent(task, "a", intent["id"])
     assert local["createdAt"] == "t1"
     assert len(task["attempts"][0]["notificationIntents"]) == 1
+
+
+def test_marked_project_acceptance_reconciles_stage_without_legacy_continue():
+    project = {
+        "id": "p1",
+        "title": "Project",
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            **default_orchestration_state(),
+            "state": "running",
+            "currentStage": 1,
+            "currentRunId": "run-1",
+        },
+        "projectExecutionEnabled": True,
+        "projectExecutionStartMode": "continuous",
+        "tasks": [{
+            "id": "t1",
+            "title": "Task",
+            "executionStage": 1,
+            "stageRunId": "run-1",
+            "executionState": "awaiting_user_acceptance",
+            "reviewResult": {"status": "pass", "attemptId": "attempt-1"},
+            "attempts": [{"id": "attempt-1", "stageRunId": "run-1"}],
+            "checklist": [{"id": "done", "text": "Done", "done": True}],
+        }],
+    }
+
+    class Repo:
+        def get(self, project_id):
+            return copy.deepcopy(project)
+
+        def update(self, project_id, mutator):
+            working = copy.deepcopy(project)
+            result = mutator(working)
+            project.clear()
+            project.update(working)
+            return result
+
+    scheduled = []
+    reconciled = []
+    result = review_acceptance.acceptance(
+        "p1",
+        "t1",
+        {"action": "accept", "attemptId": "attempt-1"},
+        context=review_acceptance.EntryContext.http(),
+        repository=Repo(),
+        ports=review_acceptance.AcceptancePorts(
+            enabled=lambda project: True,
+            validate_workspace=lambda path: {"ok": True, "path": path},
+            active_task=lambda project: None,
+            resolve_roles=lambda project, task, allow_skip: {"ok": True},
+            automatic_snapshot=lambda project, path: {"ok": True, "snapshot": {}},
+            requires_acceptance=lambda task: True,
+            mark_done=lambda project, task, actor, reason, attempt_id, **kwargs: task.update({"executionState": "done", "completedAt": "now"}) or {"ok": True},
+            transition=lambda *args, **kwargs: None,
+            log_activity=lambda *args, **kwargs: None,
+            redact=lambda value: str(value or ""),
+            now=lambda: "now",
+            new_id=lambda: "unused",
+            create_cancel_flag=lambda attempt_id: object(),
+            launcher=lambda callback: callback(),
+            runner=lambda *args, **kwargs: None,
+            schedule_continue=lambda project_id, reason: scheduled.append((project_id, reason)),
+            notify_intervention=lambda *args, **kwargs: None,
+            is_stage_pipeline=lambda project: True,
+            reconcile_terminal=lambda project_id, task_id, attempt_id, reason: reconciled.append((project_id, task_id, attempt_id, reason)),
+        ),
+    )
+
+    assert result["ok"] is True
+    assert result["flowContinues"] is False
+    assert scheduled == []
+    assert reconciled == [("p1", "t1", "attempt-1", "user_accepted")]
+    assert project["tasks"][0]["executionState"] == "done"
+    assert project.get("projectExecutionFlowActive") is None

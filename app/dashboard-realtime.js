@@ -284,9 +284,13 @@
     window.addEventListener('i18n:ready', refreshModeLabel);
     window.addEventListener('i18n:changed', refreshModeLabel);
 
+    function connectAfterStartup() {
+        setTimeout(connect, 1800);
+    }
+
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', connect);
+        document.addEventListener('DOMContentLoaded', connectAfterStartup);
     } else {
-        connect();
+        connectAfterStartup();
     }
 })();

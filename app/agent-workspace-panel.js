@@ -105,11 +105,13 @@ function _agentWorkspaceProjectMeta(t, compact) {
 
 function _agentWorkspaceProjectBadges(t) {
     var badges = [];
+    var markedPipeline = t.executionModel === 'stage_pipeline_v1';
     if (t.completed) badges.push('done');
     if (t.activeAttemptId) badges.push('active');
     if (t.meetingBlocker && t.meetingBlocker.status) badges.push('meeting ' + t.meetingBlocker.status);
-    if (t.projectExecutionFlowActive) badges.push('flow active');
-    if (t.projectExecutionFlowStopReason) badges.push(t.projectExecutionFlowStopReason);
+    if (markedPipeline && t.pauseReason) badges.push(t.pauseReason);
+    if (!markedPipeline && t.projectExecutionFlowActive) badges.push('flow active');
+    if (!markedPipeline && t.projectExecutionFlowStopReason) badges.push(t.projectExecutionFlowStopReason);
     if (t.blockedReason) badges.push('blocked');
     return badges.length ? '<div class="agent-workspace-badges">' + badges.map(function(label) {
         return '<span>' + escHtml(label) + '</span>';

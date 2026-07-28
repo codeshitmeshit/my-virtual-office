@@ -12,15 +12,14 @@ TEMPLATE_SCHEMA_VERSION = 2
 LEGACY_TEMPLATE_SCHEMA_VERSION = 1
 _TASK_RUNTIME_FIELDS = frozenset({
     "activeAttemptId", "attempts", "blockedReason", "completedAt", "createdAt",
-    "executionState", "lastError", "maintenanceHistory", "updatedAt",
+    "executionOrder", "executionState", "lastError", "maintenanceHistory", "updatedAt",
 })
 _PROJECT_FIELDS = (
     "title", "description", "projectType", "priority", "dueDate", "tags", "branch",
     "longTermProject",
 )
 _EXECUTION_FIELDS = (
-    "projectExecutionEnabled", "projectExecutionStartMode", "executionPolicy",
-    "defaultExecutorAgentId", "defaultReviewerAgentId",
+    "projectExecutionEnabled", "defaultExecutorAgentId", "defaultReviewerAgentId",
 )
 
 
@@ -62,8 +61,6 @@ def build_template_snapshot(draft: Mapping[str, Any]) -> dict[str, Any]:
     # validation normally supplies it; direct callers receive the same enabled
     # default rather than creating another ambiguous historical snapshot.
     execution.setdefault("projectExecutionEnabled", True)
-    execution.setdefault("projectExecutionStartMode", "continuous")
-    execution.setdefault("executionPolicy", {"maxActiveTasks": 1})
     tasks = [
         _task_blueprint(task)
         for task in (draft.get("tasks") or [])
@@ -144,6 +141,7 @@ def adapt_legacy_template(template: Mapping[str, Any]) -> dict[str, Any]:
         item.setdefault("executorActor", None)
         item.setdefault("reviewerActor", None)
         item.setdefault("reviewerRecommendation", {"recommended": False, "triggers": []})
+        item.setdefault("executionStage", 1)
         tasks.append(item)
     snapshot = {
         "schemaVersion": LEGACY_TEMPLATE_SCHEMA_VERSION,
@@ -156,8 +154,6 @@ def adapt_legacy_template(template: Mapping[str, Any]) -> dict[str, Any]:
         "agentMaintenanceMode": "strict_confirmation",
         "executionSettings": {
             "projectExecutionEnabled": False,
-            "projectExecutionStartMode": "continuous",
-            "executionPolicy": {"maxActiveTasks": 1},
         },
     }
     return {

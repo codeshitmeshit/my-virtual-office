@@ -12,9 +12,9 @@ The backend cannot cryptographically verify provider-neutral chat authorship. `c
 
 ## Project Execution creation semantics
 
-Future Agent-created projects default to `projectExecutionEnabled=true`. Enabled means the project is capable of using Project Execution; it does not mean execution has started. Immediately after ordinary creation, `projectExecutionFlowActive=false` and `workflowActive=false`. The user must explicitly request project-level execution later.
+Future Agent-created projects default to `projectExecutionEnabled=true`. Enabled means the project is capable of using Project Execution; it does not mean execution has started. Immediately after ordinary creation, `orchestration.state=draft` and `orchestration.currentRunId=null`. The user must explicitly request project-level execution later.
 
-The confirmation proposal always displays execution enabled/disabled, executor, reviewer or absence, start mode, and whether creation starts execution. Each task proposal must separately state task input, task output, execution notes, risk/discussion, and acceptance criteria. Task input/output/notes/risk are persisted in structured `description` text; only deliverable acceptance criteria become `checklist` items. An explicit tracking-only request sets `projectExecutionEnabled=false`; it does not prepare an executable workspace and may use human-only task executors. Omission is not tracking-only.
+The confirmation proposal always displays execution enabled/disabled, executor, reviewer or absence, stage orchestration, and whether creation starts execution. Each task proposal must separately state task input, task output, execution notes, risk/discussion, and acceptance criteria. Task input/output/notes/risk are persisted in structured `description` text; only deliverable acceptance criteria become `checklist` items. An explicit tracking-only request sets `projectExecutionEnabled=false`; it does not prepare an executable workspace and may use human-only task executors. Omission is not tracking-only.
 
 Enabled creation fails closed before commit when an executor is missing/unassignable or the workspace cannot be prepared. It never silently creates a legacy or tracking-only project. A failed attempt leaves no partial Project, and a system-managed workspace created only for that failed attempt is eligible for cleanup.
 
@@ -45,12 +45,12 @@ Agent routes require loopback, no browser `Origin`, `X-VO-Agent-Action: project-
     "projectType": "one_time",
     "agentMaintenanceMode": "strict_confirmation",
     "projectExecutionEnabled": true,
-    "projectExecutionStartMode": "continuous",
     "columns": [{"id": "backlog", "title": "Backlog"}],
     "tasks": [{
       "title": "Prepare release evidence",
       "description": "Input: confirmed release scope and current project context\n\nOutput: release evidence package and verification notes\n\nExecution notes: collect release notes, validation steps, rollback notes, and traceable evidence.\n\nRisk/discussion: none",
       "columnId": "backlog",
+      "executionStage": 1,
       "responsibleActor": {"type": "agent", "id": "owner"},
       "executorActor": {"type": "agent", "id": "builder"},
       "reviewerRecommendation": {"recommended": false, "triggers": []},
@@ -66,7 +66,7 @@ Every task has one responsible actor and one executor actor; they may be the sam
 
 The server rejects direct creation unless `confirmation.summaryText` contains the fixed VO project confirmation template and `confirmation.summaryDigest` equals the SHA-256 digest of that exact UTF-8 text. This does not cryptographically prove chat authorship, but it prevents bare `confirmed=true` requests and makes the Agent submit the same full proposal it claims the user confirmed.
 
-The atomic commit contains the project, tasks, actor projections, authoring source/digest, optional immutable template version, recurrence definition, and outbox intent as applicable. Reusable is a project attribute and does not require a template. Legacy grant metadata may be stored for backward-compatible recurrence dispatch and administration, but project maintenance is authorized by explicit user-confirmed maintenance proposals. Tasks start in `backlog`; `workflowActive` and `projectExecutionFlowActive` are false.
+The atomic commit contains the project, tasks, actor projections, authoring source/digest, optional immutable template version, recurrence definition, and outbox intent as applicable. Reusable is a project attribute and does not require a template. Legacy grant metadata may be stored for backward-compatible recurrence dispatch and administration, but project maintenance is authorized by explicit user-confirmed maintenance proposals. Tasks start in `backlog`; marked projects persist `executionModel: stage_pipeline_v1`, `orchestration.state=draft`, and task `executionStage` assignments without legacy progression authorities.
 
 Idempotency is scoped to Agent and key. Same key and semantic payload returns the original project. Same key with changed project or proposal digest returns `project_creation_idempotency_conflict`. Workspace or commit failure leaves no partial project.
 

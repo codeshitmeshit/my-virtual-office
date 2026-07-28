@@ -132,6 +132,8 @@ class RunnerPorts:
     schedule_transient_retry: Callable[..., bool]
     start_review: Callable[..., dict[str, Any]]
     finalize_cancel: Callable[[str, str, str, dict[str, Any]], bool]
+    is_stage_pipeline: Callable[[Project], bool] = lambda project: False
+    reconcile_terminal: Callable[[str, str, str, str], Any] = lambda project_id, task_id, attempt_id, reason: None
 
 
 def invoke_provider(
@@ -255,6 +257,7 @@ def transition(
 
 def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: threading.Event, *, ports: RunnerPorts) -> None:
     notification_key: str | None = None
+    reconcile_reason: str | None = None
     try:
         invocation = invoke_provider(
             project_id, task_id, attempt_id,
@@ -279,6 +282,7 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
             and attempt.get("status") not in {"cancelling", "cancelled"}
         ):
             return
+        stage_pipeline = ports.is_stage_pipeline(project)
         commit_baseline = copy.deepcopy(project)
         checklist_changed = ports.apply_checklist_updates(task, result)
         discussion_points_changed = ports.apply_meeting_discussion_points(task, result)
@@ -313,19 +317,25 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
                 task["evidence"] = evidence
                 ports.transition(project, task, "backlog", executor.get("id") or "executor", "Meeting action items completed; original task can resume.", attempt_id)
                 ports.move_task_to_column(project, task, ports.backlog_column(project))
-                project.update({
+                project_update = {
                     "workflowActive": False,
                     "workflowPhase": "meeting_action_items_completed",
                     "activeTaskId": None,
                     "activeAgent": None,
-                    "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
-                    "projectExecutionFlowStopReason": None,
                     "updatedAt": ports.now(),
-                })
+                }
+                if not stage_pipeline:
+                    project_update.update({
+                        "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
+                        "projectExecutionFlowStopReason": None,
+                    })
+                project.update(project_update)
                 if not ports.commit_projects(project_id, task_id, attempt_id, data, commit_baseline):
                     return
                 ports.cancel_registry.discard(attempt_id)
-                if not ports.has_pending_meeting_actions(task):
+                if stage_pipeline:
+                    ports.reconcile_terminal(project_id, task_id, attempt_id, "meeting_action_items_completed")
+                elif not ports.has_pending_meeting_actions(task):
                     ports.launcher(lambda: ports.start_task(project_id, task_id, {"projectStart": True, "mode": project.get("projectExecutionStartMode") or "continuous", "autoReviewAfterExecution": True, "by": "meeting-action-items"}))
                 return
             if attempt.get("skipReview"):
@@ -342,13 +352,16 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
                 task["reviewHistory"] = task["reviewHistory"][-50:]
                 if ports.attempt_requires_acceptance(task, attempt):
                     attempt["status"] = "review_skipped_waiting_acceptance"
-                    project["projectExecutionFlowActive"] = False
-                    project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
+                    if not stage_pipeline:
+                        project["projectExecutionFlowActive"] = False
+                        project["projectExecutionFlowStopReason"] = "awaiting_user_acceptance"
                     ports.transition(project, task, "awaiting_user_acceptance", "system", "Review skipped by user confirmation; waiting for user acceptance.", attempt_id)
                     notification_key = ports.stage_acceptance(
                         project, task, attempt_id,
                         "Review skipped by user confirmation; waiting for user acceptance.",
                     )
+                    if stage_pipeline:
+                        reconcile_reason = "awaiting_user_acceptance"
                 else:
                     done_result = ports.mark_done(project, task, "system", "Review skipped by user confirmation; task does not require user acceptance.", attempt_id)
                     if not done_result.get("ok"):
@@ -359,12 +372,16 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
                         task["blockedReason"] = done_result.get("error")
                         ports.transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                         ports.notify_intervention(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
+                    elif stage_pipeline:
+                        reconcile_reason = "review_skipped"
                     elif attempt.get("projectFlow") or project.get("projectExecutionFlowActive"):
                         project["projectExecutionFlowActive"] = True
                         project["projectExecutionFlowStopReason"] = None
                         ports.schedule_continue(project_id, "review_skipped")
             else:
                 ports.transition(project, task, "execution_complete", executor.get("id") or "executor", "Execution completed; Independent review has not started.", attempt_id)
+                if stage_pipeline:
+                    reconcile_reason = "execution_complete"
         else:
             transient_reason = ports.transient_failure_reason(result)
             if transient_reason and ports.schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, transient_reason, commit_baseline):
@@ -381,6 +398,8 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
         ports.cancel_registry.discard(attempt_id)
         if notification_key:
             ports.deliver_notification(project_id, task_id, attempt_id, notification_key)
+        if reconcile_reason:
+            ports.reconcile_terminal(project_id, task_id, attempt_id, reconcile_reason)
         if result.get("ok") and attempt.get("autoReviewAfterExecution"):
             ports.start_review(project_id, task_id, {"attemptId": attempt_id})
     finally:

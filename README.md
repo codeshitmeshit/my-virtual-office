@@ -401,6 +401,7 @@ npm test
 - 多 Provider 架构草案：[docs/UNIVERSAL-AGENT-HARNESS-SPEC.md](docs/UNIVERSAL-AGENT-HARNESS-SPEC.md)
 - Provider 服务架构与运维：[docs/PROVIDER_SERVICE_ARCHITECTURE.md](docs/PROVIDER_SERVICE_ARCHITECTURE.md)
 - Project Service 边界与开发约束：[docs/SERVICE_BOUNDARIES.md](docs/SERVICE_BOUNDARIES.md)
+- Project Task Orchestration 运维与开发契约：[docs/PROJECT_TASK_ORCHESTRATION_OPERATIONS.md](docs/PROJECT_TASK_ORCHESTRATION_OPERATIONS.md)
 - 技能库：[docs/SKILLS-LIBRARY-SPEC.md](docs/SKILLS-LIBRARY-SPEC.md)
 - 多聊天窗口架构：[docs/MULTI-CHAT-ARCHITECTURE.md](docs/MULTI-CHAT-ARCHITECTURE.md)
 - 历史设计记录：[docs/design-history/](docs/design-history/)

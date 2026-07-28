@@ -14,6 +14,12 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+    default_skip_state,
+)
+
 
 DEFAULT_COLUMNS: tuple[Mapping[str, Any], ...] = (
     {"title": "Backlog", "color": "#6c757d", "order": 0},
@@ -23,8 +29,6 @@ DEFAULT_COLUMNS: tuple[Mapping[str, Any], ...] = (
 )
 
 CANONICAL_PROJECT_BASE_FIELDS = frozenset({
-    "activeAgent",
-    "activeTaskId",
     "activity",
     "archiveMaintenance",
     "archiveMaintenanceEnabled",
@@ -37,15 +41,13 @@ CANONICAL_PROJECT_BASE_FIELDS = frozenset({
     "description",
     "dueDate",
     "executionDirtyConfirmations",
-    "executionPolicy",
+    "executionModel",
     "highPriorityAiMeetingAutoApprove",
     "id",
     "longTermProject",
+    "orchestration",
     "priority",
     "projectExecutionEnabled",
-    "projectExecutionFlowActive",
-    "projectExecutionFlowStopReason",
-    "projectExecutionStartMode",
     "projectType",
     "scheduledCronPaused",
     "status",
@@ -54,8 +56,6 @@ CANONICAL_PROJECT_BASE_FIELDS = frozenset({
     "template",
     "title",
     "updatedAt",
-    "workflowActive",
-    "workflowPhase",
     "workspaceCreatedAt",
     "workspaceKind",
     "workspaceManagedBy",
@@ -79,8 +79,8 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
     "description",
     "dueDate",
     "evidence",
+    "executionStage",
     "executionState",
-    "executionOrder",
     "executorActor",
     "executorAgentId",
     "id",
@@ -90,6 +90,7 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
     "meetingDiscussionPoints",
     "meetingRecords",
     "order",
+    "orchestrationSkip",
     "priority",
     "requiresUserAcceptance",
     "responsibleActor",
@@ -98,6 +99,7 @@ CANONICAL_TASK_BASE_FIELDS = frozenset({
     "reviewerRecommendation",
     "scheduledRepeatEnabled",
     "source",
+    "stageRunId",
     "tags",
     "title",
     "updatedAt",
@@ -336,6 +338,16 @@ def _safe_execution_order(value: Any) -> int:
     return parsed if parsed > 0 else 0
 
 
+def _positive_execution_stage(value: Any, *, field: str = "executionStage") -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        raise ProjectMaterializationError(f"{field} must be a positive integer")
+    if parsed <= 0:
+        raise ProjectMaterializationError(f"{field} must be a positive integer")
+    return parsed
+
+
 def materialize_task_base(
     configuration: Mapping[str, Any],
     *,
@@ -369,25 +381,22 @@ def materialize_task_base(
         resolved_order = 0
     source = configuration.get("source")
     evidence = configuration.get("evidence")
-    configured_execution_order = configuration.get("executionOrder")
-    if configured_execution_order is not None:
-        resolved_execution_order = configured_execution_order
+    configured_execution_stage = configuration.get("executionStage")
+    if configured_execution_stage is not None:
+        resolved_execution_stage = _positive_execution_stage(configured_execution_stage)
     elif existing_tasks is not None:
-        resolved_execution_order = max(
+        resolved_execution_stage = max(
             (
-                _safe_execution_order(task.get("executionOrder"))
+                _safe_execution_order(task.get("executionStage"))
                 for task in existing_tasks
                 if isinstance(task, Mapping)
             ),
             default=0,
         ) + 1
-    elif order is not None:
-        try:
-            resolved_execution_order = int(order) + 1
-        except (TypeError, ValueError):
-            resolved_execution_order = 1
     else:
-        resolved_execution_order = 1
+        resolved_execution_stage = 1
+    if resolved_execution_stage <= 0:
+        resolved_execution_stage = 1
 
     return {
         "id": str(task_id or configuration.get("id") or new_id()),
@@ -395,7 +404,9 @@ def materialize_task_base(
         "description": copy.deepcopy(configuration.get("description") or ""),
         "columnId": column_id,
         "order": copy.deepcopy(resolved_order),
-        "executionOrder": copy.deepcopy(resolved_execution_order),
+        "executionStage": copy.deepcopy(resolved_execution_stage),
+        "stageRunId": None,
+        "orchestrationSkip": default_skip_state(),
         "priority": configuration.get("priority") or "medium",
         "responsibleActor": copy.deepcopy(configuration.get("responsibleActor")),
         "executorActor": copy.deepcopy(configuration.get("executorActor")),
@@ -653,20 +664,10 @@ def materialize_project_base(
         "workspaceCreatedAt": workspace_fields["workspaceCreatedAt"],
         "defaultExecutorAgentId": copy.deepcopy(configuration.get("defaultExecutorAgentId")),
         "defaultReviewerAgentId": copy.deepcopy(configuration.get("defaultReviewerAgentId")),
-        "projectExecutionStartMode": (
-            configuration.get("projectExecutionStartMode") or "continuous"
-        ),
-        "projectExecutionFlowActive": False,
-        "projectExecutionFlowStopReason": None,
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": default_orchestration_state(),
         "scheduledCronPaused": configuration.get("scheduledCronPaused") is True,
-        "executionPolicy": copy.deepcopy(
-            configuration.get("executionPolicy") or {"maxActiveTasks": 1}
-        ),
         "executionDirtyConfirmations": [],
-        "workflowActive": False,
-        "workflowPhase": "idle",
-        "activeTaskId": None,
-        "activeAgent": None,
         "columns": copy.deepcopy(list(columns)),
         "tasks": copy.deepcopy(list(tasks or [])),
         "activity": [],

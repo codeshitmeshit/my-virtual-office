@@ -13,6 +13,16 @@ from .project_materialization import (
     materialize_task_base,
 )
 from .project_execution_ordering import execution_order_map
+from .project_orchestration import (
+    STATE_COMPLETED,
+    STATE_DRAFT,
+    STATE_PAUSED,
+    compact_stages_after_removal,
+    is_marked_project,
+    last_completed_stage,
+    orchestration_state,
+    task_stage,
+)
 from .project_repository import ProjectAlreadyExistsError, ProjectConflictError, ProjectNotFoundError, ProjectRepository
 
 
@@ -20,6 +30,60 @@ from .project_repository import ProjectAlreadyExistsError, ProjectConflictError,
 class CommandOutcome:
     result: ServiceResult
     post_commit: Mapping[str, Any] | None = None
+
+
+EDITABLE_ORCHESTRATION_STATES = frozenset({STATE_DRAFT, STATE_PAUSED})
+
+
+def _marked_structural_edit_error(project: Mapping[str, Any]) -> str | None:
+    if not is_marked_project(project):
+        return None
+    state = orchestration_state(project).get("state")
+    if state not in EDITABLE_ORCHESTRATION_STATES:
+        return str(state or "")
+    return None
+
+
+def _bump_orchestration_revision(project: dict[str, Any]) -> None:
+    if not is_marked_project(project):
+        return
+    state = orchestration_state(project)
+    state["revision"] = int(state.get("revision") or 0) + 1
+    project["orchestration"] = state
+
+
+def _prepare_marked_task_creation(project: dict[str, Any], body: Mapping[str, Any]) -> dict[str, Any]:
+    config = dict(body)
+    if not is_marked_project(project):
+        return config
+    state = orchestration_state(project)
+    lock_state = _marked_structural_edit_error(project)
+    if lock_state is not None and lock_state != STATE_COMPLETED:
+        raise PermissionError("orchestration_locked")
+    if lock_state == STATE_COMPLETED:
+        timestamp = config.get("_timestamp")
+        max_existing_stage = max(
+            (
+                task_stage(task) or 0
+                for task in project.get("tasks") or []
+                if isinstance(task, Mapping)
+            ),
+            default=0,
+        )
+        next_stage = max(last_completed_stage(project), max_existing_stage) + 1
+        config["executionStage"] = next_stage
+        state.update({
+            "state": STATE_PAUSED,
+            "currentStage": next_stage,
+            "currentRunId": None,
+            "pauseReason": "new_task_added_after_completion",
+            "completedAt": None,
+        })
+        project["orchestration"] = state
+        project["status"] = "active"
+        if timestamp:
+            project["updatedAt"] = timestamp
+    return config
 
 
 def _assignment_rejection(
@@ -69,7 +133,6 @@ def create_project(
             **body,
             "title": title,
             "createdBy": created_by,
-            "executionPolicy": {"maxActiveTasks": 1},
         },
         columns=columns,
         tasks=[],
@@ -102,27 +165,29 @@ def create_task(project_id: str, body: Mapping[str, Any], *, repository: Project
     created = {}
     def mutate(project):
         timestamp = now()
+        task_config = _prepare_marked_task_creation(project, {**body, "_timestamp": timestamp})
         task = materialize_task_base(
             {
                 "title": title,
-                "description": body.get("description", ""),
-                "columnId": body.get("columnId"),
-                "priority": body.get("priority", "medium"),
-                "assignee": body.get("assignee"),
-                "assigneeBranch": body.get("assigneeBranch"),
-                "executorAgentId": body.get("executorAgentId"),
-                "reviewerAgentId": body.get("reviewerAgentId"),
-                "requiresUserAcceptance": body.get("requiresUserAcceptance", False),
-                "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False),
-                "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False),
-                "dueDate": body.get("dueDate"),
-                "tags": body.get("tags", []),
-                "checklist": body.get("checklist", []),
-                "meetingActionItems": body.get("meetingActionItems", []),
-                "meetingDecisionHistory": body.get("meetingDecisionHistory", []),
-                "meetingDiscussionPoints": body.get("meetingDiscussionPoints", []),
-                "meetingRecords": body.get("meetingRecords", []),
-                "source": body.get("source"),
+                "description": task_config.get("description", ""),
+                "columnId": task_config.get("columnId"),
+                "executionStage": task_config.get("executionStage"),
+                "priority": task_config.get("priority", "medium"),
+                "assignee": task_config.get("assignee"),
+                "assigneeBranch": task_config.get("assigneeBranch"),
+                "executorAgentId": task_config.get("executorAgentId"),
+                "reviewerAgentId": task_config.get("reviewerAgentId"),
+                "requiresUserAcceptance": task_config.get("requiresUserAcceptance", False),
+                "allowReviewerlessExecution": task_config.get("allowReviewerlessExecution", False),
+                "scheduledRepeatEnabled": task_config.get("scheduledRepeatEnabled", False),
+                "dueDate": task_config.get("dueDate"),
+                "tags": task_config.get("tags", []),
+                "checklist": task_config.get("checklist", []),
+                "meetingActionItems": task_config.get("meetingActionItems", []),
+                "meetingDecisionHistory": task_config.get("meetingDecisionHistory", []),
+                "meetingDiscussionPoints": task_config.get("meetingDiscussionPoints", []),
+                "meetingRecords": task_config.get("meetingRecords", []),
+                "source": task_config.get("source"),
             },
             columns=project.get("columns") or [],
             existing_tasks=project.get("tasks") or [],
@@ -132,8 +197,9 @@ def create_task(project_id: str, body: Mapping[str, Any], *, repository: Project
             now=now,
         )
         project.setdefault("tasks", []).append(task)
+        _bump_orchestration_revision(project)
         project["updatedAt"] = timestamp
-        by = body.get("by", "user")
+        by = task_config.get("by", "user")
         log_activity(project, "task_created", by, f"Created task '{title}'", task["id"])
         created.update({"task": task, "columnTitle": next((column["title"] for column in project.get("columns", []) if column["id"] == task["columnId"]), "backlog"), "by": by})
     try:
@@ -142,6 +208,11 @@ def create_task(project_id: str, body: Mapping[str, Any], *, repository: Project
         return CommandOutcome(ServiceResult(404, {"error": "Project not found"}))
     except ProjectMaterializationError as exc:
         return CommandOutcome(ServiceResult(400, {"error": str(exc)}))
+    except PermissionError:
+        return CommandOutcome(ServiceResult(409, {
+            "error": "Project orchestration is locked against ordinary task creation",
+            "code": "orchestration_structural_edit_locked",
+        }))
     return CommandOutcome(ServiceResult(200, {"ok": True, "task": created["task"]}), created)
 
 
@@ -186,14 +257,44 @@ def update_columns(project_id: str, body: Mapping[str, Any], *, repository: Proj
 def delete_task(project_id: str, task_id: str, *, repository: ProjectRepository, now: Callable[[], str]) -> CommandOutcome:
     found = {"value": False}
     def mutate(project):
-        tasks = project.get("tasks", []); remaining = [task for task in tasks if task.get("id") != task_id]
-        found["value"] = len(remaining) != len(tasks)
+        lock_state = _marked_structural_edit_error(project)
+        if lock_state is not None:
+            raise PermissionError("orchestration_locked")
+        tasks = project.get("tasks", [])
+        target = next((task for task in tasks if task.get("id") == task_id), None)
+        if target is None:
+            return
+        if is_marked_project(project):
+            stage = task_stage(target)
+            if stage is not None and stage <= last_completed_stage(project):
+                raise PermissionError("completed_stage_locked")
+        remaining = [task for task in tasks if task.get("id") != task_id]
+        found["value"] = True
         if found["value"]:
-            project["tasks"] = remaining; project["updatedAt"] = now()
+            timestamp = now()
+            project["tasks"] = remaining
+            if is_marked_project(project):
+                compacted = dict(compact_stages_after_removal(project, task_id))
+                for task in project.get("tasks", []):
+                    if task.get("id") in compacted:
+                        task["executionStage"] = compacted[task["id"]]
+                        task["updatedAt"] = timestamp
+                _bump_orchestration_revision(project)
+            project["updatedAt"] = timestamp
     try:
         repository.update(project_id, mutate)
     except ProjectNotFoundError:
         return CommandOutcome(ServiceResult(404, {"error": "Project not found"}))
+    except PermissionError as exc:
+        if str(exc) == "completed_stage_locked":
+            return CommandOutcome(ServiceResult(409, {
+                "error": "Completed stage tasks cannot be deleted",
+                "code": "completed_stage_locked",
+            }))
+        return CommandOutcome(ServiceResult(409, {
+            "error": "Project orchestration is locked against ordinary task deletion",
+            "code": "orchestration_structural_edit_locked",
+        }))
     if not found["value"]:
         return CommandOutcome(ServiceResult(404, {"error": "Task not found"}))
     return CommandOutcome(ServiceResult(200, {"ok": True, "id": task_id}))

@@ -91,6 +91,13 @@ def create_project_with_task():
     return project, task
 
 
+def unmark_project_for_legacy_task_cron(project_id):
+    data, stored = server._project_find(project_id)
+    stored.pop("executionModel", None)
+    stored.pop("orchestration", None)
+    server._save_projects(data)
+
+
 def create_cron(project_id, task_id=None):
     body = {
         "name": "History cron",
@@ -136,6 +143,7 @@ def test_paused_and_repeat_block_write_non_alert_history():
         server._gateway_rpc_call = FakeCronGateway()
         try:
             project, task = create_project_with_task()
+            unmark_project_for_legacy_task_cron(project["id"])
             created = create_cron(project["id"], task["id"])
 
             server._handle_project_update(project["id"], {"scheduledCronPaused": True})

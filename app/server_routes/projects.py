@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import urllib.parse
@@ -55,19 +56,20 @@ def handle_get(handler, parsed_url):
         result = projects_service._handle_project_artifact_file(proj_id, query)
         if not result.get("ok"):
             return send_json(handler, result)
-        file_path = result.get("path")
+        opened = result.get("opened")
+        if not opened:
+            return send_json(handler, {"error": "Artifact not found", "_status": 404})
         try:
-            size = os.path.getsize(file_path)
             handler.send_response(200)
-            handler.send_header("Content-Type", handler.guess_type(file_path))
-            handler.send_header("Content-Length", str(size))
+            handler.send_header("Content-Type", handler.guess_type(opened.relative_path))
+            handler.send_header("Content-Length", str(opened.size))
             handler.send_header("Access-Control-Allow-Origin", "*")
-            handler.send_header("Content-Disposition", f"inline; filename={projects_service.json.dumps(os.path.basename(file_path))}")
+            handler.send_header("Content-Disposition", f"inline; filename={json.dumps(os.path.basename(opened.relative_path))}")
             handler.end_headers()
-            with open(file_path, "rb") as f:
-                shutil.copyfileobj(f, handler.wfile)
-        except OSError:
-            send_json(handler, {"error": "Artifact not found"}, status=404)
+            with opened:
+                shutil.copyfileobj(opened.stream, handler.wfile)
+        except (BrokenPipeError, ConnectionResetError, OSError):
+            opened.close()
         return True
     if path.startswith("/api/projects/") and path.endswith("/artifacts"):
         proj_id = path.split("/api/projects/", 1)[1].rsplit("/artifacts", 1)[0]
@@ -168,6 +170,8 @@ def handle_put(handler, parsed_url):
     proj_id = parts[0]
     if len(parts) == 1:
         result = projects_service._handle_project_update(proj_id, body)
+    elif len(parts) == 2 and parts[1] == "orchestration":
+        result = projects_service._handle_project_orchestration_update(proj_id, body)
     elif len(parts) == 2 and parts[1] == "columns":
         result = projects_service._handle_columns_update(proj_id, body)
     elif len(parts) == 3 and parts[1] == "tasks" and parts[2] == "reorder":

@@ -41,10 +41,16 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass
 import feishu_chat_channel
 import gateway_presence
+import server_routes
 from dashboard_realtime import DashboardRealtimeStream
 from services import project_execution as project_execution_service
 from services import project_workflow_chat as project_workflow_chat_service
 from services import project_commands as project_command_service
+from services import project_orchestration_commands as project_orchestration_command_service
+from services import project_orchestration_pause as project_orchestration_pause_service
+from services import project_orchestration_recovery as project_orchestration_recovery_service
+from services import project_orchestration_skip as project_orchestration_skip_service
+from services import project_stage_dispatch as project_stage_dispatch_service
 from services import browser_project_creation as browser_project_creation_service
 from services import execution_lifecycle as execution_lifecycle_service
 from services import review_acceptance as review_acceptance_service
@@ -66,6 +72,9 @@ from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import archive_manager_lifecycle as archive_manager_lifecycle_service
+from server_services.agents import _handle_agents_list
+from server_services.browser_runtime import _handle_browser_status
+from server_services.config_runtime import _handle_health
 from services.weather_config import resolve_weather_location
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
@@ -85,6 +94,7 @@ from services import agent_management_session_mint as agent_management_session_m
 from services import agent_management_session_exchange as agent_management_session_exchange_service
 from services import agent_management_browser as agent_management_browser_service
 from services.project_execution_ordering import first_incomplete_task
+from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
 from services import system_agent_lifecycle as system_agent_lifecycle_service
 from services import system_agent_profiles as system_agent_profiles_service
@@ -131,6 +141,29 @@ from provider_execution import (
 from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message, update_feishu_notification
 from feishu_long_connection import FeishuLongConnectionReceiver
 
+# Route/service split compatibility markers:
+# from server_services import projects as _projects_service
+# from server_services import meetings as _meetings_service
+# from server_services import providers as _providers_service
+# from server_services import notifications as _notifications_service
+# from server_services import workflow as _workflow_service
+# from server_services.workflow import *
+# from server_services import archive_room as _archive_room_service
+# from server_services.archive_room import *
+# from server_services import agent_bridges as _agent_bridges_service
+# from server_services.agent_bridges import *
+# from server_services import agents as _agents_service
+# from server_services.agents import *
+# from server_services import skills as _skills_service
+# from server_services.skills import *
+# from server_services import config_runtime as _config_runtime_service
+# from server_services.config_runtime import *
+# from server_services import browser_runtime as _browser_runtime_service
+# from server_services.browser_runtime import *
+# server_routes.dispatch(self, "GET", parsed_url)
+# server_routes.dispatch(self, "POST", parsed_url)
+# server_routes.dispatch(self, "PUT", parsed_url)
+# server_routes.dispatch(self, "DELETE", parsed_url)
 
 _FEISHU_LONG_CONNECTION_RECEIVER = None
 _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
@@ -589,6 +622,20 @@ def _project_execution_dashboard_items():
 
 
 def _project_execution_project_summary(project):
+    if is_marked_project(project):
+        projection = project_projection(project)
+        state = orchestration_state(project)
+        active_count = int(projection.get("activeTaskCount") or 0)
+        active_states = {"starting", "running", "pausing"}
+        return {
+            "projectExecutionActive": active_count > 0 or state.get("state") in active_states,
+            "projectExecutionPhase": state.get("state") or "",
+            "activeTaskIds": list(projection.get("activeTaskIds") or []),
+            "activeTaskCount": active_count,
+            "currentStage": projection.get("currentStage"),
+            "orchestrationState": projection.get("orchestrationState"),
+            "pauseReason": projection.get("pauseReason"),
+        }
     active_items = _project_execution_task_dashboard_items(project)
     active_task_ids = {item.get("taskId") for item in active_items if item.get("taskId")}
     active_task = None
@@ -2915,14 +2962,11 @@ def _agent_project_tasks(agent):
             blocker = task.get("meetingBlocker") if isinstance(task.get("meetingBlocker"), dict) else {}
             attempts = task.get("attempts") if isinstance(task.get("attempts"), list) else []
             active_attempt = next((a for a in attempts if isinstance(a, dict) and a.get("id") == task.get("activeAttemptId")), None)
-            items.append({
+            item = {
                 "projectId": project.get("id", ""),
                 "projectTitle": project.get("title", ""),
                 "projectStatus": project.get("status", "active"),
                 "projectExecutionEnabled": bool(project.get("projectExecutionEnabled")),
-                "projectWorkflowPhase": project.get("workflowPhase") or "",
-                "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
-                "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason") or "",
                 "taskId": task.get("id", ""),
                 "id": task.get("id", ""),
                 "title": task.get("title", ""),
@@ -2955,7 +2999,24 @@ def _agent_project_tasks(agent):
                 "scheduledRepeatEnabled": task.get("scheduledRepeatEnabled") is True,
                 "updatedAt": task.get("updatedAt") or project.get("updatedAt", ""),
                 "readOnly": True,
-            })
+            }
+            if is_marked_project(project):
+                projection = project_projection(project)
+                item.update({
+                    "executionModel": projection.get("executionModel") or "",
+                    "projectWorkflowPhase": projection.get("orchestrationState") or "",
+                    "orchestrationState": projection.get("orchestrationState") or "",
+                    "currentStage": projection.get("currentStage"),
+                    "pauseReason": projection.get("pauseReason") or "",
+                    "activeTaskIds": projection.get("activeTaskIds") or [],
+                })
+            else:
+                item.update({
+                    "projectWorkflowPhase": project.get("workflowPhase") or "",
+                    "projectExecutionFlowActive": bool(project.get("projectExecutionFlowActive")),
+                    "projectExecutionFlowStopReason": project.get("projectExecutionFlowStopReason") or "",
+                })
+            items.append(item)
     items.sort(key=lambda x: x.get("updatedAt") or "", reverse=True)
     return items[:25]
 
@@ -17408,6 +17469,8 @@ def _project_cron_reason_label(reason, error=None):
         "dirty_workspace_confirmation_required": "工作区存在未确认变更，需要人工确认。",
         "dispatch_failed": "派发项目定时任务失败。",
         "project_all_tasks_completed": "项目所有任务已完成，定时任务已跳过。",
+        "marked_task_not_current_stage": "目标任务不属于当前编排阶段，本次定时任务已跳过。",
+        "marked_project_task_cron_forbidden": "编排项目不能通过任务级定时任务启动。",
     }
     if reason in labels:
         return labels[reason]
@@ -18289,10 +18352,17 @@ def _project_task_is_done(task):
 
 def _handle_project_get(project_id):
     """GET /api/projects/{id} — return full project."""
-    data = _load_projects()
-    for p in data["projects"]:
-        if p["id"] == project_id:
-            return {"ok": True, "project": p}
+    project = PROJECT_STORE.get_project(project_id)
+    if project is not None:
+        repaired = _project_execution_repair_acceptance_state({"projects": [project], "templates": []})
+        project = copy.deepcopy((repaired.get("projects") or [project])[0])
+        if is_marked_project(project):
+            project.update(project_projection(project))
+            project.pop("activeTaskId", None)
+            project.pop("activeAgent", None)
+            project.pop("projectExecutionFlowActive", None)
+            project.pop("projectExecutionFlowStopReason", None)
+        return {"ok": True, "project": project}
     return {"error": "Project not found", "_status": 404}
 
 
@@ -18615,7 +18685,10 @@ def _handle_task_update(project_id, task_id, body):
     post = outcome.post_commit or {}; task = post.get("task") or outcome.result.payload.get("task")
     if post.get("score"):
         score = post["score"]; task["_scoreAwarded"] = _award_points(score["assignee"], score["points"], score["reason"])
-    if post.get("continueFlow"):
+    if post.get("continueFlow") and is_marked_project(post.get("project") or {}):
+        attempt_id = str(((task or {}).get("reviewResult") or {}).get("attemptId") or "")
+        _project_stage_reconcile_terminal(project_id, task_id, attempt_id, "checklist_completed")
+    elif post.get("continueFlow"):
         _project_execution_schedule_continue(project_id, "checklist_completed")
     changed_fields = post.get("changedFields") or []
     if changed_fields:
@@ -18652,6 +18725,28 @@ def _handle_tasks_reorder(project_id, body):
         for task in (outcome.post_commit or {}).get("completedTasks", []):
             _archive_maintenance_trigger(project_id, "task_completed", source=_archive_source_ref("task", task.get("id"), title=task.get("title", ""), taskId=task.get("id")), title=f"Task completed: {task.get('title', '')}", summary=f"Task completed: {task.get('title', '')}", value_level="high", impact="task")
     return {**outcome.result.payload, **({"_status": outcome.result.status} if outcome.result.status != 200 else {})}
+
+
+def _handle_project_orchestration_update(project_id, body):
+    try:
+        outcome = project_orchestration_command_service.autosave_orchestration(
+            project_id,
+            body,
+            repository=_PROJECT_REPOSITORY,
+            now=_proj_now,
+        )
+    except Exception as exc:
+        print(f"Project orchestration auto-save failed for {project_id}: {_project_execution_redact(str(exc))}", file=sys.stderr)
+        return {
+            "ok": False,
+            "error": "Project orchestration could not be persisted",
+            "code": "orchestration_persistence_failed",
+            "_status": 500,
+        }
+    return {
+        **outcome.result.payload,
+        **({"_status": outcome.result.status} if outcome.result.status != 200 else {}),
+    }
 
 
 # ── DELETE handlers ───────────────────────────────────────────────────────────
@@ -19275,6 +19370,24 @@ def _project_execution_mark_done(project, task, actor, reason, attempt_id=None, 
     _project_execution_transition(project, task, "done", actor, reason, attempt_id)
     task["completedAt"] = _proj_now()
     task["columnId"] = done_col.get("id")
+    try:
+        from services.project_task_final_result import ensure_task_final_result
+
+        ensure_task_final_result(
+            project,
+            task,
+            attempt=_project_execution_attempt(task, attempt_id) if attempt_id else None,
+            evidence=task.get("evidence") if isinstance(task.get("evidence"), dict) else {},
+            status="available",
+            now=task.get("completedAt"),
+        )
+    except Exception as exc:
+        task.setdefault("comments", []).append({
+            "id": _proj_uuid(),
+            "author": "project-execution",
+            "text": f"Final result artifact generation failed: {_project_execution_redact(exc)}",
+            "createdAt": _proj_now(),
+        })
     if not was_completed:
         _archive_trigger_task_completed(project.get("id"), task)
     return {"ok": True}
@@ -20196,6 +20309,7 @@ def _project_execution_apply_meeting_result(meeting, _record_reconciliation=True
     if not outcome and meeting.get("stage") in {"cancelled", "failed"}:
         outcome = "needs_user_decision"
     resume = {"needed": False, "mode": "continuous"}
+    reconcile = {"needed": False, "attemptId": "", "reason": "meeting_resolved_continue"}
     def mutate(project):
         task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
         if not task:
@@ -20218,6 +20332,7 @@ def _project_execution_apply_meeting_result(meeting, _record_reconciliation=True
             "updatedAt": now,
         })
         if outcome == "approved":
+            marked_project = is_marked_project(project)
             blocker.update({"status": "resolved_continue", "resolvedAt": now, "awaitingUserDecision": False})
             task["meetingBlocker"] = blocker; task["blockedReason"] = None; task["lastError"] = None; task["activeAttemptId"] = None
             applied = _project_execution_apply_meeting_output_to_task(project, task, meeting, result, request_id)
@@ -20225,12 +20340,21 @@ def _project_execution_apply_meeting_result(meeting, _record_reconciliation=True
             reason += "; meeting action items must be completed before original task resumes." if applied.get("pendingRequired") else "; task may continue."
             _project_execution_transition(project, task, "backlog", "meeting", reason, request_id)
             _project_execution_move_task_to_column(project, task, _wf_get_backlog_col(project))
-            project.update({
+            project_update = {
                 "workflowActive": False, "workflowPhase": "meeting_resolved_continue", "activeTaskId": None,
-                "activeAgent": None, "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
-                "projectExecutionFlowStopReason": None, "updatedAt": now,
-            })
-            resume["needed"] = True; resume["mode"] = project.get("projectExecutionStartMode") or "continuous"
+                "activeAgent": None, "updatedAt": now,
+            }
+            if not marked_project:
+                project_update.update({
+                    "projectExecutionFlowActive": project.get("projectExecutionStartMode") == "continuous",
+                    "projectExecutionFlowStopReason": None,
+                })
+            project.update(project_update)
+            if marked_project:
+                reconcile["needed"] = True
+                reconcile["attemptId"] = source_attempt or blocker_attempt
+            else:
+                resume["needed"] = True; resume["mode"] = project.get("projectExecutionStartMode") or "continuous"
             return {"ok": True, "status": "resolved_continue", "taskId": task_id, "appliedMeetingResult": applied, "requestStatus": "resolved_continue"}
         if outcome in {"rejected", "no_consensus"}:
             blocker.update({"status": "blocked", "resolvedAt": now, "awaitingUserDecision": False})
@@ -20277,6 +20401,8 @@ def _project_execution_apply_meeting_result(meeting, _record_reconciliation=True
             project_id, task_id,
             {"projectStart": True, "mode": resume["mode"], "autoReviewAfterExecution": True, "by": "meeting"},
         ), daemon=True).start()
+    if reconcile["needed"]:
+        _project_stage_reconcile_terminal(project_id, task_id, reconcile["attemptId"], reconcile["reason"])
     return applied
 
 
@@ -23040,6 +23166,17 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
     ) or "- No checklist supplied"
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
     archive_context = _archive_context_prompt_block(project, task)
+    try:
+        from services.project_task_final_result import prior_stage_result_prompt_block, task_final_result_prompt_instructions
+
+        prior_stage_context = prior_stage_result_prompt_block(project, task)
+        final_result_instructions = task_final_result_prompt_instructions()
+    except Exception:
+        prior_stage_context = ""
+        final_result_instructions = (
+            "TASK FINAL RESULT REQUIREMENT:\n"
+            "- Include a concise final conclusion, changed files/artifacts, tests, risks, and notes for later stages.\n"
+        )
     meeting_action_block = ""
     if attempt.get("meetingActionPhase"):
         pending_actions = [
@@ -23072,6 +23209,7 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. The orchestration service will persist checklistUpdates from your final response; do not call the project API to persist checklist changes yourself.\n"
         f"2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{project.get('id', '')}/tasks/{task.get('id', '')}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
         "3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.\n"
+        f"{final_result_instructions}"
         "FINAL RESPONSE FORMAT (strict):\n"
         "- First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.\n"
         "- Then output exactly one fenced ```json block containing a single object. For a regular task, checklistUpdates is REQUIRED and must be a non-empty array containing every acceptance checklist item with its final status. meetingDiscussionPoints and tests are optional.\n"
@@ -23083,6 +23221,7 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
         f"PROJECT_ID: {project.get('id', '')}\nTASK_ID: {task.get('id', '')}\nTASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
         f"REWORK FEEDBACK: {rework_feedback}\nCHECKLIST:\n{checklist_text}\n"
+        f"{prior_stage_context}"
         f"{meeting_action_block}"
         f"{archive_context}\n"
     )
@@ -23272,6 +23411,8 @@ def _project_execution_review_runner_ports():
         new_id=_proj_uuid,
         launch_rework=_project_execution_launch_rework,
         discard_review=_project_execution_discard_review,
+        is_stage_pipeline=is_marked_project,
+        reconcile_terminal=_project_stage_reconcile_terminal,
     )
 
 
@@ -23380,6 +23521,8 @@ def _project_execution_runner_ports():
         schedule_transient_retry=_project_execution_schedule_transient_retry,
         start_review=_handle_project_execution_review_start,
         finalize_cancel=_project_execution_finalize_cancel,
+        is_stage_pipeline=is_marked_project,
+        reconcile_terminal=_project_stage_reconcile_terminal,
     )
 
 
@@ -23415,7 +23558,338 @@ def _project_execution_start_ports():
     )
 
 
+def _project_stage_preflight_ports():
+    return type("ProjectStagePreflightPorts", (), {
+        "validate_workspace": staticmethod(_project_execution_validate_workspace),
+        "git_snapshot": staticmethod(_project_execution_git_snapshot),
+        "resolve_roles": staticmethod(lambda project, task, allow_skip: _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=allow_skip)),
+        "authorize": staticmethod(lambda project, actor: {"ok": True}),
+        "now": staticmethod(_proj_now),
+        "new_run_id": staticmethod(_proj_uuid),
+    })()
+
+
+def _project_stage_attempt_ports():
+    return type("ProjectStageAttemptPorts", (), {
+        "now": staticmethod(_proj_now),
+        "new_attempt_id": staticmethod(_proj_uuid),
+        "requires_acceptance": staticmethod(_project_execution_requires_user_acceptance),
+        "seed_checklist": staticmethod(_project_execution_seed_acceptance_checklist),
+        "has_pending_meeting_actions": staticmethod(_project_execution_has_pending_meeting_actions),
+        "transition": staticmethod(_project_execution_transition),
+    })()
+
+
+_PROJECT_STAGE_EXECUTION_DISPATCHER = None
+
+
+def _project_stage_dispatch_runner(item):
+    attempt_id = str((item.payload or {}).get("attemptId") or "")
+    cancel_flag = (item.payload or {}).get("cancelFlag")
+    if not attempt_id or cancel_flag is None:
+        return {"ok": False, "code": "invalid_stage_dispatch_payload"}
+    return _project_execution_run_attempt(item.project_id, item.task_id, attempt_id, cancel_flag)
+
+
+def _project_stage_execution_dispatcher():
+    global _PROJECT_STAGE_EXECUTION_DISPATCHER
+    if _PROJECT_STAGE_EXECUTION_DISPATCHER is None:
+        _PROJECT_STAGE_EXECUTION_DISPATCHER = project_stage_dispatch_service.BoundedProjectExecutionDispatcher(
+            _project_stage_dispatch_runner,
+        )
+    return _PROJECT_STAGE_EXECUTION_DISPATCHER
+
+
+def _project_stage_reconcile_terminal(project_id, task_id, attempt_id, reason):
+    try:
+        project = _PROJECT_REPOSITORY.get(project_id)
+    except ProjectNotFoundError:
+        return None
+    if not project or not is_marked_project(project):
+        return None
+    task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
+    attempt = _project_execution_attempt(task or {}, attempt_id)
+    run_id = str((attempt or {}).get("stageRunId") or (task or {}).get("stageRunId") or "").strip()
+    if not run_id:
+        return None
+    outcome = project_stage_dispatch_service.reconcile_stage(
+        project_id,
+        run_id,
+        repository=_PROJECT_REPOSITORY,
+        now=_proj_now,
+        new_run_id=_proj_uuid,
+        on_project_completed=_send_project_execution_project_complete_notification,
+    )
+    continuation = None
+    reconciliation = outcome.reconciliation
+    if (
+        outcome.result.status == 200
+        and reconciliation is not None
+        and reconciliation.status == "stage_advanced"
+        and reconciliation.next_run_id
+    ):
+        continuation = project_stage_dispatch_service.submit_reserved_stage(
+            project_id,
+            reconciliation.next_run_id,
+            {"by": "stage-dispatch", "autoReviewAfterExecution": True},
+            repository=_PROJECT_REPOSITORY,
+            preflight_ports=_project_stage_preflight_ports(),
+            attempt_ports=_project_stage_attempt_ports(),
+            dispatcher=_project_stage_execution_dispatcher(),
+            create_cancel_flag=_PROJECT_EXECUTION_CANCEL_REGISTRY.create,
+        )
+    return {
+        **dict(outcome.result.payload),
+        "_status": outcome.result.status,
+        "reason": reason,
+        **({
+            "continuation": {
+                **dict(continuation.result.payload),
+                "_status": continuation.result.status,
+            }
+        } if continuation is not None else {}),
+    }
+
+
+def _project_orchestration_skip_ports():
+    return project_orchestration_skip_service.SkipPorts(
+        now=_proj_now,
+        management_authorize=lambda project, actor: {"ok": True},
+        new_run_id=_proj_uuid,
+        on_project_completed=_send_project_execution_project_complete_notification,
+    )
+
+
+def _project_orchestration_pause_ports():
+    return project_orchestration_pause_service.PausePorts(
+        now=_proj_now,
+        authorize=lambda project, actor: {"ok": True},
+    )
+
+
+def _project_orchestration_pause_cancellation_ports(project_id):
+    def cancel_attempt(payload):
+        current_project_id = str(project_id or "")
+        task_id = str(payload.get("taskId") or "")
+        attempt_id = str(payload.get("attemptId") or "")
+        project = _PROJECT_REPOSITORY.get(current_project_id) if current_project_id else None
+        task = next((item for item in (project or {}).get("tasks", []) if item.get("id") == task_id), None)
+        attempt = _project_execution_attempt(task or {}, attempt_id)
+        if not project or not task or not attempt:
+            return {"ok": True, "status": "stale", "reason": "attempt_not_found"}
+        _PROJECT_EXECUTION_CANCEL_REGISTRY.cancel(attempt_id)
+        _project_execution_cancel_provider(attempt, current_project_id, task_id, attempt_id)
+        return {"ok": True, "status": "cancelled"}
+
+    return project_orchestration_pause_service.PauseCancellationPorts(
+        now=_proj_now,
+        cancel_attempt=cancel_attempt,
+        transition=_project_execution_transition,
+    )
+
+
+def _project_orchestration_recovery_ports():
+    def is_live_attempt(attempt_id):
+        with _PROJECT_EXECUTION_LOCK:
+            return bool(attempt_id and (attempt_id in _PROJECT_EXECUTION_CANCEL_FLAGS or attempt_id in _PROJECT_EXECUTION_REVIEW_FLAGS))
+
+    def prepare_reserved_task(project_id, task_id, run_id):
+        project = _PROJECT_REPOSITORY.get(project_id)
+        task = next((item for item in (project or {}).get("tasks", []) if item.get("id") == task_id), None)
+        if not project or not task:
+            return {"ok": False, "code": "task_not_found", "error": "Project or task not found"}
+        workspace = _project_execution_validate_workspace(project.get("workspacePath"))
+        if not workspace.get("ok"):
+            return dict(workspace)
+        git_state = _project_execution_git_snapshot(workspace.get("path"))
+        if git_state.get("error"):
+            return {
+                "ok": False,
+                "code": "workspace_git_snapshot_failed",
+                "error": "Unable to verify the Git workspace state",
+                "snapshot": git_state,
+            }
+        roles = _project_execution_resolve_start_roles(project, task, allow_skip_reviewer=False)
+        if not roles.get("ok"):
+            return dict(roles)
+        outcome = project_stage_dispatch_service.prepare_reserved_task_attempt(
+            project_id,
+            task_id,
+            run_id,
+            repository=_PROJECT_REPOSITORY,
+            ports=_project_stage_attempt_ports(),
+            workspace=workspace,
+            git_state=git_state,
+            roles=roles,
+            body={"by": "startup-recovery", "autoReviewAfterExecution": True},
+        )
+        payload = dict(outcome.result.payload)
+        payload["_status"] = outcome.result.status
+        return payload
+
+    def submit_reserved_task(project_id, task_id, run_id, attempt_id):
+        cancel_flag = _PROJECT_EXECUTION_CANCEL_REGISTRY.create(attempt_id)
+        submission = _project_stage_execution_dispatcher().submit(
+            project_id=project_id,
+            task_id=task_id,
+            run_id=run_id,
+            payload={"attemptId": attempt_id, "cancelFlag": cancel_flag},
+        )
+        if not submission.accepted:
+            _PROJECT_EXECUTION_CANCEL_REGISTRY.discard(attempt_id)
+        return {
+            "ok": submission.accepted,
+            "accepted": submission.accepted,
+            "code": submission.code,
+            "queued": submission.queued,
+            "inFlight": submission.in_flight,
+        }
+
+    def reconcile_stage_run(project_id, run_id):
+        outcome = project_stage_dispatch_service.reconcile_stage(
+            project_id,
+            run_id,
+            repository=_PROJECT_REPOSITORY,
+            now=_proj_now,
+            new_run_id=_proj_uuid,
+            on_project_completed=_send_project_execution_project_complete_notification,
+        )
+        payload = dict(outcome.result.payload)
+        payload["_status"] = outcome.result.status
+        return payload
+
+    def complete_pausing_project(project_id):
+        outcome = project_orchestration_pause_service.complete_phase_two_pause(
+            project_id,
+            repository=_PROJECT_REPOSITORY,
+            ports=_project_orchestration_pause_cancellation_ports(project_id),
+        )
+        payload = dict(outcome.result.payload)
+        payload["_status"] = outcome.result.status
+        return payload
+
+    return project_orchestration_recovery_service.RecoveryPorts(
+        now=_proj_now,
+        is_live_attempt=is_live_attempt,
+        prepare_reserved_task=prepare_reserved_task,
+        submit_reserved_task=submit_reserved_task,
+        reconcile_stage_run=reconcile_stage_run,
+        complete_pausing_project=complete_pausing_project,
+        transition=_project_execution_transition,
+    )
+
+
+def _project_orchestration_recover_on_startup():
+    time.sleep(3)
+    try:
+        report = project_orchestration_recovery_service.recover_marked_projects(
+            repository=_PROJECT_REPOSITORY,
+            ports=_project_orchestration_recovery_ports(),
+        )
+        recovered = [item for item in report.projects if item.status != "ignored"]
+        if recovered:
+            summary = ", ".join(f"{item.project_id[:8]}:{item.status}" for item in recovered)
+            print(f"[PROJECT ORCHESTRATION RECOVERY] {summary}")
+    except Exception as exc:
+        print(f"[PROJECT ORCHESTRATION RECOVERY] Error: {exc}")
+
+
+def _handle_project_orchestration_skip_request(project_id, task_id, body=None):
+    outcome = project_orchestration_skip_service.request_task_skip(
+        project_id,
+        task_id,
+        body or {},
+        repository=_PROJECT_REPOSITORY,
+        ports=_project_orchestration_skip_ports(),
+    )
+    payload = dict(outcome.result.payload)
+    payload["_status"] = outcome.result.status
+    return payload
+
+
+def _handle_project_orchestration_skip_decision(project_id, task_id, body=None):
+    outcome = project_orchestration_skip_service.decide_task_skip(
+        project_id,
+        task_id,
+        body or {},
+        repository=_PROJECT_REPOSITORY,
+        ports=_project_orchestration_skip_ports(),
+    )
+    payload = dict(outcome.result.payload)
+    payload["_status"] = outcome.result.status
+    return payload
+
+
+def _handle_project_orchestration_pause(project_id, body=None):
+    phase_one = project_orchestration_pause_service.request_phase_one_pause(
+        project_id,
+        body or {},
+        repository=_PROJECT_REPOSITORY,
+        ports=_project_orchestration_pause_ports(),
+    )
+    if phase_one.result.status != 200:
+        if phase_one.result.payload.get("code") == "orchestration_not_pausable" and phase_one.result.payload.get("orchestrationState") == "paused":
+            phase_two = project_orchestration_pause_service.complete_phase_two_pause(
+                project_id,
+                repository=_PROJECT_REPOSITORY,
+                ports=_project_orchestration_pause_cancellation_ports(project_id),
+            )
+            payload = dict(phase_two.result.payload)
+            payload["_status"] = phase_two.result.status
+            return payload
+        payload = dict(phase_one.result.payload)
+        payload["_status"] = phase_one.result.status
+        return payload
+    phase_two = project_orchestration_pause_service.complete_phase_two_pause(
+        project_id,
+        repository=_PROJECT_REPOSITORY,
+        ports=_project_orchestration_pause_cancellation_ports(project_id),
+    )
+    payload = dict(phase_two.result.payload)
+    payload.setdefault("phaseOne", dict(phase_one.result.payload))
+    payload["_status"] = phase_two.result.status
+    return payload
+
+
+def _handle_project_orchestration_resume(project_id, body=None):
+    outcome = project_stage_dispatch_service.resume_paused_project(
+        project_id,
+        body or {},
+        repository=_PROJECT_REPOSITORY,
+        preflight_ports=_project_stage_preflight_ports(),
+        attempt_ports=_project_stage_attempt_ports(),
+        dispatcher=_project_stage_execution_dispatcher(),
+        create_cancel_flag=_PROJECT_EXECUTION_CANCEL_REGISTRY.create,
+    )
+    payload = dict(outcome.result.payload)
+    payload["_status"] = outcome.result.status
+    return payload
+
+
+def _handle_marked_project_execution_project_start(project_id, body=None):
+    outcome = project_stage_dispatch_service.start_marked_project(
+        project_id,
+        body or {},
+        repository=_PROJECT_REPOSITORY,
+        preflight_ports=_project_stage_preflight_ports(),
+        attempt_ports=_project_stage_attempt_ports(),
+        dispatcher=_project_stage_execution_dispatcher(),
+        create_cancel_flag=_PROJECT_EXECUTION_CANCEL_REGISTRY.create,
+    )
+    payload = dict(outcome.result.payload)
+    payload["_status"] = outcome.result.status
+    return payload
+
+
 def _handle_project_execution_start(project_id, task_id, body):
+    project = _PROJECT_REPOSITORY.get(project_id)
+    if project and is_marked_project(project):
+        return {
+            "ok": False,
+            "code": "marked_project_task_start_forbidden",
+            "error": "Marked stage-pipeline projects must be started at the project level",
+            "_status": 409,
+        }
     return execution_lifecycle_service.start_task(
         project_id, task_id, body,
         repository=_PROJECT_REPOSITORY,
@@ -23425,6 +23899,9 @@ def _handle_project_execution_start(project_id, task_id, body):
 
 
 def _handle_project_execution_project_start(project_id, body=None):
+    project = _PROJECT_REPOSITORY.get(project_id)
+    if project and is_marked_project(project):
+        return _handle_marked_project_execution_project_start(project_id, body)
     return execution_lifecycle_service.start_project(
         project_id, body, repository=_PROJECT_REPOSITORY,
         active_task=_project_execution_project_start_blocker,
@@ -23498,7 +23975,7 @@ def _handle_project_execution_review_start(project_id, task_id, body=None):
             enabled=_project_execution_enabled,
             latest_attempt=_project_execution_latest_attempt,
             resolve_roles=_project_execution_resolve_roles,
-            active_task=_project_execution_active_task,
+            active_task=lambda project: None if is_marked_project(project) else _project_execution_active_task(project),
             transition=_project_execution_transition,
             now=_proj_now,
             new_id=_proj_uuid,
@@ -23518,7 +23995,7 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None, *, entr
         ports=review_acceptance_service.AcceptancePorts(
             enabled=_project_execution_enabled,
             validate_workspace=_project_execution_validate_workspace,
-            active_task=_project_execution_active_task,
+            active_task=lambda project: None if is_marked_project(project) else _project_execution_active_task(project),
             resolve_roles=lambda project, task, allow_skip: _project_execution_resolve_start_roles(
                 project, task, allow_skip_reviewer=allow_skip,
             ),
@@ -23535,6 +24012,8 @@ def _handle_project_execution_acceptance(project_id, task_id, body=None, *, entr
             runner=_project_execution_run_attempt,
             schedule_continue=_project_execution_schedule_continue,
             notify_intervention=_send_project_execution_intervention_notification,
+            is_stage_pipeline=is_marked_project,
+            reconcile_terminal=_project_stage_reconcile_terminal,
         ),
     )
 
@@ -25546,7 +26025,7 @@ def _wf_agent_descriptor(agent_id):
     return {"providerKind": "openclaw", "providerAgentId": agent_id}
 
 
-def _handle_workflow_chat(project_id):
+def _handle_workflow_chat(project_id, task_scope=None):
     """Return the compatible workflow-chat envelope for one resolved execution scope."""
 
     def workflow_state(target_project_id):
@@ -25567,7 +26046,7 @@ def _handle_workflow_chat(project_id):
             session_active=_wf_is_task_session_active,
         )
     )
-    return service.read(project_id)
+    return service.read(project_id, task_scope=task_scope)
 
 
 def _wf_timeline_router():
@@ -26999,6 +27478,28 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return
         body = {**body, "by": agent_id, "source": "agent_project_execution"}
         result = _handle_project_execution_start(project_id, task_id, body)
+        status = int(result.get("_status") or 200)
+        payload = dict(result)
+        payload.pop("_status", None)
+        self._send_json(payload, status=status, allow_origin="*")
+
+    def _handle_agent_project_orchestration_skip_request(self, project_id, task_id):
+        body = self._read_agent_project_execution_body()
+        if body is None:
+            return
+        agent_id = self._agent_project_execution_id()
+        project = self._agent_project_execution_project(project_id)
+        if project is None:
+            return
+        if not self._agent_project_execution_authorized(project, agent_id):
+            return
+        body = {
+            **body,
+            "actor": {"type": "agent", "id": agent_id},
+            "by": agent_id,
+            "source": "agent_project_execution",
+        }
+        result = _handle_project_orchestration_skip_request(project_id, task_id, body)
         status = int(result.get("_status") or 200)
         payload = dict(result)
         payload.pop("_status", None)
@@ -28892,13 +29393,15 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
-        elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/chat"):
-            proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/chat", 1)[0]
-            result = _handle_workflow_chat(proj_id)
-            self.send_response(200)
+        elif request_path.startswith("/api/projects/") and request_path.endswith("/workflow/chat"):
+            proj_id = request_path.split("/api/projects/")[1].rsplit("/workflow/chat", 1)[0]
+            task_scope = (query_params.get("taskId") or query_params.get("taskScope") or [""])[0]
+            result = _handle_workflow_chat(urllib.parse.unquote(proj_id), task_scope=task_scope)
+            self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/status"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/status", 1)[0]
@@ -30141,6 +30644,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             if len(parts) == 1:
                 # PUT /api/projects/{id}
                 result = _handle_project_update(proj_id, body)
+            elif len(parts) == 2 and parts[1] == "orchestration":
+                # PUT /api/projects/{id}/orchestration
+                result = _handle_project_orchestration_update(proj_id, body)
             elif len(parts) == 2 and parts[1] == "columns":
                 # PUT /api/projects/{id}/columns
                 result = _handle_columns_update(proj_id, body)
@@ -30402,6 +30908,20 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 self._send_json({"ok": False, "error": "Project not found"}, status=404)
                 return
             self._handle_agent_project_scheduled_cron_create(project_id)
+            return
+        if request_path.startswith(agent_project_prefix) and request_path.endswith("/orchestration/skip-request"):
+            rest = request_path[len(agent_project_prefix):].strip("/")
+            if "/tasks/" not in rest:
+                self._send_json({"ok": False, "error": "Project or task not found"}, status=404)
+                return
+            project_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/orchestration/skip-request", 1)[0].strip("/")
+            project_id = urllib.parse.unquote(project_id).strip("/")
+            task_id = urllib.parse.unquote(task_id).strip("/")
+            if not project_id or not task_id or "/" in project_id or "/" in task_id:
+                self._send_json({"ok": False, "error": "Project or task not found"}, status=404)
+                return
+            self._handle_agent_project_orchestration_skip_request(project_id, task_id)
             return
         if request_path.startswith(agent_project_prefix) and request_path.endswith("/project-execution/start"):
             rest = request_path[len(agent_project_prefix):].strip("/")
@@ -31994,6 +32514,56 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+        elif self.path.startswith("/api/projects/") and "/tasks/" in self.path and self.path.endswith("/orchestration/skip-decision"):
+            if self._reject_untrusted_management_request():
+                return
+            rest = self.path.split("/api/projects/")[1]
+            proj_id, task_rest = rest.split("/tasks/", 1)
+            task_id = task_rest.rsplit("/orchestration/skip-decision", 1)[0]
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            body = {
+                **body,
+                "actor": {"type": "management", "id": str(body.get("by") or "management")},
+            }
+            result = _handle_project_orchestration_skip_decision(proj_id, task_id, body)
+            status = int(result.get("_status") or 200)
+            result.pop("_status", None)
+            self._send_json(result, status=status, allow_origin="*")
+        elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/orchestration/pause"):
+            if self._reject_untrusted_management_request():
+                return
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/orchestration/pause", 1)[0]
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            body = {
+                **body,
+                "actor": {"type": "management", "id": str(body.get("by") or "management")},
+            }
+            result = _handle_project_orchestration_pause(proj_id, body)
+            status = int(result.get("_status") or 200)
+            result.pop("_status", None)
+            self._send_json(result, status=status, allow_origin="*")
+        elif self.path.startswith("/api/projects/") and "/tasks/" not in self.path and self.path.endswith("/orchestration/resume"):
+            if self._reject_untrusted_management_request():
+                return
+            proj_id = self.path.split("/api/projects/")[1].rsplit("/orchestration/resume", 1)[0]
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            body = {
+                **body,
+                "actor": {"type": "management", "id": str(body.get("by") or "management")},
+            }
+            result = _handle_project_orchestration_resume(proj_id, body)
+            status = int(result.get("_status") or 200)
+            result.pop("_status", None)
+            self._send_json(result, status=status, allow_origin="*")
         elif self.path.startswith("/api/projects/") and self.path.endswith("/workflow/stop"):
             proj_id = self.path.split("/api/projects/")[1].rsplit("/workflow/stop", 1)[0]
             result = _handle_workflow_stop(proj_id)
@@ -35940,6 +36510,12 @@ if __name__ == "__main__":
     # Auto-resume interrupted workflows (in background, after server starts)
     resume_thread = threading.Thread(target=_wf_auto_resume_on_startup, daemon=True, name="wf-auto-resume")
     resume_thread.start()
+    project_orchestration_recovery_thread = threading.Thread(
+        target=_project_orchestration_recover_on_startup,
+        daemon=True,
+        name="project-orchestration-recovery",
+    )
+    project_orchestration_recovery_thread.start()
 
     # Keep built-in Archive Room manager profile aligned with the bundled template.
     archive_manager_thread = threading.Thread(target=_archive_manager_profile_check_on_startup, daemon=True, name="archive-manager-profile-check")

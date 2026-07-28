@@ -2216,73 +2216,48 @@ def _wf_is_task_session_active(agent_id, project_id, task_id):
         return False
 
 
-def _handle_workflow_chat(project_id):
+def _handle_workflow_chat(project_id, task_scope=None):
     """GET /api/projects/{id}/workflow/chat — get the active workflow agent's session messages.
 
     ONLY reads from the task-specific workflow session (wf-<project>-<task>),
     never from the agent's main session or other sessions.
     """
-    with _WORKFLOW_LOCK:
-        wf = _WORKFLOW_STATE.get(project_id, {})
+    from services import project_workflow_chat as project_workflow_chat_service
 
-    # Also check persisted state if in-memory is empty
-    persisted = _wf_load_persisted_state(project_id)
-    current_task_id = wf.get("currentTaskId") or persisted.get("currentTaskId")
-    phase = wf.get("phase") or persisted.get("phase", "idle")
+    def workflow_state(target_project_id):
+        with _WORKFLOW_LOCK:
+            return dict(_WORKFLOW_STATE.get(target_project_id, {}))
 
-    # Find the assigned agent — check current task or find any in-progress/review task
-    data = _load_projects()
-    p = next((x for x in data["projects"] if x["id"] == project_id), None)
-    if not p:
-        return {"ok": True, "messages": [], "agent": None}
+    def agent_descriptor(agent_id):
+        if _is_hermes_agent(agent_id):
+            return {**(_get_hermes_agent(agent_id) or {}), "providerKind": "hermes"}
+        if _is_codex_agent(agent_id):
+            return {**(_get_codex_agent(agent_id) or {}), "providerKind": "codex"}
+        if _is_claude_code_agent(agent_id):
+            return {**(_get_claude_code_agent(agent_id) or {}), "providerKind": "claude-code"}
+        return {"providerKind": "openclaw", "providerAgentId": agent_id}
 
-    project_execution_active = _project_execution_enabled(p) and p.get("workflowActive") and p.get("activeTaskId")
-    agent_key = p.get("activeAgent") if project_execution_active else None
-    task_id = p.get("activeTaskId") if project_execution_active else current_task_id
-    conversation_id = None
+    def task_agent_id(project, task):
+        resolver = globals().get("_project_execution_task_agent_id")
+        if callable(resolver):
+            return resolver(project, task)
+        return task.get("executorAgentId") or task.get("assignee") or ""
 
-    # First try the tracked current task
-    if task_id:
-        task = next((t for t in p["tasks"] if t["id"] == task_id), None)
-        if task:
-            if project_execution_active:
-                phase = p.get("workflowPhase") or phase
-                conversation_id = task.get("activeAttemptId")
-                if phase == "reviewing":
-                    agent_key = agent_key or task.get("reviewerAgentId")
-                else:
-                    agent_key = agent_key or task.get("executorAgentId")
-            agent_key = agent_key or task.get("assignee")
-
-    # If no tracked task, find the most recently active task (in progress or review)
-    if not agent_key:
-        ip_cols = [c["id"] for c in p.get("columns", []) if c.get("title", "").lower() in ("in progress", "review", "to do")]
-        active_tasks = [t for t in p.get("tasks", []) if t.get("columnId") in ip_cols]
-        if active_tasks:
-            active_tasks.sort(key=lambda t: t.get("updatedAt", ""), reverse=True)
-            task_id = active_tasks[0]["id"]
-            agent_key = active_tasks[0].get("assignee")
-
-    if not agent_key or not task_id:
-        return {"ok": True, "messages": [], "agent": None, "phase": phase}
-
-    # Read ONLY from the execution-scoped session. Project Execution uses the
-    # active attempt/review id for OpenClaw sessions so repeat triggers do not
-    # continue a prior run's transcript.
-    session_task_id = conversation_id if (project_execution_active and conversation_id and not (_is_hermes_agent(agent_key) or _is_codex_agent(agent_key))) else task_id
-    msgs = _wf_get_task_session_messages(agent_key, project_id, session_task_id, conversation_id=conversation_id)
-
-    # Check if the workflow session is still actively running
-    session_active = _wf_is_task_session_active(agent_key, project_id, session_task_id)
-
-    return {
-        "ok": True,
-        "messages": msgs,
-        "agent": agent_key,
-        "taskId": task_id,
-        "phase": phase,
-        "sessionActive": session_active,
-    }
+    service = project_workflow_chat_service.ProjectWorkflowChatService(
+        project_workflow_chat_service.ProjectWorkflowChatPorts(
+            workflow_state=workflow_state,
+            persisted_state=_wf_load_persisted_state,
+            load_projects=_load_projects,
+            project_execution_enabled=_project_execution_enabled,
+            task_agent_id=task_agent_id,
+            agent_descriptor=agent_descriptor,
+            read_messages=lambda agent, project, task, conversation: _wf_get_task_session_messages(
+                agent, project, task, conversation_id=conversation
+            ),
+            session_active=_wf_is_task_session_active,
+        )
+    )
+    return service.read(project_id, task_scope=task_scope)
 
 def _handle_workflow_start(project_id, body=None):
     """POST /api/projects/{id}/workflow/start — start the workflow pipeline."""

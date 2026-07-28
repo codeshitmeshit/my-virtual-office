@@ -16,6 +16,8 @@ from services.project_recurrence_execution import (
     STARTED,
     transition_occurrence_execution_intent,
 )
+from services.project_orchestration import is_marked_project
+from services.project_scheduling_orchestration import marked_project_scheduling_satisfaction
 
 
 _INTERVENTION_CODES = frozenset({
@@ -49,6 +51,9 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 
 def _already_satisfied(project: Mapping[str, Any]) -> str | None:
+    marked = marked_project_scheduling_satisfaction(project)
+    if marked:
+        return marked
     if str(project.get("status") or "").lower() in {"completed", "done", "archived"}:
         return "already_completed"
     if project.get("projectExecutionFlowActive") is True or project.get("workflowActive") is True:
@@ -132,7 +137,7 @@ class RecurrenceExecutionDispatcher:
             })
             outcome.update({
                 "state": "owned", "claimToken": token, "projectId": project_id,
-                "startMode": project.get("projectExecutionStartMode") or "continuous",
+                "startMode": None if is_marked_project(project) else project.get("projectExecutionStartMode") or "continuous",
             })
 
         self.store.update(claim)
@@ -143,12 +148,14 @@ class RecurrenceExecutionDispatcher:
 
         self._observe("requested", "")
         try:
-            result = self.start_project(str(outcome["projectId"]), {
-                "mode": outcome["startMode"],
+            body = {
                 "by": "system:project-recurrence",
                 "flowReason": "recurrence_automatic_execution",
                 "occurrenceId": occurrence_id,
-            })
+            }
+            if outcome.get("startMode"):
+                body["mode"] = outcome["startMode"]
+            result = self.start_project(str(outcome["projectId"]), body)
             response = dict(result) if isinstance(result, Mapping) else {}
             raw_response_code = str(response.get("code") or "")[:100]
             response_code = sanitize_audit_text(raw_response_code, limit=100)

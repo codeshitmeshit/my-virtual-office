@@ -22,6 +22,10 @@ from services.project_materialization import (
     CANONICAL_PROJECT_BASE_FIELDS,
     CANONICAL_TASK_BASE_FIELDS,
 )
+from services.project_orchestration import (
+    EXECUTION_MODEL_STAGE_PIPELINE_V1,
+    default_orchestration_state,
+)
 from services.project_authoring_store import (
     IDEMPOTENCY_KEY,
     OUTBOX_KEY,
@@ -62,6 +66,7 @@ def _draft(title="Launch"):
         "tasks": [{
             "title": "Implement",
             "columnId": "backlog",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -285,8 +290,10 @@ def test_confirm_materializes_complete_project_once_without_starting_execution(t
     assert project["projectType"] == "one_time"
     assert project["authoringRequestId"] == "request-1"
     assert project["authoringAgentId"] == "author"
-    assert project["workflowActive"] is False
-    assert project["projectExecutionFlowActive"] is False
+    assert project["executionModel"] == EXECUTION_MODEL_STAGE_PIPELINE_V1
+    assert project["orchestration"] == default_orchestration_state()
+    assert "workflowActive" not in project
+    assert "projectExecutionFlowActive" not in project
     assert project["tasks"][0]["executionState"] == "backlog"
     assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert project["tasks"][0]["executorActor"] == {"type": "agent", "id": "builder"}
@@ -630,7 +637,7 @@ def test_confirmed_maintenance_create_task_is_canonical_atomic_and_idempotent(tm
     assert set(task) == CANONICAL_TASK_BASE_FIELDS
     assert task["columnId"] == project["columns"][0]["id"]
     assert task["order"] == 1
-    assert task["executionOrder"] == 2
+    assert task["executionStage"] == 2
     assert task["checklist"][0]["text"] == "Acceptance is met"
     assert created["project"]["maintenanceHistory"][-1]["operation"] == "create_task"
 

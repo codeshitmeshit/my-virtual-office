@@ -78,13 +78,13 @@ Project Execution：已启用（默认） | 仅跟踪（用户明确要求不执
 默认执行 Agent：agent-id | 未指定（使用任务级执行人）
 Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分配前不会写入 reviewer。
 创建后状态：确认后会创建真实项目并保持未启动；只有用户显式要求执行才会开始。
-启动模式：continuous（启动后连续推进整个项目） | single（每次只启动一个任务）
+阶段编排：每个任务必须填写正整数 executionStage；同一 stage 并行，stage 必须从 1 连续递增且不能断档。
 
 任务清单：
 
-| # | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | ... | Backlog | ... | ... | ... | 无 | ... | agent-id | agent-id | 不指定 |
+| # | 阶段 | 任务名称 | 所属列 | 任务输入 | 任务输出 | 执行说明 | 风险/讨论 | 验收标准 | 负责人 | 执行人 | Reviewer |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | 1 | ... | Backlog | ... | ... | ... | 无 | ... | agent-id | agent-id | 不指定 |
 
 模板/复用配置：无 | 创建模板：... | 复用模板：templateId@version
 周期配置：无 | cron/every + timezone + 触发范围
@@ -98,6 +98,7 @@ Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分�
 
 - 项目名称、目标和 `one_time`、`reusable` 或 `recurring` 类型。
 - 全部初始任务及所属 column。
+- 每个任务必须明确 `executionStage`；同一 stage 代表并行执行，stage 编号必须从 1 开始连续排列，不能缺失或跳号。
 - 每个任务必须明确输入、输出、执行说明和验收标准；未知项写“待确认”，不要省略。
 - 任务输入、输出、执行说明、风险和讨论只进入任务 `description` 的结构化段落，不进入 `checklist`。
 - 每个任务唯一的负责人和执行人；二者可以相同。
@@ -105,9 +106,9 @@ Reviewer 默认策略：不指定；如有建议，仅作为建议，确认分�
 - `strict_confirmation` 或 `autonomous` 维护模式；默认 strict。
 - 模板/复用配置默认写“无”；只有用户明确要求创建或引用模板时，才写“创建模板”或“复用模板”。周期配置只在用户明确要求周期/定时/重复执行时填写 schedule、timezone。
 - 非周期项目的周期执行模式写“不适用”。周期项目必须单独展示并确认 `create_only` 或 `create_and_execute`；默认 `create_only`，只有用户明确要求每次创建后自动执行时才可写 `create_and_execute`。
-- 明确展示 Project Execution 是否启用、默认执行 Agent、Reviewer 策略、创建后未启动状态和启动模式。
+- 明确展示 Project Execution 是否启用、默认执行 Agent、Reviewer 策略、创建后未启动状态和阶段编排。
 - Agent 创建默认写 `projectExecutionEnabled=true`；只有用户明确要求“仅跟踪/不执行”时才写 false。启用时，每个任务必须有可分配 Agent 执行人，或由项目默认执行 Agent 补足。
-- `continuous` 只描述用户显式启动后的连续推进范围；创建动作本身绝不自动启动。
+- 创建动作本身绝不自动启动；不要写 `projectExecutionStartMode`、`executionPolicy` 或任务 `executionOrder`。
 - “需要你确认的点”只列真正会影响创建结果的未决事项；如果没有，写“无”。
 
 actor 使用注册 Agent 或本地 `user:local`。本地用户可以负责或执行可跟踪任务，但不能作为自动 Project Execution 的执行 Agent。
@@ -172,12 +173,12 @@ curl -sS -X POST "$vo_authoring_url/api/agent/project-authoring/projects" \
       "projectType":"one_time",
       "agentMaintenanceMode":"strict_confirmation",
       "projectExecutionEnabled":true,
-      "projectExecutionStartMode":"continuous",
       "columns":[{"id":"backlog","title":"Backlog"}],
       "tasks":[{
         "title":"准备发布材料",
         "description":"输入：已确认的发布范围、当前项目上下文和待发布变更清单\n\n输出：发布材料包、验证说明和可追溯证据\n\n执行说明：整理发布说明、验证步骤、回滚提示和交付证据。\n\n风险/讨论：无",
         "columnId":"backlog",
+        "executionStage":1,
         "responsibleActor":{"type":"agent","id":"owner-agent-id"},
         "executorActor":{"type":"agent","id":"builder-agent-id"},
         "reviewerRecommendation":{"recommended":false,"triggers":[]},

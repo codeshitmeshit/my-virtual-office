@@ -39,6 +39,7 @@ def _draft(**updates):
             "title": "Implement",
             "description": "Build it",
             "columnId": "backlog",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -64,15 +65,17 @@ def _codes(error):
     return {issue.code for issue in error.value.issues}
 
 
-def test_complete_draft_normalizes_roles_and_legacy_execution_fields():
+def test_complete_draft_normalizes_roles_and_stage_pipeline_fields():
     normalized = _validate(_draft())
 
     assert normalized["projectExecutionEnabled"] is True
-    assert normalized["projectExecutionStartMode"] == "continuous"
-    assert normalized["executionPolicy"] == {"maxActiveTasks": 1}
+    assert "projectExecutionStartMode" not in normalized
+    assert "executionPolicy" not in normalized
     assert normalized["defaultExecutorAgentId"] is None
     assert normalized["defaultReviewerAgentId"] is None
     task = normalized["tasks"][0]
+    assert task["executionStage"] == 1
+    assert "executionOrder" not in task
     assert task["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert task["executorActor"] == {"type": "agent", "id": "builder"}
     assert task["reviewerActor"] is None
@@ -125,11 +128,43 @@ def test_execution_configuration_rejects_invalid_values_and_agents():
 
     assert {
         "invalid_project_execution_enabled",
-        "invalid_project_execution_start_mode",
-        "invalid_max_active_tasks",
+        "legacy_project_execution_start_mode",
+        "legacy_execution_policy",
         "agent_not_found",
         "agent_not_assignable",
     } <= _codes(error)
+
+
+def test_task_execution_stage_assignments_must_be_complete_and_contiguous():
+    missing = _draft()
+    missing["tasks"][0].pop("executionStage")
+    with pytest.raises(DraftValidationError) as missing_error:
+        _validate(missing)
+    assert "invalid_execution_stage" in _codes(missing_error)
+
+    invalid = _draft()
+    invalid["tasks"][0]["executionStage"] = 0
+    with pytest.raises(DraftValidationError) as invalid_error:
+        _validate(invalid)
+    assert "invalid_execution_stage" in _codes(invalid_error)
+
+    gap = _draft(tasks=[
+        _draft()["tasks"][0],
+        {
+            **_draft()["tasks"][0],
+            "title": "Review",
+            "executionStage": 3,
+        },
+    ])
+    with pytest.raises(DraftValidationError) as gap_error:
+        _validate(gap)
+    assert "non_contiguous_execution_stages" in _codes(gap_error)
+
+    legacy = _draft()
+    legacy["tasks"][0]["executionOrder"] = 1
+    with pytest.raises(DraftValidationError) as legacy_error:
+        _validate(legacy)
+    assert "legacy_execution_order" in _codes(legacy_error)
 
 
 def test_acceptance_checklist_is_normalized_without_promoting_meeting_context():

@@ -33,6 +33,10 @@ NON_BUILDER_INVENTORY = {
     MaterializationSite("app/project_store.py", "MarkdownProjectStore._read_project_dir", "project"): "reader",
     MaterializationSite("app/project_store.py", "MarkdownProjectStore._read_task_file", "task"): "reader",
     MaterializationSite("app/project_store.py", "MarkdownProjectStore._write_task_file", "task"): "serializer",
+    MaterializationSite("app/server_services/projects.py", "_handle_project_create", "project"): "legacy_transport",
+    MaterializationSite("app/server_services/projects.py", "_handle_project_from_template", "project"): "legacy_transport",
+    MaterializationSite("app/server_services/projects.py", "_handle_project_from_template", "task"): "legacy_transport",
+    MaterializationSite("app/server_services/projects.py", "_handle_task_create", "task"): "legacy_transport",
     MaterializationSite("app/services/project_templates.py", "build_template_snapshot", "project"): "blueprint",
     MaterializationSite("app/services/project_repository.py", "ProjectRepository.create", "project"): "persistence_sink",
     MaterializationSite("app/services/project_direct_creation.py", "DirectProjectCreationService._commit", "project"): "persistence_sink",
@@ -160,7 +164,7 @@ def test_creation_writers_are_limited_to_the_final_materializer_boundary():
 
 def test_inventory_classifies_non_builders_and_defines_final_boundary():
     assert set(NON_BUILDER_INVENTORY.values()) == {
-        "reader", "serializer", "blueprint", "persistence_sink",
+        "reader", "serializer", "blueprint", "legacy_transport", "persistence_sink",
     }
     assert FINAL_MATERIALIZATION_BOUNDARY == {
         MaterializationSite(

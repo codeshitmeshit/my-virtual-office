@@ -1,4 +1,4 @@
-from .http import JsonBodyError, read_json, send_json
+from .http import JsonBodyError, query_dict, read_json, send_json
 
 
 def _workflow_service():
@@ -22,7 +22,15 @@ def handle_get(handler, parsed_url):
     workflow_service = _workflow_service()
     path = parsed_url.path
     if path.startswith("/api/projects/") and path.endswith("/workflow/chat"):
-        return send_json(handler, workflow_service._handle_workflow_chat(_project_id(path, "/workflow/chat")), status=200)
+        query = query_dict(parsed_url)
+        task_scope = (query.get("taskId") or query.get("taskScope") or [""])[0]
+        return send_json(
+            handler,
+            workflow_service._handle_workflow_chat(
+                _project_id(path, "/workflow/chat"),
+                task_scope=task_scope,
+            ),
+        )
     if path.startswith("/api/projects/") and path.endswith("/workflow/status"):
         return send_json(handler, workflow_service._handle_workflow_status(_project_id(path, "/workflow/status")))
     return False

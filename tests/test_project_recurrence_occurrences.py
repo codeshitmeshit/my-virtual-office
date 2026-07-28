@@ -39,6 +39,7 @@ def _draft(*, execution=False, execution_mode="create_only"):
         "tasks": [{
             "title": "Prepare release",
             "columnId": "todo",
+            "executionStage": 1,
             "responsibleActor": {"type": "agent", "id": "owner"},
             "executorActor": {"type": "agent", "id": "builder"},
             "reviewerRecommendation": {"recommended": False, "triggers": []},
@@ -130,8 +131,10 @@ def test_occurrence_creates_one_independent_version_pinned_project(tmp_path):
         "templateId": "template-request-1",
         "templateVersion": 1,
     }
-    assert first["project"]["workflowActive"] is False
-    assert first["project"]["projectExecutionFlowActive"] is False
+    assert first["project"]["executionModel"] == "stage_pipeline_v1"
+    assert first["project"]["orchestration"]["state"] == "draft"
+    assert "projectExecutionFlowActive" not in first["project"]
+    assert "workflowActive" not in first["project"]
     assert CANONICAL_PROJECT_BASE_FIELDS <= set(first["project"])
     assert set(first["project"]["tasks"][0]) == CANONICAL_TASK_BASE_FIELDS
     root = markdown.load_all()
@@ -206,6 +209,7 @@ def test_post_commit_retry_reconciles_once_after_start_port_recovers(tmp_path):
 
     def start(project_id, body):
         assert any(item["id"] == project_id for item in markdown.load_all()["projects"])
+        assert "mode" not in body
         calls.append((project_id, body))
         return {"ok": True, "status": "started"}
 
@@ -276,7 +280,13 @@ def test_already_active_occurrence_is_marked_started_without_launch(tmp_path):
 
     def activate(root):
         project = next(item for item in root["projects"] if item["id"] == committed["project"]["id"])
-        project["projectExecutionFlowActive"] = True
+        project["orchestration"].update({"state": "running", "currentStage": 1, "currentRunId": "run-1"})
+        project["tasks"][0].update({
+            "stageRunId": "run-1",
+            "activeAttemptId": "attempt-1",
+            "executionState": "executing",
+            "attempts": [{"id": "attempt-1", "status": "executing", "stageRunId": "run-1"}],
+        })
 
     service.store.update(activate)
     calls = []
