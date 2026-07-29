@@ -103,6 +103,10 @@ from services import agent_management_browser as agent_management_browser_servic
 from services import skill_library_catalog_integration
 from services import archive_manager_coordinated_work
 from services.archive_manager_work_coordinator import ArchiveManagerWorkCoordinator
+from services.skill_library_archive_adapter import SkillLibraryArchiveManagerAdapter
+from services.skill_library_organization_admin import SkillLibraryOrganizationAdmin
+from services.skill_library_organization_runs import SkillLibraryOrganizationService
+from services.skill_library_organization_runtime import SkillLibraryOrganizationRuntime
 from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
@@ -37088,7 +37092,61 @@ def _signal_openclaw_gateway(restart=False):
         return {"ok": False, "method": "gateway-rpc-restart-request", "error": str(exc)}
 
 
+def _skill_library_archive_manager_adapter():
+    return SkillLibraryArchiveManagerAdapter(
+        load_state=_archive_manager_load_state,
+        save_state=_archive_manager_save_state,
+        public_state=lambda: _archive_manager_public_state(ensure=False),
+        append_activity=_archive_manager_append_activity,
+        call_agent=lambda agent_id, prompt, timeout: _wf_call_agent(
+            agent_id,
+            prompt,
+            timeout=timeout,
+            project_id="",
+            task_id="skill-library-organization",
+        ),
+        set_presence=gateway_presence.set_manual_override,
+        default_agent_id=ARCHIVE_MANAGER_AGENT_ID,
+    )
+
+
+def _skill_library_organization_runtime():
+    library_dir = _get_skills_library_dir()
+    archive_adapter = _skill_library_archive_manager_adapter()
+    organizer = SkillLibraryOrganizationService(
+        library_dir,
+        coordinator=ARCHIVE_MANAGER_WORK_COORDINATOR,
+        manager_state=archive_adapter.manager_state,
+        call_archive_manager=archive_adapter.call,
+        mark_manager_working=archive_adapter.mark_working,
+        finalize_manager=archive_adapter.finalize,
+        append_terminal_activity=archive_adapter.append_terminal,
+    )
+    admin = SkillLibraryOrganizationAdmin(
+        library_dir,
+        coordinator=ARCHIVE_MANAGER_WORK_COORDINATOR,
+        finalize_manager=archive_adapter.finalize,
+        append_terminal_activity=archive_adapter.append_terminal,
+    )
+    return SkillLibraryOrganizationRuntime(
+        organizer=organizer,
+        admin=admin,
+        list_skills=lambda: _handle_skills_library_list(),
+        archive_manager_state=archive_adapter.manager_state,
+    )
+
+
+server_routes.skill_library_organization.configure_runtime(
+    _skill_library_organization_runtime
+)
+
+
 if __name__ == "__main__":
+    try:
+        _skill_library_organization_runtime().recover_interrupted_run()
+    except Exception as exc:
+        print(f"[SKILL LIBRARY] organization recovery failed: {exc}")
+
     # Start API usage collector background thread
     _api_usage_collector.start()
     print("📊 API usage collector started (polls every 60s)")
