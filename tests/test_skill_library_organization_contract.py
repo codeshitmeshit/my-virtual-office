@@ -86,6 +86,25 @@ def test_prompt_isolates_untrusted_text_and_declares_json_only_contract():
     assert prompt.index("<security>") < prompt.index("<untrusted_skill_data>")
 
 
+def test_prompt_requires_new_category_for_clear_unmatched_purpose():
+    prompt = build_classification_prompt(
+        [
+            {
+                "slug": "specialist",
+                "name": "Specialist",
+                "description": "A clearly described specialist purpose",
+                "structuralSummary": "# Specialist",
+            }
+        ],
+        SEEDED_CATEGORIES,
+    )
+
+    assert "用途明确但现有分类均不适用，必须通过 newCategoryName" in prompt
+    assert "不得仅因缺少现成分类而判定归类失败" in prompt
+    assert "只有从受限摘要中仍无法可靠判断用途" in prompt
+    assert "信息不足或含糊" in prompt
+
+
 def parse(payload, expected=("alpha", "beta")):
     return parse_classification_reply(
         json.dumps(payload, ensure_ascii=False),
@@ -130,6 +149,39 @@ def test_parser_accepts_existing_new_and_explicit_failure_results():
             "slug": "gamma",
             "code": "classification_failed",
             "reason": "用途信息不足",
+        },
+    )
+
+
+def test_clear_unmatched_purpose_creates_category_while_ambiguous_purpose_fails():
+    parsed = parse(
+        {
+            "results": [
+                {
+                    "slug": "alpha",
+                    "newCategoryName": "设计与体验",
+                    "tags": ["设计"],
+                },
+                {
+                    "slug": "beta",
+                    "failureReason": "摘要仅包含标题，无法可靠判断主要用途",
+                },
+            ]
+        }
+    )
+
+    assert parsed.assignments == (
+        {
+            "slug": "alpha",
+            "newCategoryName": "设计与体验",
+            "tags": ["设计"],
+        },
+    )
+    assert parsed.failures == (
+        {
+            "slug": "beta",
+            "code": "classification_failed",
+            "reason": "摘要仅包含标题，无法可靠判断主要用途",
         },
     )
 
