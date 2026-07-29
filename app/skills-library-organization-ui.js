@@ -12,7 +12,9 @@
         categoryId: 'all',
         selectedSlug: '',
         search: '',
-        starting: false
+        starting: false,
+        dismissing: false,
+        pollTimer: null
     };
 
     function byId(id) {
@@ -218,7 +220,9 @@
         var manager = state.data.archiveManager || {};
         var defaultCount = categoryCount('default');
         var disabledReason = '';
+        var organization = state.data.organization || {};
         if (!state.data.organizationEnabled) disabledReason = '智能整理当前未启用';
+        else if (organization.status === 'running') disabledReason = '档案管理员正在整理技能库';
         else if (manager.status === 'working' || manager.activeWork) disabledReason = '档案管理员正在处理其他工作';
         else if (['missing', 'error', 'offline', 'unavailable', 'paused'].indexOf(manager.status) >= 0) disabledReason = '档案管理员当前不可用';
         else if (!defaultCount) disabledReason = '默认标签中没有需要整理的技能';
@@ -227,11 +231,92 @@
         button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
     }
 
+    function markerCopy(organization) {
+        var failures = Number(organization.failureCount || 0);
+        if (organization.status === 'running') {
+            return { tone: 'running', text: '档案管理员正在整理技能库…', dismissible: false };
+        }
+        if (organization.status === 'completed') {
+            return { tone: 'completed', text: '技能整理已完成', dismissible: true };
+        }
+        if (organization.status === 'resolved') {
+            return { tone: 'resolved', text: '归类失败项已全部处理', dismissible: true };
+        }
+        if (organization.status === 'partial') {
+            return { tone: 'partial', text: '技能整理完成，' + failures + ' 个归类失败', dismissible: true };
+        }
+        if (organization.status === 'failed') {
+            return {
+                tone: 'partial',
+                text: failures ? '技能整理未完成，' + failures + ' 个归类失败' : '技能整理未完成',
+                dismissible: true
+            };
+        }
+        return null;
+    }
+
+    function renderMarker() {
+        var marker = byId('skl-organization-marker');
+        if (!marker) return;
+        var organization = state.data.organization;
+        var copy = organization && !organization.dismissedAt ? markerCopy(organization) : null;
+        marker.replaceChildren();
+        marker.className = 'skl-organization-marker';
+        if (!copy) {
+            marker.classList.add('hidden');
+            return;
+        }
+        marker.classList.add('is-' + copy.tone);
+        var text = document.createElement('span');
+        text.className = 'skl-marker-text';
+        text.textContent = copy.text;
+        marker.appendChild(text);
+        if (copy.dismissible) {
+            var dismiss = document.createElement('button');
+            dismiss.type = 'button';
+            dismiss.className = 'skl-marker-dismiss';
+            dismiss.textContent = '关闭';
+            dismiss.setAttribute('aria-label', '关闭整理结果');
+            dismiss.disabled = state.dismissing;
+            dismiss.addEventListener('click', dismissMarker);
+            marker.appendChild(dismiss);
+        }
+    }
+
+    function stopPolling() {
+        if (state.pollTimer !== null) {
+            global.clearTimeout(state.pollTimer);
+            state.pollTimer = null;
+        }
+    }
+
+    function modalIsOpen() {
+        var modal = byId('skillsLibraryModal');
+        return Boolean(modal && !modal.classList.contains('hidden'));
+    }
+
+    function syncPolling() {
+        stopPolling();
+        var organization = state.data.organization || {};
+        if (organization.status !== 'running' || !modalIsOpen()) return;
+        state.pollTimer = global.setTimeout(async function() {
+            state.pollTimer = null;
+            if (typeof global.refreshSkillsList === 'function') {
+                await global.refreshSkillsList();
+            }
+            if ((state.data.organization || {}).status === 'running') {
+                syncPolling();
+            }
+        }, 2000);
+    }
+
     function render() {
+        renderMarker();
         renderCategories();
         renderCards();
         renderDetail();
         updateOrganizeButton();
+        syncPolling();
     }
 
     function update(data) {
@@ -256,6 +341,8 @@
             });
             var result = await response.json();
             if (!response.ok) throw new Error(result.error || '智能整理启动失败');
+            state.data.organization = result;
+            render();
             if (typeof global.refreshSkillsList === 'function') {
                 await global.refreshSkillsList();
             }
@@ -265,6 +352,35 @@
         } finally {
             state.starting = false;
             updateOrganizeButton();
+        }
+    }
+
+    async function dismissMarker() {
+        if (state.dismissing) return;
+        state.dismissing = true;
+        renderMarker();
+        try {
+            var request = global.i18n && global.i18n.managementFetch
+                ? global.i18n.managementFetch.bind(global.i18n)
+                : global.fetch.bind(global);
+            var response = await request('/api/skills-library/organization/dismiss', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: '{}'
+            });
+            var result = await response.json();
+            if (!response.ok) throw new Error(result.error || '关闭整理结果失败');
+            if (state.data.organization) {
+                state.data.organization.dismissedAt =
+                    (result.organization || {}).dismissedAt || new Date().toISOString();
+            }
+            render();
+        } catch (error) {
+            var toast = global._showOfficeToast || global._acpShowToast;
+            if (toast) toast('❌ ' + error.message);
+        } finally {
+            state.dismissing = false;
+            renderMarker();
         }
     }
 
@@ -284,7 +400,9 @@
         init: init,
         update: update,
         render: render,
-        startOrganization: startOrganization
+        startOrganization: startOrganization,
+        dismissMarker: dismissMarker,
+        stopPolling: stopPolling
     };
     init();
 })(window);

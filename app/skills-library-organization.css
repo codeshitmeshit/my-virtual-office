@@ -48,6 +48,35 @@
     color: #c8c8dc;
     background: #161628;
     font-size: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.skl-organization-marker.is-running {
+    border-color: #5e5290;
+    color: #c4b9ff;
+}
+
+.skl-organization-marker.is-completed,
+.skl-organization-marker.is-resolved {
+    border-color: #2f7655;
+    color: #8bd6ac;
+}
+
+.skl-organization-marker.is-partial {
+    border-color: #8a6829;
+    color: #e7c36d;
+}
+
+.skl-marker-dismiss {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 9px;
 }
 
 .skl-topbar {

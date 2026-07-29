@@ -14,6 +14,9 @@ function openSkillsLibrary() {
 
 function closeSkillsLibrary() {
     document.getElementById('skillsLibraryModal').classList.add('hidden');
+    if (window.SkillLibraryOrganizationUI) {
+        window.SkillLibraryOrganizationUI.stopPolling();
+    }
 }
 
 async function refreshSkillsList() {
