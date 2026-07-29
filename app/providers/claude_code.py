@@ -43,7 +43,7 @@ class ClaudeCodeProvider:
     reply_text: str | None = None
     timeout_sec: int = 900
     permission_mode: str = "acceptEdits"
-    include_main: bool = True
+    include_main: bool = False
     include_native_agents: bool = True
     register_native_agents: bool = True
 

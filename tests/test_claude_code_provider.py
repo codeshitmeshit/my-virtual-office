@@ -31,7 +31,6 @@ def test_enabled_provider_discovers_collaborator_and_demo_reply():
             workspace=tmp,
             workspace_root=workspace_root,
             home_path=home,
-            include_main=False,
             name="Claude QA",
             agent_id="qa",
             model="sonnet-test",

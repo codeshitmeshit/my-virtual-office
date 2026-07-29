@@ -274,7 +274,7 @@
                         <input type="checkbox" id="s-codex-appserver" checked> Prefer app-server protocol
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-                        <input type="checkbox" id="s-codex-main" checked> Show Codex Main agent
+                        <input type="checkbox" id="s-codex-main"> Show Codex Main agent
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
                         <input type="checkbox" id="s-codex-native" checked> Discover native Codex agents
@@ -320,7 +320,7 @@
                         <option value="bypassPermissions">bypassPermissions</option>
                     </select>
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
-                        <input type="checkbox" id="s-claude-main" checked> Show Claude Code Main agent
+                        <input type="checkbox" id="s-claude-main"> Show Claude Code Main agent
                     </label>
                     <label style="display:flex;align-items:center;gap:8px;margin-top:10px;">
                         <input type="checkbox" id="s-claude-native" checked> Discover native Claude Code subagents
@@ -648,7 +648,7 @@
             if (document.getElementById('s-codex-model')) document.getElementById('s-codex-model').value = c.model || '';
             if (document.getElementById('s-codex-sandbox')) document.getElementById('s-codex-sandbox').value = c.sandbox || 'workspace-write';
             if (document.getElementById('s-codex-approval')) document.getElementById('s-codex-approval').value = c.approvalPolicy || 'never';
-            if (document.getElementById('s-codex-main')) document.getElementById('s-codex-main').checked = c.includeMain !== false;
+            if (document.getElementById('s-codex-main')) document.getElementById('s-codex-main').checked = c.includeMain === true;
             if (document.getElementById('s-codex-native')) document.getElementById('s-codex-native').checked = c.includeNativeAgents !== false;
             if (document.getElementById('s-codex-register')) document.getElementById('s-codex-register').checked = c.registerNativeAgents !== false;
             if (document.getElementById('s-codex-appserver')) document.getElementById('s-codex-appserver').checked = c.preferAppServer !== false;
@@ -664,7 +664,7 @@
             if (document.getElementById('s-claude-main-workspace')) document.getElementById('s-claude-main-workspace').value = cc.mainWorkspace || '';
             if (document.getElementById('s-claude-model')) document.getElementById('s-claude-model').value = cc.model || '';
             if (document.getElementById('s-claude-permission')) document.getElementById('s-claude-permission').value = cc.permissionMode || 'acceptEdits';
-            if (document.getElementById('s-claude-main')) document.getElementById('s-claude-main').checked = cc.includeMain !== false;
+            if (document.getElementById('s-claude-main')) document.getElementById('s-claude-main').checked = cc.includeMain === true;
             if (document.getElementById('s-claude-native')) document.getElementById('s-claude-native').checked = cc.includeNativeAgents !== false;
             if (document.getElementById('s-claude-register')) document.getElementById('s-claude-register').checked = cc.registerNativeAgents !== false;
             var ccFields = document.getElementById('claude-fields');

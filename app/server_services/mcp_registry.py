@@ -1,4 +1,4 @@
-"""VO-managed MCP server registry and OpenClaw registration helpers."""
+"""VO-managed MCP server registry and client registration orchestration."""
 
 from __future__ import annotations
 
@@ -134,6 +134,8 @@ def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = No
         "createdAt": created_at,
         "updatedAt": _now(),
         "openclaw": dict(existing.get("openclaw") or {}),
+        "codex": dict(existing.get("codex") or {}),
+        "claude": dict(existing.get("claude") or {}),
     }
     return {key: value for key, value in server.items() if value not in ("", None, [], {})}
 
@@ -212,15 +214,16 @@ Use this server when the task matches its description:
 
 {description}
 
-## OpenClaw Registration
+## Client Registration
 
-The expected OpenClaw MCP config is:
+Virtual Office registers this MCP server in the native client that owns the assigned agent.
+The normalized MCP config is:
 
 ```json
 {config}
 ```
 
-If tools are unavailable, ask the user or VO operator to register or reload this MCP server from the Skills Library MCP Registry. Do not request or print secrets.
+If tools are unavailable, ask the user or VO operator to assign this MCP server again from the Skills Library MCP Registry. Do not request or print secrets.
 """
 
 
@@ -291,7 +294,41 @@ def _handle_mcp_registry_register_openclaw(name: str, body: dict[str, Any] | Non
     return {"ok": True, "server": _public_server(server), "openclaw": server["openclaw"]}
 
 
-def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
+def _handle_mcp_registry_register_native(name: str, client: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    registry, server = _get_server(name)
+    if not server:
+        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    from server_services import mcp_native_clients
+
+    options = body or {}
+    result = mcp_native_clients.register_native_client(
+        client,
+        server,
+        claude_scope=str(options.get("scope") or "user"),
+    )
+    if not result.get("ok"):
+        return result
+    status = {
+        "registered": True,
+        "registeredAt": _now(),
+    }
+    if result.get("warnings"):
+        status["warnings"] = result["warnings"]
+    server[client] = status
+    registry.setdefault("servers", {})[server["name"]] = server
+    _save_registry(registry)
+    return {"ok": True, "server": _public_server(server), client: status}
+
+
+def _handle_mcp_registry_register_codex(name: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _handle_mcp_registry_register_native(name, "codex", body)
+
+
+def _handle_mcp_registry_register_claude(name: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    return _handle_mcp_registry_register_native(name, "claude", body)
+
+
+def _install_mcp_skill_only(name: str, body: dict[str, Any]) -> dict[str, Any]:
     _, server = _get_server(name)
     if not server:
         return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
@@ -310,6 +347,24 @@ def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[
     if not apply.get("ok"):
         return apply
     return {"ok": True, "skill": create["skill"], "agentId": agent_id, "library": create, "install": apply}
+
+
+def _register_mcp_for_client(name: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
+    if client == "openclaw":
+        return _handle_mcp_registry_register_openclaw(name, body)
+    return _handle_mcp_registry_register_native(name, client, body)
+
+
+def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    from server_services import agents, mcp_assignment
+
+    return mcp_assignment.assign_to_agent(
+        name,
+        body,
+        list_agents=agents._handle_agents_list,
+        register_client=_register_mcp_for_client,
+        install_skill=_install_mcp_skill_only,
+    )
 
 
 def _handle_mcp_registry_vibe_template() -> dict[str, Any]:

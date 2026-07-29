@@ -1952,7 +1952,7 @@ def _codex_provider_from_config():
         bridge_url=cfg.get("bridgeUrl"),
         sandbox=cfg.get("sandbox", "workspace-write"),
         approval_policy=cfg.get("approvalPolicy", "never"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     )
@@ -3064,7 +3064,7 @@ def _claude_code_provider_from_config():
         reply_text=cfg.get("replyText") or os.environ.get("VO_CLAUDE_CODE_REPLY_TEXT"),
         timeout_sec=int(cfg.get("timeoutSec") or 900),
         permission_mode=cfg.get("permissionMode", "acceptEdits"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     )

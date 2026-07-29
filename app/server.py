@@ -913,7 +913,7 @@ def _load_vo_config():
             "bridgeUrl": _env_or("VO_CODEX_BRIDGE_URL", codex_cfg.get("bridgeUrl")),
             "sandbox": _env_or("VO_CODEX_SANDBOX", codex_cfg.get("sandbox", "workspace-write")),
             "approvalPolicy": _env_or("VO_CODEX_APPROVAL_POLICY", codex_cfg.get("approvalPolicy", "never")),
-            "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", True)),
+            "includeMain": _env_bool("VO_CODEX_INCLUDE_MAIN", codex_cfg.get("includeMain", False)),
             "includeNativeAgents": _env_bool("VO_CODEX_INCLUDE_NATIVE_AGENTS", codex_cfg.get("includeNativeAgents", True)),
             "registerNativeAgents": _env_bool("VO_CODEX_REGISTER_NATIVE_AGENTS", codex_cfg.get("registerNativeAgents", True)),
             "routeApprovalsThroughVo": _env_bool("VO_CODEX_ROUTE_APPROVALS_THROUGH_VO", codex_cfg.get("routeApprovalsThroughVo", False)),
@@ -932,7 +932,7 @@ def _load_vo_config():
             "replyText": _env_or("VO_CLAUDE_CODE_REPLY_TEXT", claude_code_cfg.get("replyText")),
             "timeoutSec": int(_env_or("VO_CLAUDE_CODE_TIMEOUT_SEC", claude_code_cfg.get("timeoutSec", 900))),
             "permissionMode": _env_or("VO_CLAUDE_CODE_PERMISSION_MODE", claude_code_cfg.get("permissionMode", "acceptEdits")),
-            "includeMain": _env_bool("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", True)),
+            "includeMain": _env_bool("VO_CLAUDE_CODE_INCLUDE_MAIN", claude_code_cfg.get("includeMain", False)),
             "includeNativeAgents": _env_bool("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", claude_code_cfg.get("includeNativeAgents", True)),
             "registerNativeAgents": _env_bool("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", claude_code_cfg.get("registerNativeAgents", True)),
         },
@@ -1380,7 +1380,7 @@ def _build_safe_vo_config():
             "bridgeUrl": VO_CONFIG.get("codex", {}).get("bridgeUrl"),
             "sandbox": VO_CONFIG.get("codex", {}).get("sandbox"),
             "approvalPolicy": VO_CONFIG.get("codex", {}).get("approvalPolicy"),
-            "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", True),
+            "includeMain": VO_CONFIG.get("codex", {}).get("includeMain", False),
             "includeNativeAgents": VO_CONFIG.get("codex", {}).get("includeNativeAgents", True),
             "registerNativeAgents": VO_CONFIG.get("codex", {}).get("registerNativeAgents", True),
             "fastPath": dict(VO_CONFIG.get("codex", {}).get("fastPath") or {}),
@@ -1399,7 +1399,7 @@ def _build_safe_vo_config():
             "model": VO_CONFIG.get("claudeCode", {}).get("model"),
             "timeoutSec": VO_CONFIG.get("claudeCode", {}).get("timeoutSec", 900),
             "permissionMode": VO_CONFIG.get("claudeCode", {}).get("permissionMode"),
-            "includeMain": VO_CONFIG.get("claudeCode", {}).get("includeMain", True),
+            "includeMain": VO_CONFIG.get("claudeCode", {}).get("includeMain", False),
             "includeNativeAgents": VO_CONFIG.get("claudeCode", {}).get("includeNativeAgents", True),
             "registerNativeAgents": VO_CONFIG.get("claudeCode", {}).get("registerNativeAgents", True),
             "detected": bool(_handle_claude_code_test().get("ok")),
@@ -2408,7 +2408,7 @@ def _get_codex_native_setup_state():
         "sandbox": cfg.get("sandbox") or "workspace-write",
         "approvalPolicy": cfg.get("approvalPolicy") or "never",
         "preferAppServer": bool(cfg.get("preferAppServer", True)),
-        "includeMain": bool(cfg.get("includeMain", True)),
+        "includeMain": bool(cfg.get("includeMain", False)),
         "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
         "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
         "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
@@ -2433,7 +2433,7 @@ def _get_claude_code_native_setup_state():
         "mainWorkspace": cfg.get("mainWorkspace") or "",
         "model": cfg.get("model") or "",
         "permissionMode": cfg.get("permissionMode") or "acceptEdits",
-        "includeMain": bool(cfg.get("includeMain", True)),
+        "includeMain": bool(cfg.get("includeMain", False)),
         "includeNativeAgents": bool(cfg.get("includeNativeAgents", True)),
         "registerNativeAgents": bool(cfg.get("registerNativeAgents", True)),
         "nativeAgentsDir": os.path.join(home_path, "agents") if home_path else "",
@@ -5975,7 +5975,7 @@ def _handle_codex_test(body=None):
         approval_policy=cfg.get("approvalPolicy") or "never",
         prefer_app_server=cfg.get("preferAppServer", True),
         main_workspace=cfg.get("mainWorkspace"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     ).test()
@@ -5995,7 +5995,7 @@ def _handle_claude_code_test(body=None):
         model=cfg.get("model") or "",
         permission_mode=cfg.get("permissionMode") or "acceptEdits",
         main_workspace=cfg.get("mainWorkspace"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     ).test()
@@ -6510,7 +6510,7 @@ def _codex_provider_from_config():
         bridge_url=cfg.get("bridgeUrl"),
         sandbox=cfg.get("sandbox", "workspace-write"),
         approval_policy=cfg.get("approvalPolicy", "never"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
         route_approvals_through_vo=cfg.get("routeApprovalsThroughVo", False),
@@ -9144,7 +9144,7 @@ def _claude_code_provider_from_config():
         reply_text=cfg.get("replyText"),
         timeout_sec=int(cfg.get("timeoutSec") or 900),
         permission_mode=cfg.get("permissionMode", "acceptEdits"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     )
@@ -28666,6 +28666,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
+            if server_routes.mcp_registry.handle_get(self, parsed_url):
+                return
         if (
             request_path
             == agent_management_session_mint_service.SESSION_EXCHANGE_PATH
@@ -30610,7 +30613,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "bridgeUrl": safe_vo_config.get("codex", {}).get("bridgeUrl"),
                 "sandbox": safe_vo_config.get("codex", {}).get("sandbox"),
                 "approvalPolicy": safe_vo_config.get("codex", {}).get("approvalPolicy"),
-                "includeMain": safe_vo_config.get("codex", {}).get("includeMain", True),
+                "includeMain": safe_vo_config.get("codex", {}).get("includeMain", False),
                 "includeNativeAgents": safe_vo_config.get("codex", {}).get("includeNativeAgents", True),
                 "registerNativeAgents": safe_vo_config.get("codex", {}).get("registerNativeAgents", True),
                 "preferAppServer": safe_vo_config.get("codex", {}).get("preferAppServer", True),
@@ -30629,7 +30632,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 "mainWorkspace": safe_vo_config.get("claudeCode", {}).get("mainWorkspace"),
                 "timeoutSec": safe_vo_config.get("claudeCode", {}).get("timeoutSec"),
                 "permissionMode": safe_vo_config.get("claudeCode", {}).get("permissionMode"),
-                "includeMain": safe_vo_config.get("claudeCode", {}).get("includeMain", True),
+                "includeMain": safe_vo_config.get("claudeCode", {}).get("includeMain", False),
                 "includeNativeAgents": safe_vo_config.get("claudeCode", {}).get("includeNativeAgents", True),
                 "registerNativeAgents": safe_vo_config.get("claudeCode", {}).get("registerNativeAgents", True),
                 "configSurface": "models-native",
@@ -31155,6 +31158,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_DELETE(self):
         request_path = urllib.parse.urlparse(self.path).path
+        if request_path.startswith("/api/mcp-registry/"):
+            if self._reject_untrusted_management_request():
+                return
+            if server_routes.mcp_registry.handle_delete(self, urllib.parse.urlparse(self.path)):
+                return
         if _is_meeting_domain_path(self.path):
             authority = _meeting_domain_authority_status()
             if not authority.get("ok"):
@@ -31298,6 +31306,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
+            if self._reject_untrusted_management_request():
+                return
+            if server_routes.mcp_registry.handle_post(self, parsed_url):
+                return
         if (
             request_path
             == agent_management_session_mint_service.SESSION_MINT_PATH

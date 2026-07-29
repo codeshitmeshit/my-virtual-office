@@ -119,7 +119,7 @@ fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
     if (document.getElementById('s-codex-model')) document.getElementById('s-codex-model').value = c.model || '';
     if (document.getElementById('s-codex-sandbox')) document.getElementById('s-codex-sandbox').value = c.sandbox || 'workspace-write';
     if (document.getElementById('s-codex-approval')) document.getElementById('s-codex-approval').value = c.approvalPolicy || 'never';
-    if (document.getElementById('s-codex-main')) document.getElementById('s-codex-main').checked = c.includeMain !== false;
+    if (document.getElementById('s-codex-main')) document.getElementById('s-codex-main').checked = c.includeMain === true;
     if (document.getElementById('s-codex-native')) document.getElementById('s-codex-native').checked = c.includeNativeAgents !== false;
     if (document.getElementById('s-codex-register')) document.getElementById('s-codex-register').checked = c.registerNativeAgents !== false;
     if (document.getElementById('s-codex-appserver')) document.getElementById('s-codex-appserver').checked = c.preferAppServer !== false;
@@ -134,7 +134,7 @@ fetch('/vo-config').then(function(r) { return r.json(); }).then(function(cfg) {
     if (document.getElementById('s-claude-main-workspace')) document.getElementById('s-claude-main-workspace').value = cc.mainWorkspace || '';
     if (document.getElementById('s-claude-model')) document.getElementById('s-claude-model').value = cc.model || '';
     if (document.getElementById('s-claude-permission')) document.getElementById('s-claude-permission').value = cc.permissionMode || 'acceptEdits';
-    if (document.getElementById('s-claude-main')) document.getElementById('s-claude-main').checked = cc.includeMain !== false;
+    if (document.getElementById('s-claude-main')) document.getElementById('s-claude-main').checked = cc.includeMain === true;
     if (document.getElementById('s-claude-native')) document.getElementById('s-claude-native').checked = cc.includeNativeAgents !== false;
     if (document.getElementById('s-claude-register')) document.getElementById('s-claude-register').checked = cc.registerNativeAgents !== false;
     var ccFields = document.getElementById('claude-fields');

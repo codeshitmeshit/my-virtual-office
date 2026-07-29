@@ -50,7 +50,7 @@ Codex creation supports two location modes:
 - `codexCreationMode: "standard"`: create under configured `codex.workspaceRoot` and register `$CODEX_HOME/agents/<profile>.toml` when native registration is enabled.
 - `codexCreationMode: "custom"` with `codexCustomDirectory`: create `<codexCustomDirectory>/<profile>` and write project-local `.codex/agents/<profile>.toml`. Virtual Office stores a registry entry under `codex.workspaceRoot` so the custom agent remains discoverable.
 
-Codex discovery also reads the standard `$CODEX_HOME/agents/*.toml` custom-agent directory and includes a synthesized `codex-main` entry for Codex's default Main agent.
+Codex discovery also reads the standard `$CODEX_HOME/agents/*.toml` custom-agent directory. The optional synthesized `codex-main` entry is disabled by default because `codex-local` is the runnable local collaborator.
 
 Codex app-server approval requests are surfaced through chat history while a turn is running. The web chat renders pending command, file-change, and permission approval cards with Approve/Cancel controls. Integrations can also poll `GET /api/codex/approval/pending?agentId=<id>` and answer the active callback with `POST /api/codex/approval/respond` using `approval_id` and `choice: "approve"` or `"cancel"`.
 
@@ -59,7 +59,7 @@ Claude Code creation supports two location modes:
 - `claudeCodeCreationMode: "standard"`: create under configured `claudeCode.workspaceRoot` and register `$CLAUDE_CONFIG_DIR/agents/<profile>.md` when native registration is enabled.
 - `claudeCodeCreationMode: "custom"` with `claudeCodeCustomDirectory`: create `<claudeCodeCustomDirectory>/<profile>` and write project-local `.claude/agents/<profile>.md`. Virtual Office stores a registry entry under `claudeCode.workspaceRoot` so the custom agent remains discoverable.
 
-Claude Code discovery also reads native `$CLAUDE_CONFIG_DIR/agents/*.md` subagents and includes a synthesized `claude-code-main` entry for Claude Code's default Main agent.
+Claude Code discovery also reads native `$CLAUDE_CONFIG_DIR/agents/*.md` subagents. The optional synthesized `claude-code-main` entry is disabled by default because `claude-code-local` is the runnable local collaborator.
 
 Claude Code chat uses `claude -p --output-format stream-json --include-partial-messages` with `--resume <session_id>` when available. The adapter converts assistant deltas, `tool_use` blocks, `tool_result` blocks, usage metadata, run completion, and interrupts into the same Virtual Office chat/event shapes used by Hermes and Codex.
 
@@ -69,7 +69,7 @@ Codex configuration is product-neutral:
 - `VO_CODEX_HOME`: local Codex auth/config home, default `~/.codex`
 - `VO_CODEX_WORKSPACE_ROOT`: Office-created Codex agent workspaces
 - `VO_CODEX_MAIN_WORKSPACE`: Workspace used by `codex-main` and native custom agents
-- `VO_CODEX_INCLUDE_MAIN`: include Codex's default Main agent, enabled by default
+- `VO_CODEX_INCLUDE_MAIN`: optionally include Codex's synthesized default Main agent, disabled by default
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`: read `$CODEX_HOME/agents/*.toml`, enabled by default
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`: write `$CODEX_HOME/agents/<profile>.toml` when creating VO Codex agents, enabled by default
 - `VO_CODEX_PREFER_APP_SERVER`: native app-server integration on by default
@@ -84,7 +84,7 @@ Claude Code configuration is product-neutral:
 - `VO_CLAUDE_CODE_MAIN_WORKSPACE`: Workspace used by `claude-code-main` and native subagents
 - `VO_CLAUDE_CODE_MODEL`: optional default Claude Code model
 - `VO_CLAUDE_CODE_PERMISSION_MODE`: Claude Code permission mode, default `acceptEdits`
-- `VO_CLAUDE_CODE_INCLUDE_MAIN`: include Claude Code's default Main agent, enabled by default
+- `VO_CLAUDE_CODE_INCLUDE_MAIN`: optionally include Claude Code's synthesized default Main agent, disabled by default
 - `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`: read `$CLAUDE_CONFIG_DIR/agents/*.md`, enabled by default
 - `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`: write `$CLAUDE_CONFIG_DIR/agents/<profile>.md` when creating standard VO Claude Code agents, enabled by default
 

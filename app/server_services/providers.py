@@ -62,7 +62,7 @@ def _handle_claude_code_test(body=None):
         model=cfg.get("model") or "",
         permission_mode=cfg.get("permissionMode") or "acceptEdits",
         main_workspace=cfg.get("mainWorkspace"),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     ).test()
@@ -116,7 +116,7 @@ def _handle_codex_test(body=None):
         sandbox=cfg.get("sandbox") or "workspace-write",
         approval_policy=cfg.get("approvalPolicy") or "never",
         prefer_app_server=cfg.get("preferAppServer", True),
-        include_main=cfg.get("includeMain", True),
+        include_main=cfg.get("includeMain", False),
         include_native_agents=cfg.get("includeNativeAgents", True),
         register_native_agents=cfg.get("registerNativeAgents", True),
     ).test()

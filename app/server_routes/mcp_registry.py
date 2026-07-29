@@ -44,6 +44,12 @@ def handle_post(handler, parsed_url):
     if path.startswith("/api/mcp-registry/") and path.endswith("/openclaw"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_register_openclaw(_server_name(path, "/openclaw"), body))
+    if path.startswith("/api/mcp-registry/") and path.endswith("/codex"):
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_mcp_registry_register_codex(_server_name(path, "/codex"), body))
+    if path.startswith("/api/mcp-registry/") and path.endswith("/claude"):
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_mcp_registry_register_claude(_server_name(path, "/claude"), body))
     if path.startswith("/api/mcp-registry/") and path.endswith("/skill"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_install_skill(_server_name(path, "/skill"), body))

@@ -2,6 +2,13 @@
 
 var _mcpServers = [];
 
+function _mcpMutationFetch(input, init) {
+    if (window.i18n && typeof window.i18n.managementFetch === 'function') {
+        return window.i18n.managementFetch(input, init || {});
+    }
+    return fetch(input, init || {});
+}
+
 function _mcpTr(key, params, fallback) {
     if (typeof _tr === 'function') {
         var translated = _tr(key, params);
@@ -59,9 +66,18 @@ function renderMcpRegistry() {
         return;
     }
     list.innerHTML = _mcpServers.map(function(server) {
-        var status = server.openclaw && server.openclaw.registered
-            ? _mcpTr('mcp_status_openclaw', null, '已注册到 OpenClaw')
+        var registeredClients = [
+            server.openclaw && server.openclaw.registered ? 'OpenClaw' : '',
+            server.codex && server.codex.registered ? 'Codex' : '',
+            server.claude && server.claude.registered ? 'Claude' : ''
+        ].filter(Boolean);
+        var status = registeredClients.length
+            ? _mcpTr('mcp_status_registered_clients', { clients: registeredClients.join(', ') }, '已注册到：{{clients}}')
             : _mcpTr('mcp_status_vo_only', null, '仅在 VO 中保存');
+        var registrationWarnings = ['codex', 'claude'].reduce(function(items, client) {
+            var warnings = server[client] && server[client].warnings;
+            return items.concat(Array.isArray(warnings) ? warnings : []);
+        }, []);
         var detail = server.transport === 'stdio'
             ? [server.command || '', (server.args || []).join(' ')].join(' ').trim()
             : [server.transport || '', server.url || ''].join(' ').trim();
@@ -72,10 +88,13 @@ function renderMcpRegistry() {
                 '<div class="mcp-card-desc">' + _mcpEsc(server.description || '') + '</div>' +
                 '<code class="mcp-card-command">' + _mcpEsc(detail + env) + '</code>' +
                 '<div class="mcp-card-status">' + _mcpEsc(status) + '</div>' +
+                (registrationWarnings.length ? '<div class="mcp-card-warning">' + _mcpEsc(_mcpTr('mcp_registration_warning', { warning: registrationWarnings.join('; ') }, '注意：{{warning}}')) + '</div>' : '') +
             '</div>' +
             '<div class="mcp-card-actions">' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_openclaw_title', null, '注册到 OpenClaw')) + '" data-mcp-action="openclaw" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_openclaw', null, '注册 OpenClaw')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_install_skill_title', null, '安装说明 skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_install_skill', null, '安装 Skill')) + '</button>' +
+                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_codex_title', null, '注册到 Codex')) + '" data-mcp-action="codex" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_codex', null, '注册 Codex')) + '</button>' +
+                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_claude_title', null, '注册到 Claude')) + '" data-mcp-action="claude" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_claude', null, '注册 Claude')) + '</button>' +
+                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '自动注册 MCP 并分配给 Agent')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '分配 Agent')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('delete', null, '删除')) + '</button>' +
             '</div>' +
             '<div class="mcp-install-row" id="mcp-install-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
@@ -109,7 +128,7 @@ function _mcpFormPayload() {
 
 async function saveMcpServer() {
     try {
-        var res = await fetch('/api/mcp-registry', {
+        var res = await _mcpMutationFetch('/api/mcp-registry', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(_mcpFormPayload())
@@ -125,7 +144,7 @@ async function saveMcpServer() {
 
 async function addVibeTradingMcpTemplate() {
     try {
-        var res = await fetch('/api/mcp-registry/templates/vibe-trading', { method: 'POST' });
+        var res = await _mcpMutationFetch('/api/mcp-registry/templates/vibe-trading', { method: 'POST' });
         var data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_template_failed_plain', null, '模板创建失败'));
         document.getElementById('mcp-name').value = data.server.name || 'vibe-trading';
@@ -142,14 +161,31 @@ async function addVibeTradingMcpTemplate() {
 }
 
 async function registerMcpInOpenClaw(name) {
+    return registerMcpInNativeClient(name, 'openclaw');
+}
+
+async function registerMcpInNativeClient(name, client) {
+    var labels = { openclaw: 'OpenClaw', codex: 'Codex', claude: 'Claude' };
+    var label = labels[client] || client;
     try {
-        var res = await fetch('/api/mcp-registry/' + encodeURIComponent(name) + '/openclaw', { method: 'POST' });
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/' + encodeURIComponent(client), { method: 'POST' });
         var data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_openclaw_failed_plain', null, 'OpenClaw 注册失败'));
-        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_openclaw_registered', { name: name }, '已注册到 OpenClaw：{{name}}'));
+        if (!res.ok || !data.ok) {
+            throw new Error(data.error || _mcpTr('mcp_client_failed_plain', { client: label }, '{{client}} 注册失败'));
+        }
+        if (typeof _acpShowToast === 'function') {
+            var message = _mcpTr('mcp_client_registered', { client: label, name: name }, '已注册到 {{client}}：{{name}}');
+            var warnings = data[client] && data[client].warnings;
+            if (Array.isArray(warnings) && warnings.length) {
+                message += ' · ' + _mcpTr('mcp_registration_warning', { warning: warnings.join('; ') }, '注意：{{warning}}');
+            }
+            _acpShowToast(message);
+        }
         refreshMcpRegistry();
     } catch (e) {
-        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_openclaw_failed', { error: e.message }, 'OpenClaw 注册失败：{{error}}'));
+        if (typeof _acpShowToast === 'function') {
+            _acpShowToast(_mcpTr('mcp_client_failed', { client: label, error: e.message }, '{{client}} 注册失败：{{error}}'));
+        }
     }
 }
 
@@ -164,11 +200,13 @@ async function toggleMcpSkillInstall(name) {
         var res = await fetch('/api/agents', { cache: 'no-store' });
         var data = await res.json();
         var agents = (data.agents || []).filter(function(agent) {
-            return String(agent.providerKind || 'openclaw').toLowerCase() === 'openclaw';
+            return ['openclaw', 'codex', 'claude', 'claude-code'].indexOf(String(agent.providerKind || 'openclaw').toLowerCase()) >= 0;
         });
         row.innerHTML = '<select id="mcp-agent-' + _mcpEsc(name) + '">' + agents.map(function(agent) {
-            return '<option value="' + _mcpEsc(agent.id) + '">' + _mcpEsc((agent.emoji || '') + ' ' + (agent.name || agent.id)) + '</option>';
-        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('install', null, '安装')) + '</button>';
+            var provider = String(agent.providerKind || 'openclaw').toLowerCase();
+            var providerLabel = provider === 'claude-code' || provider === 'claude' ? 'Claude' : (provider === 'codex' ? 'Codex' : 'OpenClaw');
+            return '<option value="' + _mcpEsc(agent.id) + '">' + _mcpEsc((agent.emoji || '') + ' ' + (agent.name || agent.id) + ' · ' + providerLabel) + '</option>';
+        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign', null, '分配')) + '</button>';
         row.style.display = 'flex';
     } catch (e) {
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_agent_list_failed', { error: e.message }, 'Agent 列表加载失败：{{error}}'));
@@ -180,23 +218,30 @@ async function installMcpSkill(name) {
     var agentId = select && select.value;
     if (!agentId) return;
     try {
-        var res = await fetch('/api/mcp-registry/' + encodeURIComponent(name) + '/skill', {
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/skill', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId: agentId, overwrite: true })
         });
         var data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_skill_failed_plain', null, 'Skill 安装失败'));
-        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_skill_installed', { agent: agentId }, 'MCP skill 已安装到 {{agent}}'));
+        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_assignment_failed_plain', null, 'MCP 分配失败'));
+        if (typeof _acpShowToast === 'function') {
+            var labels = { openclaw: 'OpenClaw', codex: 'Codex', claude: 'Claude' };
+            _acpShowToast(_mcpTr('mcp_assigned', {
+                agent: agentId,
+                client: labels[data.client] || data.client || ''
+            }, '已注册到 {{client}} 并分配给 {{agent}}'));
+        }
+        refreshMcpRegistry();
     } catch (e) {
-        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_skill_failed', { error: e.message }, 'Skill 安装失败：{{error}}'));
+        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_assignment_failed', { error: e.message }, 'MCP 分配失败：{{error}}'));
     }
 }
 
 async function deleteMcpServer(name) {
     if (!confirm(_mcpTr('mcp_delete_confirm', { name: name }, '从 VO 注册表删除 MCP server "{{name}}"？'))) return;
     try {
-        var res = await fetch('/api/mcp-registry/' + encodeURIComponent(name), { method: 'DELETE' });
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name), { method: 'DELETE' });
         var data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('delete_failed', null, '删除失败'));
         refreshMcpRegistry();
@@ -212,7 +257,7 @@ document.addEventListener('click', function(e) {
     if (!actionButton) return;
     var action = actionButton.getAttribute('data-mcp-action');
     var name = actionButton.getAttribute('data-mcp-name') || '';
-    if (action === 'openclaw') registerMcpInOpenClaw(name);
+    if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
     if (action === 'toggle-skill') toggleMcpSkillInstall(name);
     if (action === 'install-skill') installMcpSkill(name);
     if (action === 'delete') deleteMcpServer(name);
@@ -229,6 +274,7 @@ Object.assign(window, {
     saveMcpServer,
     addVibeTradingMcpTemplate,
     registerMcpInOpenClaw,
+    registerMcpInNativeClient,
     toggleMcpSkillInstall,
     installMcpSkill,
     deleteMcpServer

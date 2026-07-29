@@ -58,7 +58,7 @@ class CodexProvider:
     sandbox: str = "workspace-write"
     approval_policy: str = "never"
     prefer_app_server: bool = True
-    include_main: bool = True
+    include_main: bool = False
     include_native_agents: bool = True
     register_native_agents: bool = True
     route_approvals_through_vo: bool = False

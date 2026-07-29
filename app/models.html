@@ -365,7 +365,7 @@ function renderCodexNativeForm(p) {
     const sandbox = p.sandbox || 'workspace-write';
     const approval = p.approvalPolicy || 'never';
     return `<label class="checkbox-line"><input id="native-codex-enabled" type="checkbox" ${nativeChecked(p.enabled, false)}> ${i18n.t('enable_codex_agents')}</label>
-        <label class="checkbox-line"><input id="native-codex-include-main" type="checkbox" ${nativeChecked(p.includeMain, true)}> ${i18n.t('show_codex_main_agent')}</label>
+        <label class="checkbox-line"><input id="native-codex-include-main" type="checkbox" ${nativeChecked(p.includeMain, false)}> ${i18n.t('show_codex_main_agent')}</label>
         <label class="checkbox-line"><input id="native-codex-include-native" type="checkbox" ${nativeChecked(p.includeNativeAgents, true)}> ${i18n.t('discover_native_codex_agents')}</label>
         <label class="checkbox-line"><input id="native-codex-register-native" type="checkbox" ${nativeChecked(p.registerNativeAgents, true)}> ${i18n.t('register_new_standard_agents_in_native_codex')}</label>
         <label class="checkbox-line"><input id="native-codex-appserver" type="checkbox" ${nativeChecked(p.preferAppServer, true)}> ${i18n.t('prefer_app_server_protocol')}</label>
@@ -398,7 +398,7 @@ function renderCodexNativeForm(p) {
 function renderClaudeNativeForm(p) {
     const permission = p.permissionMode || 'acceptEdits';
     return `<label class="checkbox-line"><input id="native-claude-enabled" type="checkbox" ${nativeChecked(p.enabled, false)}> ${i18n.t('enable_claude_code_agents')}</label>
-        <label class="checkbox-line"><input id="native-claude-include-main" type="checkbox" ${nativeChecked(p.includeMain, true)}> ${i18n.t('show_claude_code_main_agent')}</label>
+        <label class="checkbox-line"><input id="native-claude-include-main" type="checkbox" ${nativeChecked(p.includeMain, false)}> ${i18n.t('show_claude_code_main_agent')}</label>
         <label class="checkbox-line"><input id="native-claude-include-native" type="checkbox" ${nativeChecked(p.includeNativeAgents, true)}> ${i18n.t('discover_native_claude_code_subagents')}</label>
         <label class="checkbox-line"><input id="native-claude-register-native" type="checkbox" ${nativeChecked(p.registerNativeAgents, true)}> ${i18n.t('register_new_standard_agents_in_native_claude_code')}</label>
         <div class="row"><label>${i18n.t('native_config')}</label><input id="native-claude-home" value="${escAttr(p.homePath || '')}" placeholder="~/.claude"></div>

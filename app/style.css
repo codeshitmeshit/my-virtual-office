@@ -5164,6 +5164,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mcp-card-desc { color: #aaa; font-size: 10px; line-height: 1.45; margin-top: 4px; overflow-wrap: anywhere; }
 .mcp-card-command { display: block; color: #9fd3ff; background: #10101c; border: 1px solid #242447; border-radius: 4px; padding: 5px 6px; margin-top: 6px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mcp-card-status { color: #8bd17c; font-size: 9px; margin-top: 5px; }
+.mcp-card-warning { color: #e6b85c; font-size: 9px; margin-top: 3px; }
 .mcp-card-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
 .mcp-card-actions button, .mcp-install-row button { font-size: 9px; padding: 4px 8px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
 .mcp-card-actions button:hover, .mcp-install-row button:hover { border-color: var(--gold); color: var(--gold); }

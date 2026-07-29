@@ -172,7 +172,7 @@ def discover_hermes_agents(hermes_home=None, hermes_bin=None, enabled=True, api_
     return _merge_hermes_agent_modes(cli_agents, api_agents, desktop_agents, prefer_api)
 
 
-def discover_codex_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, bridge_url=None, sandbox="workspace-write", approval_policy="never", include_main=True, include_native_agents=True, register_native_agents=True):
+def discover_codex_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, bridge_url=None, sandbox="workspace-write", approval_policy="never", include_main=False, include_native_agents=True, register_native_agents=True):
     """Discover the optional local Codex collaborator harness."""
     return CodexProvider(
         enabled=enabled,
@@ -194,7 +194,7 @@ def discover_codex_agents(enabled=False, workspace=None, home_path=None, binary=
     ).discover_agents()
 
 
-def discover_claude_code_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, timeout_sec=900, permission_mode="acceptEdits", include_main=True, include_native_agents=True, register_native_agents=True):
+def discover_claude_code_agents(enabled=False, workspace=None, home_path=None, binary=None, workspace_root=None, main_workspace=None, name=None, agent_id=None, model=None, reply_text=None, timeout_sec=900, permission_mode="acceptEdits", include_main=False, include_native_agents=True, register_native_agents=True):
     """Discover the optional local Claude Code collaborator harness."""
     return ClaudeCodeProvider(
         enabled=enabled,
@@ -246,7 +246,7 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
         bridge_url=codex.get("bridgeUrl"),
         sandbox=codex.get("sandbox", "workspace-write"),
         approval_policy=codex.get("approvalPolicy", "never"),
-        include_main=codex.get("includeMain", True),
+        include_main=codex.get("includeMain", False),
         include_native_agents=codex.get("includeNativeAgents", True),
         register_native_agents=codex.get("registerNativeAgents", True),
     ))
@@ -264,7 +264,7 @@ def discover_all_agents(oc_home, hermes_home=None, hermes_bin=None, hermes_enabl
         reply_text=claude_code.get("replyText"),
         timeout_sec=claude_code.get("timeoutSec", 900),
         permission_mode=claude_code.get("permissionMode", "acceptEdits"),
-        include_main=claude_code.get("includeMain", True),
+        include_main=claude_code.get("includeMain", False),
         include_native_agents=claude_code.get("includeNativeAgents", True),
         register_native_agents=claude_code.get("registerNativeAgents", True),
     ))

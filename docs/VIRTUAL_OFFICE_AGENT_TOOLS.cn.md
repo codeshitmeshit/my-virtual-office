@@ -68,7 +68,7 @@ Codex 配置是与产品无关的：
 - `VO_CODEX_HOME`：本机 Codex 认证/配置主目录，默认 `~/.codex`
 - `VO_CODEX_WORKSPACE_ROOT`：办公室创建的 Codex 代理工作区
 - `VO_CODEX_MAIN_WORKSPACE`：`codex-main` 和原生自定义代理使用的工作区
-- `VO_CODEX_INCLUDE_MAIN`：包含 Codex 的默认主代理，默认启用
+- `VO_CODEX_INCLUDE_MAIN`：可选显示合成的 Codex 默认 Main 代理，默认关闭
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`：读取 `$CODEX_HOME/agents/*.toml`，默认启用
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`：创建 VO Codex 代理时写入 `$CODEX_HOME/agents/<profile>.toml`，默认启用
 - `VO_CODEX_PREFER_APP_SERVER`：默认启用原生应用服务器集成
@@ -83,7 +83,7 @@ Claude Code 配置是与产品无关的：
 - `VO_CLAUDE_CODE_MAIN_WORKSPACE`：`claude-code-main` 和原生子代理使用的工作区
 - `VO_CLAUDE_CODE_MODEL`：可选的默认 Claude Code 模型
 - `VO_CLAUDE_CODE_PERMISSION_MODE`：Claude Code 权限模式，默认为 `acceptEdits`
-- `VO_CLAUDE_CODE_INCLUDE_MAIN`：包含 Claude Code 的默认主代理，默认启用
+- `VO_CLAUDE_CODE_INCLUDE_MAIN`：可选显示合成的 Claude Code 默认 Main 代理，默认关闭
 - `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS`：读取 `$CLAUDE_CONFIG_DIR/agents/*.md`，默认启用
 - `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS`：创建标准 VO Claude Code 代理时写入 `$CLAUDE_CONFIG_DIR/agents/<profile>.md`，默认启用
 
