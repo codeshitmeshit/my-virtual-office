@@ -10,6 +10,7 @@ The Skills Library needs a low-maintenance way to place newly created and import
 - Allow the Virtual Office owner to correct one skill's primary category at a time.
 - Surface running, completed, partially failed, unavailable, and disabled conditions without adding organization lifecycle fields to skills.
 - Keep successfully organized skills in their destination categories while failed skills remain discoverable in `默认标签` for manual correction.
+- Require the archive manager to create an ordinary category when the purpose is clear but no existing category matches, and expose a safe reason for genuine classification failures.
 - Write one summary activity to the archive manager's existing activity log for each organization run.
 - Keep the Skills Library separate from the MCP Registry and omit unsupported workspace concepts from the UI.
 

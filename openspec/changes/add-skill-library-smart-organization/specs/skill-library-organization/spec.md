@@ -53,7 +53,7 @@ The system SHALL assign every newly created or imported skill to `默认标签` 
 - **THEN** the skill's primary category is `默认标签`
 
 ### Requirement: Purpose-based category governance
-The system SHALL provide the general purpose categories `开发与测试`, `协作与文档`, `项目与流程`, `运维与诊断`, and `知识与内容`. The archive manager MAY create an ordinary category when a skill clearly does not belong to any existing category and SHALL have final authority over the meaning of ordinary categories.
+The system SHALL provide the general purpose categories `开发与测试`, `协作与文档`, `项目与流程`, `运维与诊断`, and `知识与内容`. The archive manager SHALL create an ordinary category when it can clearly identify a skill purpose that does not belong to any existing category and SHALL have final authority over the meaning of ordinary categories. The absence of a suitable existing category SHALL NOT by itself be treated as a classification failure.
 
 #### Scenario: Skill matches a general category
 - **WHEN** the archive manager determines that a skill clearly matches an existing general category
@@ -61,8 +61,14 @@ The system SHALL provide the general purpose categories `开发与测试`, `协�
 
 #### Scenario: Skill does not match an existing category
 - **WHEN** the archive manager determines that a skill clearly falls outside all existing categories
-- **THEN** it may create an ordinary category with an appropriate purpose
+- **THEN** it creates an ordinary category with an appropriate purpose
 - **AND** it assigns the skill to that new category
+- **AND** it does not report the skill as failed merely because no prior category matched
+
+#### Scenario: Skill purpose cannot be determined reliably
+- **WHEN** the available skill information is insufficient or ambiguous after considering both existing and new categories
+- **THEN** the archive manager returns a disclosure-safe failure reason
+- **AND** the skill remains in `默认标签` for owner review
 
 ### Requirement: Archive-manager smart organization
 The system SHALL use the existing archive-room archive manager to organize skills and SHALL limit each run to skills whose current primary category is `默认标签`.
@@ -131,11 +137,17 @@ The system SHALL present organization progress and outcomes through a lightweigh
 - **WHEN** one or more processed skills fail classification
 - **THEN** the top marker displays the number of failed skills
 - **AND** failed skills are visibly identified in `默认标签`
+- **AND** each failed skill exposes its disclosure-safe failure reason
 
 #### Scenario: Owner opens a partial-failure marker
 - **WHEN** the owner activates the partial-failure marker
 - **THEN** the Skills Library selects `默认标签`
 - **AND** it shows only skills that failed classification
+
+#### Scenario: Owner inspects a failed skill
+- **WHEN** the owner views a skill that failed classification
+- **THEN** the skill card and selected-skill details display the failure reason
+- **AND** the reason distinguishes an archive-manager judgment from validation, timeout, unreadable-skill, or interrupted-run failures without exposing private paths or raw model output
 
 ### Requirement: Manual correction of failed classifications
 The system SHALL allow the owner to change one skill's primary category at a time. The outstanding failure count SHALL decrease after each correction and SHALL transition to a resolved marker when all failed skills have been corrected.

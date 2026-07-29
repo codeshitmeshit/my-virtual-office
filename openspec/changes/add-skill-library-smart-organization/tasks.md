@@ -31,3 +31,9 @@
 - [x] 6.1 Add Chinese and English copy for categories, controls, markers, errors, and accessibility labels; update Skills Library documentation to describe the sidecar metadata, owner boundary, archive-manager reuse, MCP separation, and absence of team-space or organization-lifecycle concepts.
 - [x] 6.2 Add an end-to-end acceptance fixture covering at least 100 default-category skills, multi-batch completion, partial failure, manual repair, archive-manager activity visibility, busy prevention across archive operations, restart recovery, and management-token prompting; capture reproducible commands and evidence for the later OpenSpec verification gate.
 - [x] 6.3 Run focused Python and JavaScript suites plus Skills Library, Archive Room, management-token, route-split, MCP Registry, and direct-filesystem regression checks; document observed duration/count logs, feature-flag rollback results, residual risks, and any unverified environments in `verification-evidence.md`.
+
+## 7. Failure Reason Clarity
+
+- [ ] 7.1 Strengthen the archive-manager prompt so a clear unmatched purpose must use `newCategoryName` and category absence cannot be returned as `failureReason`; add contract tests that distinguish new-category creation from genuine insufficient-information failures.
+- [ ] 7.2 Render each bounded organization failure reason on the failed skill card and in selected-skill details, with Chinese and English accessibility copy; add DOM tests for model, validation, timeout, unreadable-skill, and interrupted-run reasons.
+- [ ] 7.3 Rerun focused organization, UI, localization, acceptance, and OpenSpec validation suites; update browser acceptance and verification evidence for the new failure-reason behavior.

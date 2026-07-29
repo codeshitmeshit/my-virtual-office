@@ -150,6 +150,8 @@ The prompt:
 - supplies existing category IDs/names;
 - requires JSON only;
 - permits either an existing category ID, a proposed ordinary category name, or a disclosure-safe failure reason;
+- explicitly requires `newCategoryName` when a clear purpose is not represented by the existing categories, so category absence alone is never a valid failure reason;
+- permits `failureReason` only when the purpose cannot be determined reliably from the bounded skill summary;
 - requires exactly one result for every input slug.
 
 Only one batch is in flight at a time. This bounds prompt size and model concurrency while still processing every skill in the default snapshot.
@@ -179,6 +181,7 @@ The enriched list response includes categories, catalog revision, archive-manage
 
 - Successful skills render in their destination category.
 - Failed skill slugs remain under `default`; the UI derives the `归类失败` badge from `lastOrganization.failures`.
+- The public projection retains each bounded failure `code` and disclosure-safe `reason`; failed cards and the selected-skill panel display the reason without exposing raw model output.
 - Activating the partial-failure marker selects `default` and filters to those slugs.
 - A successful manual move removes that slug from `failures` in the same catalog write.
 - When the final failure is removed, the run-level outcome becomes `resolved`.
@@ -205,6 +208,7 @@ The Skills Library modal removes its MCP Registry button and renders:
 - purpose categories with immutable `默认标签` first;
 - searchable skill cards;
 - a selected-skill panel with source, primary category, and single-skill category change;
+- failure-reason text on failed cards and in selected-skill details;
 - top markers for running, completed, partial failure, and resolved outcomes.
 
 The smart-organize button is disabled when the manager is busy, unavailable, or the default category is empty. Manual category mutation controls are disabled during an active organization run to avoid confusing revision conflicts; server revision checks remain authoritative.
