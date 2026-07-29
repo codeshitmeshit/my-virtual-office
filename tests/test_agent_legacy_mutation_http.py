@@ -62,6 +62,9 @@ def test_post_legacy_mutations_require_management_before_body_parsing():
         "/api/agent/codex-local/skills",
         "/api/skills-library",
         "/api/skills-library/apply",
+        "/api/skills-library/organization/runs",
+        "/api/skills-library/organization/dismiss",
+        "/api/skills-library/reviewer/category",
         "/set-model",
     ):
         handler = _handler(path, b"not-json")

@@ -18,6 +18,9 @@ def test_every_retained_legacy_agent_write_requires_management():
         ("POST", "/api/agent/codex-local/skills"),
         ("POST", "/api/skills-library"),
         ("POST", "/api/skills-library/apply"),
+        ("POST", "/api/skills-library/organization/runs"),
+        ("POST", "/api/skills-library/organization/dismiss"),
+        ("POST", "/api/skills-library/reviewer/category"),
         ("DELETE", "/api/agent/codex-local/skills/reviewer"),
         ("DELETE", "/api/skills-library/reviewer"),
     )

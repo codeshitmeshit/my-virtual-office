@@ -28762,6 +28762,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == "/api/skills-library":
+            if server_routes.skill_library_organization.handle_get(self, parsed_url):
+                return
         if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
             if server_routes.mcp_registry.handle_get(self, parsed_url):
                 return
@@ -31432,6 +31435,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             and self._reject_untrusted_management_request()
         ):
+            return
+        if server_routes.skill_library_organization.handle_post(self, parsed_url):
             return
         if request_path == "/api/agent/project-authoring/projects":
             self._handle_agent_project_direct_create()
