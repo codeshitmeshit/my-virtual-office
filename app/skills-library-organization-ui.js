@@ -23,6 +23,14 @@
         return document.getElementById(id);
     }
 
+    function tr(key, params, fallback) {
+        if (global.i18n && typeof global.i18n.t === 'function') {
+            var translated = global.i18n.t(key, params);
+            if (translated && translated !== key) return translated;
+        }
+        return fallback;
+    }
+
     function skills() {
         return Array.isArray(state.data.skills) ? state.data.skills : [];
     }
@@ -35,7 +43,18 @@
         var category = categories().find(function(item) {
             return item.id === categoryId;
         });
-        return category ? category.name : '默认标签';
+        var seededKeys = {
+            'default': 'skill_category_default',
+            'development-testing': 'skill_category_development_testing',
+            'collaboration-docs': 'skill_category_collaboration_docs',
+            'project-process': 'skill_category_project_process',
+            'operations-diagnostics': 'skill_category_operations_diagnostics',
+            'knowledge-content': 'skill_category_knowledge_content'
+        };
+        var fallback = category ? category.name : '默认标签';
+        return seededKeys[categoryId]
+            ? tr(seededKeys[categoryId], null, fallback)
+            : fallback;
     }
 
     function categoryCount(categoryId) {
@@ -74,7 +93,12 @@
         var container = byId('skl-category-list');
         if (!container) return;
         container.replaceChildren();
-        var items = [{ id: 'all', name: '全部技能' }].concat(categories());
+        var items = [{
+            id: 'all',
+            name: tr('skill_library_all_skills', null, '全部技能')
+        }].concat(categories().map(function(category) {
+            return Object.assign({}, category, { name: categoryName(category.id) });
+        }));
         items.forEach(function(category) {
             var button = document.createElement('button');
             button.type = 'button';
@@ -105,9 +129,9 @@
         var count = byId('skl-list-count');
         if (title) {
             title.textContent = state.failureOnly
-                ? '归类失败'
+                ? tr('skill_library_failed_filter', null, '归类失败')
                 : state.categoryId === 'all'
-                ? '全部技能'
+                ? tr('skill_library_all_skills', null, '全部技能')
                 : categoryName(state.categoryId);
         }
         if (count) count.textContent = String(visible.length);
@@ -115,7 +139,9 @@
         if (!visible.length) {
             var empty = document.createElement('div');
             empty.className = 'skl-empty';
-            empty.textContent = state.search ? '没有匹配的技能' : '这个分类中还没有技能';
+            empty.textContent = state.search
+                ? tr('skill_library_no_matches', null, '没有匹配的技能')
+                : tr('skill_library_empty_category', null, '这个分类中还没有技能');
             container.appendChild(empty);
             return;
         }
@@ -133,7 +159,8 @@
             name.textContent = skill.name || '';
             var description = document.createElement('div');
             description.className = 'skl-card-desc';
-            description.textContent = skill.description || '暂无描述';
+            description.textContent = skill.description ||
+                tr('skill_library_no_description', null, '暂无描述');
             var category = document.createElement('span');
             category.className = 'skl-card-category';
             category.textContent = categoryName(skill.primaryCategoryId || 'default');
@@ -141,7 +168,8 @@
             if (failureSlugs().has(skill.name)) {
                 var failureBadge = document.createElement('span');
                 failureBadge.className = 'skl-failure-badge';
-                failureBadge.textContent = '归类失败';
+                failureBadge.textContent =
+                    tr('skill_library_classification_failed', null, '归类失败');
                 card.appendChild(failureBadge);
             }
             card.addEventListener('click', function() {
@@ -176,7 +204,8 @@
         if (!skill) {
             var empty = document.createElement('div');
             empty.className = 'skl-detail-empty';
-            empty.textContent = '选择一个技能查看详情';
+            empty.textContent =
+                tr('skill_library_select_detail', null, '选择一个技能查看详情');
             container.appendChild(empty);
             return;
         }
@@ -185,24 +214,31 @@
         title.textContent = skill.name || '';
         var description = document.createElement('p');
         description.className = 'skl-detail-description';
-        description.textContent = skill.description || '暂无描述';
+        description.textContent = skill.description ||
+            tr('skill_library_no_description', null, '暂无描述');
         container.append(
             title,
             description,
-            detailField('来源', '本地技能库'),
-            detailField('主分类', categoryName(skill.primaryCategoryId || 'default'))
+            detailField(
+                tr('skill_library_source', null, '来源'),
+                tr('skill_library_local_source', null, '本地技能库')
+            ),
+            detailField(
+                tr('skill_library_primary_category', null, '主分类'),
+                categoryName(skill.primaryCategoryId || 'default')
+            )
         );
         var tagsField = document.createElement('div');
         tagsField.className = 'skl-detail-field';
         var tagsLabel = document.createElement('span');
         tagsLabel.className = 'skl-detail-label';
-        tagsLabel.textContent = '标签';
+        tagsLabel.textContent = tr('skill_library_tags', null, '标签');
         var tagList = document.createElement('div');
         tagList.className = 'skl-tag-list';
         var tags = Array.isArray(skill.tags) ? skill.tags : [];
         if (!tags.length) {
             tagList.className = 'skl-detail-value';
-            tagList.textContent = '暂无标签';
+            tagList.textContent = tr('skill_library_no_tags', null, '暂无标签');
         } else {
             tags.forEach(function(tag) {
                 var chip = document.createElement('span');
@@ -219,7 +255,10 @@
         var categorySelect = document.createElement('select');
         categorySelect.id = 'skl-category-select';
         categorySelect.className = 'skl-category-select';
-        categorySelect.setAttribute('aria-label', '调整主分类');
+        categorySelect.setAttribute(
+            'aria-label',
+            tr('skill_library_adjust_category', null, '调整主分类')
+        );
         categories().forEach(function(category) {
             var option = document.createElement('option');
             option.value = category.id;
@@ -231,7 +270,9 @@
         moveButton.id = 'skl-category-move';
         moveButton.type = 'button';
         moveButton.className = 'skl-category-move';
-        moveButton.textContent = state.moving ? '移动中…' : '移动';
+        moveButton.textContent = state.moving
+            ? tr('skill_library_moving', null, '移动中…')
+            : tr('skill_library_move', null, '移动');
         var organizationRunning =
             (state.data.organization || {}).status === 'running';
         categorySelect.disabled = organizationRunning || state.moving;
@@ -245,9 +286,9 @@
         var actions = document.createElement('div');
         actions.className = 'skl-detail-actions';
         [
-            ['应用到 AI', false, function() { global.toggleSkillApply(skill.name); }],
-            ['编辑', true, function() { global.openSkillEditor(skill.name); }],
-            ['删除', true, function() { global.deleteLibrarySkill(skill.name); }]
+            [tr('skill_library_apply_to_ai', null, '应用到 AI'), false, function() { global.toggleSkillApply(skill.name); }],
+            [tr('edit', null, '编辑'), true, function() { global.openSkillEditor(skill.name); }],
+            [tr('delete', null, '删除'), true, function() { global.deleteLibrarySkill(skill.name); }]
         ].forEach(function(action) {
             var button = document.createElement('button');
             button.type = 'button';
@@ -270,11 +311,37 @@
         var defaultCount = categoryCount('default');
         var disabledReason = '';
         var organization = state.data.organization || {};
-        if (!state.data.organizationEnabled) disabledReason = '智能整理当前未启用';
-        else if (organization.status === 'running') disabledReason = '档案管理员正在整理技能库';
-        else if (manager.status === 'working' || manager.activeWork) disabledReason = '档案管理员正在处理其他工作';
-        else if (['missing', 'error', 'offline', 'unavailable', 'paused'].indexOf(manager.status) >= 0) disabledReason = '档案管理员当前不可用';
-        else if (!defaultCount) disabledReason = '默认标签中没有需要整理的技能';
+        if (!state.data.organizationEnabled) {
+            disabledReason = tr(
+                'skill_organization_disabled',
+                null,
+                '智能整理当前未启用'
+            );
+        } else if (organization.status === 'running') {
+            disabledReason = tr(
+                'skill_organization_running',
+                null,
+                '档案管理员正在整理技能库'
+            );
+        } else if (manager.status === 'working' || manager.activeWork) {
+            disabledReason = tr(
+                'skill_organization_manager_busy',
+                null,
+                '档案管理员正在处理其他工作'
+            );
+        } else if (['missing', 'error', 'offline', 'unavailable', 'paused'].indexOf(manager.status) >= 0) {
+            disabledReason = tr(
+                'skill_organization_manager_unavailable',
+                null,
+                '档案管理员当前不可用'
+            );
+        } else if (!defaultCount) {
+            disabledReason = tr(
+                'skill_organization_default_empty',
+                null,
+                '默认标签中没有需要整理的技能'
+            );
+        }
         button.disabled = Boolean(disabledReason || state.starting);
         button.title = disabledReason;
         button.setAttribute('aria-disabled', button.disabled ? 'true' : 'false');
@@ -283,18 +350,46 @@
     function markerCopy(organization) {
         var failures = Number(organization.failureCount || 0);
         if (organization.status === 'running') {
-            return { tone: 'running', text: '档案管理员正在整理技能库…', dismissible: false };
+            return {
+                tone: 'running',
+                text: tr(
+                    'skill_organization_marker_running',
+                    null,
+                    '档案管理员正在整理技能库…'
+                ),
+                dismissible: false
+            };
         }
         if (organization.status === 'completed') {
-            return { tone: 'completed', text: '技能整理已完成', dismissible: true };
+            return {
+                tone: 'completed',
+                text: tr(
+                    'skill_organization_marker_completed',
+                    null,
+                    '技能整理已完成'
+                ),
+                dismissible: true
+            };
         }
         if (organization.status === 'resolved') {
-            return { tone: 'resolved', text: '归类失败项已全部处理', dismissible: true };
+            return {
+                tone: 'resolved',
+                text: tr(
+                    'skill_organization_marker_resolved',
+                    null,
+                    '归类失败项已全部处理'
+                ),
+                dismissible: true
+            };
         }
         if (organization.status === 'partial') {
             return {
                 tone: 'partial',
-                text: '技能整理完成，' + failures + ' 个归类失败',
+                text: tr(
+                    'skill_organization_marker_partial',
+                    { count: failures },
+                    '技能整理完成，' + failures + ' 个归类失败'
+                ),
                 dismissible: true,
                 opensFailures: failures > 0
             };
@@ -302,7 +397,17 @@
         if (organization.status === 'failed') {
             return {
                 tone: 'partial',
-                text: failures ? '技能整理未完成，' + failures + ' 个归类失败' : '技能整理未完成',
+                text: failures
+                    ? tr(
+                        'skill_organization_marker_failed_count',
+                        { count: failures },
+                        '技能整理未完成，' + failures + ' 个归类失败'
+                    )
+                    : tr(
+                        'skill_organization_marker_failed',
+                        null,
+                        '技能整理未完成'
+                    ),
                 dismissible: true,
                 opensFailures: failures > 0
             };
@@ -335,8 +440,15 @@
             var dismiss = document.createElement('button');
             dismiss.type = 'button';
             dismiss.className = 'skl-marker-dismiss';
-            dismiss.textContent = '关闭';
-            dismiss.setAttribute('aria-label', '关闭整理结果');
+            dismiss.textContent = tr('close', null, '关闭');
+            dismiss.setAttribute(
+                'aria-label',
+                tr(
+                    'skill_organization_dismiss_label',
+                    null,
+                    '关闭整理结果'
+                )
+            );
             dismiss.disabled = state.dismissing;
             dismiss.addEventListener('click', dismissMarker);
             marker.appendChild(dismiss);
@@ -429,7 +541,11 @@
                 ) {
                     await global.refreshSkillsList();
                 }
-                throw new Error(result.error || '调整技能分类失败');
+                throw new Error(result.error || tr(
+                    'skill_organization_move_failed',
+                    null,
+                    '调整技能分类失败'
+                ));
             }
             skill.primaryCategoryId =
                 (result.metadata || {}).primaryCategoryId || targetCategoryId;
@@ -472,7 +588,11 @@
                 body: '{}'
             });
             var result = await response.json();
-            if (!response.ok) throw new Error(result.error || '智能整理启动失败');
+            if (!response.ok) throw new Error(result.error || tr(
+                'skill_organization_start_failed',
+                null,
+                '智能整理启动失败'
+            ));
             state.data.organization = result;
             render();
             if (typeof global.refreshSkillsList === 'function') {
@@ -501,7 +621,11 @@
                 body: '{}'
             });
             var result = await response.json();
-            if (!response.ok) throw new Error(result.error || '关闭整理结果失败');
+            if (!response.ok) throw new Error(result.error || tr(
+                'skill_organization_dismiss_failed',
+                null,
+                '关闭整理结果失败'
+            ));
             if (state.data.organization) {
                 state.data.organization.dismissedAt =
                     (result.organization || {}).dismissedAt || new Date().toISOString();
@@ -524,6 +648,10 @@
                 state.selectedSlug = '';
                 render();
             });
+        }
+        if (typeof global.addEventListener === 'function') {
+            global.addEventListener('i18n:changed', render);
+            global.addEventListener('i18n:ready', render);
         }
     }
 

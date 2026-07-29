@@ -169,6 +169,40 @@ function findByClass(element, className) {
 
 async function main() {
   {
+    const { window, document } = harness();
+    const english = {
+      skill_library_all_skills: 'All Skills',
+      skill_category_default: 'Default',
+      skill_organization_marker_partial:
+        'Organization completed with {{count}} classification failure(s)',
+    };
+    window.i18n = {
+      t(key, params) {
+        let value = english[key] || key;
+        for (const [name, replacement] of Object.entries(params || {})) {
+          value = value.replaceAll(`{{${name}}}`, replacement);
+        }
+        return value;
+      },
+    };
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        organization: {
+          status: 'partial',
+          failureCount: 1,
+          failures: [{ slug: 'alpha' }],
+        },
+      }),
+    );
+    assert.equal(document.getElementById('skl-list-title').textContent, 'All Skills');
+    assert.equal(markerText(document), 'Organization completed with 1 classification failure(s)');
+    assert.equal(
+      document.getElementById('skl-category-list').children[1].children[0].textContent,
+      'Default',
+    );
+  }
+
+  {
     const { window, document, timers } = harness();
     const cases = [
       ['running', '档案管理员正在整理技能库…', 'is-running'],

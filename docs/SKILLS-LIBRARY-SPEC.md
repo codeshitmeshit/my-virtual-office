@@ -89,10 +89,29 @@ Body: `{filename: string, content: string}` (base64 content)
 - Reads file, extracts name from frontmatter or filename
 - POST /api/skills-library/upload
 
+## Classification and Smart Organization
+
+- `SKILL.md` files and skill directories remain the content source of truth. Classification metadata lives in the `.vo-library-catalog.json` sidecar at the Skills Library root.
+- A skill has only `primaryCategoryId` and `tags` classification metadata. The system does not add lifecycle states such as pending admission, admitted, or pending organization.
+- New, imported, and unclassified skills enter the immutable Default category. Each organization run processes only that category and moves successful items to their destination category.
+- Seeded general categories are Default, Development & Testing, Collaboration & Docs, Projects & Process, Operations & Diagnostics, and Knowledge & Content. When a skill clearly does not fit them, the archive manager may create an ordinary category and has final authority over its name and classification.
+- Smart organization reuses the Archive Room's existing archive-manager AI; it does not create a separate organizer bot. Start fails explicitly or remains disabled when that manager is missing, unavailable, or busy with other archive work.
+- Duplicate starts and manual category corrections are disabled while a run is active. On completion, the header shows only a dismissible result marker. Partial failures remain in Default; the marker opens a failure-only view where the owner can move one skill at a time.
+- Category correction is an owner management operation. It uses management-token authorization and a catalog revision; on revision conflict, the client refreshes authoritative state instead of overwriting it.
+- The MCP Registry keeps its separate entry point and does not appear in the Skills Library modal. The product currently has no team-space concept, and this feature neither introduces nor depends on one.
+
+### Classification and Organization APIs
+
+- `GET /api/skills-library` returns skills, categories, catalog revision, the latest organization summary, and archive-manager availability.
+- `POST /api/skills-library/organization/runs` starts an organization run limited to Default.
+- `POST /api/skills-library/<name>/category` moves one skill manually with `{categoryId, expectedRevision}`.
+- `POST /api/skills-library/organization/dismiss` dismisses the header result marker.
+
 ## File Structure
 ```
 STATUS_DIR/
 └── skills-library/
+    ├── .vo-library-catalog.json
     ├── continuous-work/
     │   └── SKILL.md
     ├── another-skill/

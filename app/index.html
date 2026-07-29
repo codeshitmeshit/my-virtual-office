@@ -734,39 +734,39 @@
                     <span class="modal-emoji">📚</span>
                     <div>
                         <h2 data-i18n="skills_library_title">Skills Library</h2>
-                        <p class="skl-subtitle">按用途管理本地技能</p>
+                        <p class="skl-subtitle" data-i18n="skill_library_subtitle">Manage local skills by purpose</p>
                     </div>
                 </div>
-                <button class="close-btn skl-close-btn" type="button" onclick="closeSkillsLibrary()" aria-label="关闭">&times;</button>
+                <button class="close-btn skl-close-btn" type="button" onclick="closeSkillsLibrary()" aria-label="Close" data-i18n-aria-label="close">&times;</button>
             </div>
             <div id="skl-organization-marker" class="skl-organization-marker hidden" role="status" aria-live="polite"></div>
             <div class="skl-topbar">
                 <label class="skl-search">
                     <span aria-hidden="true">⌕</span>
-                    <input id="skl-search-input" type="search" placeholder="搜索技能" aria-label="搜索技能">
+                    <input id="skl-search-input" type="search" placeholder="Search skills" aria-label="Search skills" data-i18n-placeholder="skill_library_search" data-i18n-aria-label="skill_library_search">
                 </label>
                 <div class="skl-header-actions">
-                    <button id="skl-organize-btn" class="mtg-btn skl-organize-btn" type="button" onclick="SkillLibraryOrganizationUI.startOrganization()">✦ 智能整理</button>
-                    <button class="mtg-btn" type="button" onclick="openSkillEditor(null)">＋ 创建技能</button>
-                    <label class="mtg-btn skl-upload-label"><span>⇧ 导入技能</span>
+                    <button id="skl-organize-btn" class="mtg-btn skl-organize-btn" type="button" onclick="SkillLibraryOrganizationUI.startOrganization()" data-i18n="skill_library_smart_organize">✦ Smart Organize</button>
+                    <button class="mtg-btn" type="button" onclick="openSkillEditor(null)" data-i18n="skill_library_create">＋ Create Skill</button>
+                    <label class="mtg-btn skl-upload-label"><span data-i18n="skill_library_import">⇧ Import Skill</span>
                     <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
                     </label>
                 </div>
             </div>
             <div class="skl-workspace">
-                <nav class="skl-category-panel" aria-label="技能分类">
-                    <div class="skl-panel-heading">分类</div>
+                <nav class="skl-category-panel" aria-label="Skill categories" data-i18n-aria-label="skill_library_categories_label">
+                    <div class="skl-panel-heading" data-i18n="skill_library_categories">Categories</div>
                     <div id="skl-category-list" class="skl-category-list"></div>
                 </nav>
-                <section class="skl-list-panel" aria-label="技能列表">
+                <section class="skl-list-panel" aria-label="Skill list" data-i18n-aria-label="skill_library_list_label">
                     <div class="skl-list-heading">
-                        <span id="skl-list-title">全部技能</span>
+                        <span id="skl-list-title" data-i18n="skill_library_all_skills">All Skills</span>
                         <span id="skl-list-count" class="skl-list-count">0</span>
                     </div>
                     <div id="skl-cards" class="skl-cards"></div>
                 </section>
-                <aside id="skl-detail" class="skl-detail-panel" aria-label="技能详情">
-                    <div class="skl-detail-empty">选择一个技能查看详情</div>
+                <aside id="skl-detail" class="skl-detail-panel" aria-label="Skill details" data-i18n-aria-label="skill_library_detail_label">
+                    <div class="skl-detail-empty" data-i18n="skill_library_select_detail">Select a skill to view details</div>
                 </aside>
             </div>
         </div>

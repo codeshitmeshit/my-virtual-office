@@ -8,6 +8,8 @@ const organization = fs.readFileSync(
   'utf8',
 );
 const library = fs.readFileSync('app/skills-library-ui.js', 'utf8');
+const en = JSON.parse(fs.readFileSync('app/locales/en.json', 'utf8'));
+const zh = JSON.parse(fs.readFileSync('app/locales/zh.json', 'utf8'));
 
 const modal = html
   .split('<!-- Skills Library Modal -->', 2)[1]
@@ -23,13 +25,13 @@ for (const id of [
   assert.ok(modal.includes(`id="${id}"`), `missing Skills Library node ${id}`);
 }
 
-const organize = modal.indexOf('智能整理');
-const create = modal.indexOf('创建技能');
-const importSkill = modal.indexOf('导入技能');
+const organize = modal.indexOf('data-i18n="skill_library_smart_organize"');
+const create = modal.indexOf('data-i18n="skill_library_create"');
+const importSkill = modal.indexOf('data-i18n="skill_library_import"');
 assert.ok(organize >= 0 && organize < create && create < importSkill);
 assert.ok(modal.includes('class="skl-header-actions"'));
 assert.ok(!modal.includes('openMcpRegistry'));
-assert.ok(!modal.includes('MCP 注册表'));
+assert.ok(!modal.includes('mcp_registry_title'));
 
 assert.ok(
   html.includes('skills-library-organization.css?v=20260730'),
@@ -63,7 +65,7 @@ assert.match(
   'mobile layout must collapse to one column',
 );
 
-assert.ok(organization.includes("detailField('来源', '本地技能库')"));
+assert.ok(organization.includes("'skill_library_local_source'"));
 assert.ok(organization.includes("categoryId: 'all'"));
 assert.ok(organization.includes('skl-category-item'));
 assert.ok(organization.includes('skl-detail-actions'));
@@ -75,6 +77,35 @@ assert.ok(
 for (const source of [modal, css, organization, library]) {
   assert.ok(!source.includes('团队空间'));
   assert.ok(!source.toLowerCase().includes('team space'));
+}
+
+for (const key of [
+  'skill_library_subtitle',
+  'skill_library_search',
+  'skill_library_smart_organize',
+  'skill_library_create',
+  'skill_library_import',
+  'skill_library_categories_label',
+  'skill_library_list_label',
+  'skill_library_detail_label',
+  'skill_library_all_skills',
+  'skill_library_failed_filter',
+  'skill_library_adjust_category',
+  'skill_category_default',
+  'skill_category_development_testing',
+  'skill_category_collaboration_docs',
+  'skill_category_project_process',
+  'skill_category_operations_diagnostics',
+  'skill_category_knowledge_content',
+  'skill_organization_marker_running',
+  'skill_organization_marker_completed',
+  'skill_organization_marker_partial',
+  'skill_organization_marker_failed',
+  'skill_organization_marker_resolved',
+  'skill_organization_move_failed',
+]) {
+  assert.equal(typeof en[key], 'string', `missing English locale key ${key}`);
+  assert.equal(typeof zh[key], 'string', `missing Chinese locale key ${key}`);
 }
 
 console.log('skill library organization static UI contract ok');
