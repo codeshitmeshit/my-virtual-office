@@ -10,7 +10,7 @@
 
 ## 3. Skill Organization Domain
 
-- [ ] 3.1 Add the bounded archive-manager classification prompt and strict response parser in `app/services/skill_library_organization.py`; test 20-item batching, 2 KiB summaries, untrusted-content isolation, JSON-only parsing, unknown/duplicate/missing slugs, invalid categories, unsafe values, and oversized tags.
+- [x] 3.1 Add the bounded archive-manager classification prompt and strict response parser in `app/services/skill_library_organization.py`; test 20-item batching, 2 KiB summaries, untrusted-content isolation, JSON-only parsing, unknown/duplicate/missing slugs, invalid categories, unsafe values, and oversized tags.
 - [ ] 3.2 Implement asynchronous run creation, default-category snapshotting, sequential batch execution, partial assignment application, custom ordinary-category creation, terminal run summaries, and one terminal archive-manager activity; test complete, partial, total failure, timeout, unavailable/paused manager, and direct-apply-without-undo behavior.
 - [ ] 3.3 Implement persisted-run recovery, marker dismissal, revision-protected single-skill manual correction, failure-count decrement, and final `resolved` transition without adding per-skill lifecycle state; add focused recovery, race, stale-revision, and resolution tests.
 
