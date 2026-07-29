@@ -79,6 +79,18 @@
     font-size: 9px;
 }
 
+.skl-marker-open {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
 .skl-topbar {
     flex: 0 0 auto;
     display: flex;
@@ -291,6 +303,16 @@
     font-size: 8px;
 }
 
+.skl-failure-badge {
+    display: inline-flex;
+    margin: 8px 0 0 6px;
+    padding: 3px 6px;
+    border-radius: 4px;
+    background: #3a2d17;
+    color: #e7c36d;
+    font-size: 8px;
+}
+
 .skl-empty {
     padding: 32px 16px;
     color: #777895;
@@ -358,6 +380,35 @@
     background: #24243a;
     color: #aaa8cc;
     font-size: 8px;
+}
+
+.skl-category-control {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 7px;
+    margin-top: 12px;
+}
+
+.skl-category-select,
+.skl-category-move {
+    min-width: 0;
+    padding: 7px 8px;
+    border: 1px solid #343454;
+    border-radius: 5px;
+    background: #191929;
+    color: #c8c8d5;
+    font-size: 9px;
+}
+
+.skl-category-move {
+    cursor: pointer;
+}
+
+.skl-category-select:disabled,
+.skl-category-move:disabled,
+.skl-detail-actions button:disabled {
+    cursor: not-allowed;
+    opacity: .48;
 }
 
 .skl-detail-actions {

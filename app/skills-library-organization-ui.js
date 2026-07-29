@@ -12,8 +12,10 @@
         categoryId: 'all',
         selectedSlug: '',
         search: '',
+        failureOnly: false,
         starting: false,
         dismissing: false,
+        moving: false,
         pollTimer: null
     };
 
@@ -43,12 +45,21 @@
         }).length;
     }
 
+    function failureSlugs() {
+        var organization = state.data.organization || {};
+        return new Set((Array.isArray(organization.failures) ? organization.failures : [])
+            .map(function(failure) { return failure.slug || failure.skillName || failure.name || ''; })
+            .filter(Boolean));
+    }
+
     function visibleSkills() {
         var query = state.search.trim().toLocaleLowerCase();
+        var failed = failureSlugs();
         return skills().filter(function(skill) {
             var inCategory = state.categoryId === 'all' ||
                 (skill.primaryCategoryId || 'default') === state.categoryId;
             if (!inCategory) return false;
+            if (state.failureOnly && !failed.has(skill.name)) return false;
             if (!query) return true;
             return [skill.name, skill.description]
                 .join(' ')
@@ -78,6 +89,7 @@
             button.append(name, count);
             button.addEventListener('click', function() {
                 state.categoryId = category.id;
+                state.failureOnly = false;
                 state.selectedSlug = '';
                 render();
             });
@@ -92,7 +104,9 @@
         var title = byId('skl-list-title');
         var count = byId('skl-list-count');
         if (title) {
-            title.textContent = state.categoryId === 'all'
+            title.textContent = state.failureOnly
+                ? '归类失败'
+                : state.categoryId === 'all'
                 ? '全部技能'
                 : categoryName(state.categoryId);
         }
@@ -124,6 +138,12 @@
             category.className = 'skl-card-category';
             category.textContent = categoryName(skill.primaryCategoryId || 'default');
             card.append(name, description, category);
+            if (failureSlugs().has(skill.name)) {
+                var failureBadge = document.createElement('span');
+                failureBadge.className = 'skl-failure-badge';
+                failureBadge.textContent = '归类失败';
+                card.appendChild(failureBadge);
+            }
             card.addEventListener('click', function() {
                 state.selectedSlug = skill.name || '';
                 renderCards();
@@ -194,17 +214,46 @@
         tagsField.append(tagsLabel, tagList);
         container.appendChild(tagsField);
 
+        var categoryControl = document.createElement('div');
+        categoryControl.className = 'skl-category-control';
+        var categorySelect = document.createElement('select');
+        categorySelect.id = 'skl-category-select';
+        categorySelect.className = 'skl-category-select';
+        categorySelect.setAttribute('aria-label', '调整主分类');
+        categories().forEach(function(category) {
+            var option = document.createElement('option');
+            option.value = category.id;
+            option.textContent = category.name;
+            categorySelect.appendChild(option);
+        });
+        categorySelect.value = skill.primaryCategoryId || 'default';
+        var moveButton = document.createElement('button');
+        moveButton.id = 'skl-category-move';
+        moveButton.type = 'button';
+        moveButton.className = 'skl-category-move';
+        moveButton.textContent = state.moving ? '移动中…' : '移动';
+        var organizationRunning =
+            (state.data.organization || {}).status === 'running';
+        categorySelect.disabled = organizationRunning || state.moving;
+        moveButton.disabled = organizationRunning || state.moving;
+        moveButton.addEventListener('click', function() {
+            moveSelectedSkill(categorySelect.value);
+        });
+        categoryControl.append(categorySelect, moveButton);
+        container.appendChild(categoryControl);
+
         var actions = document.createElement('div');
         actions.className = 'skl-detail-actions';
         [
-            ['应用到 AI', function() { global.toggleSkillApply(skill.name); }],
-            ['编辑', function() { global.openSkillEditor(skill.name); }],
-            ['删除', function() { global.deleteLibrarySkill(skill.name); }]
+            ['应用到 AI', false, function() { global.toggleSkillApply(skill.name); }],
+            ['编辑', true, function() { global.openSkillEditor(skill.name); }],
+            ['删除', true, function() { global.deleteLibrarySkill(skill.name); }]
         ].forEach(function(action) {
             var button = document.createElement('button');
             button.type = 'button';
             button.textContent = action[0];
-            button.addEventListener('click', action[1]);
+            button.disabled = organizationRunning && action[1];
+            button.addEventListener('click', action[2]);
             actions.appendChild(button);
         });
         var apply = document.createElement('div');
@@ -243,13 +292,19 @@
             return { tone: 'resolved', text: '归类失败项已全部处理', dismissible: true };
         }
         if (organization.status === 'partial') {
-            return { tone: 'partial', text: '技能整理完成，' + failures + ' 个归类失败', dismissible: true };
+            return {
+                tone: 'partial',
+                text: '技能整理完成，' + failures + ' 个归类失败',
+                dismissible: true,
+                opensFailures: failures > 0
+            };
         }
         if (organization.status === 'failed') {
             return {
                 tone: 'partial',
                 text: failures ? '技能整理未完成，' + failures + ' 个归类失败' : '技能整理未完成',
-                dismissible: true
+                dismissible: true,
+                opensFailures: failures > 0
             };
         }
         return null;
@@ -267,9 +322,14 @@
             return;
         }
         marker.classList.add('is-' + copy.tone);
-        var text = document.createElement('span');
+        var text = document.createElement(copy.opensFailures ? 'button' : 'span');
         text.className = 'skl-marker-text';
         text.textContent = copy.text;
+        if (copy.opensFailures) {
+            text.type = 'button';
+            text.className += ' skl-marker-open';
+            text.addEventListener('click', openFailures);
+        }
         marker.appendChild(text);
         if (copy.dismissible) {
             var dismiss = document.createElement('button');
@@ -321,7 +381,79 @@
 
     function update(data) {
         state.data = data || {};
+        if (!failureSlugs().size) state.failureOnly = false;
         render();
+    }
+
+    function openFailures() {
+        state.categoryId = 'default';
+        state.failureOnly = true;
+        state.selectedSlug = '';
+        render();
+    }
+
+    async function moveSelectedSkill(targetCategoryId) {
+        var skill = skills().find(function(item) {
+            return item.name === state.selectedSlug;
+        });
+        var organization = state.data.organization || {};
+        if (
+            state.moving ||
+            !skill ||
+            organization.status === 'running' ||
+            !targetCategoryId ||
+            targetCategoryId === (skill.primaryCategoryId || 'default')
+        ) return;
+        state.moving = true;
+        renderDetail();
+        try {
+            var request = global.i18n && global.i18n.managementFetch
+                ? global.i18n.managementFetch.bind(global.i18n)
+                : global.fetch.bind(global);
+            var response = await request(
+                '/api/skills-library/' + encodeURIComponent(skill.name) + '/category',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        categoryId: targetCategoryId,
+                        expectedRevision: state.data.catalogRevision
+                    })
+                }
+            );
+            var result = await response.json();
+            if (!response.ok) {
+                if (
+                    result.code === 'catalog_revision_conflict' &&
+                    typeof global.refreshSkillsList === 'function'
+                ) {
+                    await global.refreshSkillsList();
+                }
+                throw new Error(result.error || '调整技能分类失败');
+            }
+            skill.primaryCategoryId =
+                (result.metadata || {}).primaryCategoryId || targetCategoryId;
+            if (Array.isArray((result.metadata || {}).tags)) {
+                skill.tags = result.metadata.tags;
+            }
+            if (result.catalogRevision !== undefined) {
+                state.data.catalogRevision = result.catalogRevision;
+            }
+            if (result.organization) {
+                state.data.organization = result.organization;
+            }
+            if (!failureSlugs().size) state.failureOnly = false;
+            render();
+            if (typeof global.refreshSkillsList === 'function') {
+                await global.refreshSkillsList();
+            }
+        } catch (error) {
+            var toast = global._showOfficeToast || global._acpShowToast;
+            if (toast) toast('❌ ' + error.message);
+        } finally {
+            state.moving = false;
+            render();
+        }
     }
 
     async function startOrganization() {
@@ -400,6 +532,8 @@
         init: init,
         update: update,
         render: render,
+        openFailures: openFailures,
+        moveSelectedSkill: moveSelectedSkill,
         startOrganization: startOrganization,
         dismissMarker: dismissMarker,
         stopPolling: stopPolling

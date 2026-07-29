@@ -158,6 +158,15 @@ function markerText(document) {
   return marker.children[0] ? marker.children[0].textContent : '';
 }
 
+function findByClass(element, className) {
+  if (element.classList && element.classList.contains(className)) return element;
+  for (const child of element.children || []) {
+    const match = findByClass(child, className);
+    if (match) return match;
+  }
+  return null;
+}
+
 async function main() {
   {
     const { window, document, timers } = harness();
@@ -315,6 +324,182 @@ async function main() {
     assert(
       document.getElementById('skl-organization-marker').classList.contains('hidden'),
     );
+  }
+
+  {
+    const { window, document } = harness();
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        skills: [
+          {
+            name: 'alpha',
+            description: 'Alpha skill',
+            primaryCategoryId: 'default',
+            tags: [],
+          },
+          {
+            name: 'beta',
+            description: 'Beta skill',
+            primaryCategoryId: 'default',
+            tags: [],
+          },
+          {
+            name: 'gamma',
+            description: 'Gamma skill',
+            primaryCategoryId: 'development-testing',
+            tags: [],
+          },
+        ],
+        organization: {
+          status: 'partial',
+          failureCount: 2,
+          failures: [{ slug: 'alpha' }, { slug: 'beta' }],
+        },
+      }),
+    );
+    window.SkillLibraryOrganizationUI.openFailures();
+    assert.equal(window.SkillLibraryOrganizationUI.state.categoryId, 'default');
+    assert.equal(window.SkillLibraryOrganizationUI.state.failureOnly, true);
+    assert.equal(document.getElementById('skl-list-title').textContent, '归类失败');
+    assert.equal(document.getElementById('skl-list-count').textContent, '2');
+    const cards = document.getElementById('skl-cards').children;
+    assert.deepEqual(
+      cards.map((card) => card.getAttribute('data-skill-slug')),
+      ['alpha', 'beta'],
+    );
+    assert(cards.every((card) => findByClass(card, 'skl-failure-badge')));
+  }
+
+  {
+    const { window } = harness();
+    let refreshes = 0;
+    window.refreshSkillsList = async () => {
+      refreshes += 1;
+    };
+    window.i18n = {
+      async managementFetch() {
+        return {
+          ok: false,
+          async json() {
+            return {
+              code: 'catalog_revision_conflict',
+              error: 'catalog changed',
+            };
+          },
+        };
+      },
+    };
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        catalogRevision: 4,
+        organization: {
+          status: 'partial',
+          failureCount: 1,
+          failures: [{ slug: 'alpha' }],
+        },
+      }),
+    );
+    await window.SkillLibraryOrganizationUI.moveSelectedSkill('development-testing');
+    assert.equal(refreshes, 1, 'revision conflict refreshes authoritative data');
+    assert.equal(
+      window.SkillLibraryOrganizationUI.state.data.skills[0].primaryCategoryId,
+      'default',
+      'revision conflict must not overwrite the local category',
+    );
+  }
+
+  {
+    const { window, document } = harness();
+    let correction = 0;
+    window.refreshSkillsList = async () => {};
+    window.i18n = {
+      async managementFetch(url, options) {
+        correction += 1;
+        const body = JSON.parse(options.body);
+        assert.match(url, /\/api\/skills-library\/(alpha|beta)\/category/);
+        assert.equal(body.expectedRevision, correction === 1 ? 7 : 8);
+        const remaining = correction === 1 ? [{ slug: 'beta' }] : [];
+        return {
+          ok: true,
+          async json() {
+            return {
+              catalogRevision: 7 + correction,
+              metadata: {
+                primaryCategoryId: body.categoryId,
+                tags: ['manual'],
+              },
+              organization: {
+                status: remaining.length ? 'partial' : 'resolved',
+                failureCount: remaining.length,
+                failures: remaining,
+              },
+            };
+          },
+        };
+      },
+    };
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        catalogRevision: 7,
+        skills: [
+          {
+            name: 'alpha',
+            description: 'Alpha skill',
+            primaryCategoryId: 'default',
+            tags: [],
+          },
+          {
+            name: 'beta',
+            description: 'Beta skill',
+            primaryCategoryId: 'default',
+            tags: [],
+          },
+        ],
+        organization: {
+          status: 'partial',
+          failureCount: 2,
+          failures: [{ slug: 'alpha' }, { slug: 'beta' }],
+        },
+      }),
+    );
+    window.SkillLibraryOrganizationUI.openFailures();
+    await window.SkillLibraryOrganizationUI.moveSelectedSkill('development-testing');
+    assert.equal(document.getElementById('skl-list-count').textContent, '1');
+    assert.equal(
+      window.SkillLibraryOrganizationUI.state.data.skills[0].primaryCategoryId,
+      'development-testing',
+    );
+    assert.equal(window.SkillLibraryOrganizationUI.state.selectedSlug, 'beta');
+
+    await window.SkillLibraryOrganizationUI.moveSelectedSkill('development-testing');
+    assert.equal(window.SkillLibraryOrganizationUI.state.failureOnly, false);
+    assert.equal(markerText(document), '归类失败项已全部处理');
+    assert.equal(
+      window.SkillLibraryOrganizationUI.state.data.organization.failureCount,
+      0,
+    );
+  }
+
+  {
+    const { window, document } = harness();
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        organization: {
+          status: 'running',
+          failureCount: 1,
+          failures: [{ slug: 'alpha' }],
+        },
+      }),
+    );
+    assert.equal(document.getElementById('skl-category-select').disabled, true);
+    assert.equal(document.getElementById('skl-category-move').disabled, true);
+    const detailActions = findByClass(
+      document.getElementById('skl-detail'),
+      'skl-detail-actions',
+    );
+    assert.equal(detailActions.children[0].disabled, false);
+    assert.equal(detailActions.children[1].disabled, true);
+    assert.equal(detailActions.children[2].disabled, true);
   }
 
   console.log('skill library organization UI state contract ok');
