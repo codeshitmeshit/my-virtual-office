@@ -1,7 +1,44 @@
 # Verification Evidence
 
 Date: 2026-07-30
-Branch: `codex/skill-library-smart-organization`
+Branch: `codex/skill-organization-failure-reasons`
+
+## Failure-reason clarity increment
+
+The follow-up increment strengthens the archive-manager prompt so a clear purpose
+without an existing category must produce `newCategoryName`, and displays the
+bounded public failure reason on both the failed card and selected-skill detail.
+DOM coverage distinguishes model judgment, invalid response, timeout, unreadable
+skill, and interrupted run failures, including localized accessibility labels.
+
+```bash
+.venv/bin/python -m pytest -q \
+  tests/test_skill_library_catalog.py \
+  tests/test_skill_library_catalog_integration.py \
+  tests/test_skill_library_organization_acceptance.py \
+  tests/test_skill_library_organization_admin.py \
+  tests/test_skill_library_organization_contract.py \
+  tests/test_skill_library_organization_feature_flag.py \
+  tests/test_skill_library_organization_http_contract.py \
+  tests/test_skill_library_organization_routes.py \
+  tests/test_skill_library_organization_runs.py
+node tests/run_skill_library_organization_acceptance.mjs
+node tests/test_skill_library_organization_ui_static.mjs
+.venv/bin/python -m json.tool app/locales/en.json
+.venv/bin/python -m json.tool app/locales/zh.json
+openspec validate add-skill-library-smart-organization --strict
+```
+
+Result:
+
+- Focused Python suite: `90 passed in 1.73s`.
+- Acceptance runner: `3 passed`, `14 passed`, management-token and UI DOM
+  contracts passed, and the runner emitted `{"ok": true}`.
+- Static UI contract and both locale JSON parses passed.
+- Strict OpenSpec validation passed.
+- Real OpenClaw classification quality remains a development-environment gate;
+  the browser checklist now explicitly verifies new-category creation and all
+  displayed failure-reason classes.
 
 ## Passing gates
 

@@ -444,6 +444,59 @@ async function main() {
   }
 
   {
+    const { window, document } = harness();
+    const english = {
+      skill_library_all_skills: 'All Skills',
+      skill_category_default: 'Default',
+      skill_library_classification_failed: 'Classification failed',
+      skill_library_failure_reason: 'Classification failure reason',
+      skill_library_failure_reason_aria: 'Classification failure reason: {{reason}}',
+    };
+    window.i18n = {
+      t(key, params) {
+        let value = english[key] || key;
+        for (const [name, replacement] of Object.entries(params || {})) {
+          value = value.replaceAll(`{{${name}}}`, replacement);
+        }
+        return value;
+      },
+    };
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        organization: {
+          status: 'partial',
+          failureCount: 1,
+          failures: [{
+            slug: 'alpha',
+            code: 'archive_manager_timeout',
+            reason: 'The archive manager timed out',
+          }],
+        },
+      }),
+    );
+    const cardReason = findByClass(
+      document.getElementById('skl-cards'),
+      'skl-failure-reason',
+    );
+    const detailReason = findByClass(
+      document.getElementById('skl-detail'),
+      'skl-detail-failure',
+    );
+    assert.equal(
+      cardReason.getAttribute('aria-label'),
+      'Classification failure reason: The archive manager timed out',
+    );
+    assert.equal(
+      detailReason.children[0].textContent,
+      'Classification failure reason',
+    );
+    assert.equal(
+      detailReason.getAttribute('aria-label'),
+      'Classification failure reason: The archive manager timed out',
+    );
+  }
+
+  {
     const { window } = harness();
     let refreshes = 0;
     window.refreshSkillsList = async () => {

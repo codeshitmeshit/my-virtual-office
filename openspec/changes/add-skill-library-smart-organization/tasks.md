@@ -36,4 +36,4 @@
 
 - [x] 7.1 Strengthen the archive-manager prompt so a clear unmatched purpose must use `newCategoryName` and category absence cannot be returned as `failureReason`; add contract tests that distinguish new-category creation from genuine insufficient-information failures.
 - [x] 7.2 Render each bounded organization failure reason on the failed skill card and in selected-skill details, with Chinese and English accessibility copy; add DOM tests for model, validation, timeout, unreadable-skill, and interrupted-run reasons.
-- [ ] 7.3 Rerun focused organization, UI, localization, acceptance, and OpenSpec validation suites; update browser acceptance and verification evidence for the new failure-reason behavior.
+- [x] 7.3 Rerun focused organization, UI, localization, acceptance, and OpenSpec validation suites; update browser acceptance and verification evidence for the new failure-reason behavior.
