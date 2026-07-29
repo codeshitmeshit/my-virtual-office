@@ -313,6 +313,14 @@
     font-size: 8px;
 }
 
+.skl-failure-reason {
+    margin-top: 7px;
+    color: #c6a95f;
+    font-size: 8px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
 .skl-empty {
     padding: 32px 16px;
     color: #777895;
@@ -366,6 +374,11 @@
     color: #c8c8d5;
     font-size: 10px;
     overflow-wrap: anywhere;
+}
+
+.skl-detail-failure .skl-detail-label,
+.skl-detail-failure .skl-detail-value {
+    color: #d4b45e;
 }
 
 .skl-tag-list {

@@ -71,6 +71,14 @@
             .filter(Boolean));
     }
 
+    function failureForSkill(slug) {
+        var organization = state.data.organization || {};
+        return (Array.isArray(organization.failures) ? organization.failures : [])
+            .find(function(failure) {
+                return (failure.slug || failure.skillName || failure.name || '') === slug;
+            }) || null;
+    }
+
     function visibleSkills() {
         var query = state.search.trim().toLocaleLowerCase();
         var failed = failureSlugs();
@@ -165,12 +173,30 @@
             category.className = 'skl-card-category';
             category.textContent = categoryName(skill.primaryCategoryId || 'default');
             card.append(name, description, category);
-            if (failureSlugs().has(skill.name)) {
+            var failure = failureForSkill(skill.name);
+            if (failure) {
                 var failureBadge = document.createElement('span');
                 failureBadge.className = 'skl-failure-badge';
                 failureBadge.textContent =
                     tr('skill_library_classification_failed', null, '归类失败');
                 card.appendChild(failureBadge);
+                var failureReason = document.createElement('div');
+                failureReason.className = 'skl-failure-reason';
+                failureReason.setAttribute(
+                    'data-failure-code',
+                    failure.code || 'classification_failed'
+                );
+                failureReason.textContent = failure.reason ||
+                    tr('skill_library_failure_reason_unknown', null, '未提供具体原因');
+                failureReason.setAttribute(
+                    'aria-label',
+                    tr(
+                        'skill_library_failure_reason_aria',
+                        { reason: failureReason.textContent },
+                        '归类失败原因：' + failureReason.textContent
+                    )
+                );
+                card.appendChild(failureReason);
             }
             card.addEventListener('click', function() {
                 state.selectedSlug = skill.name || '';
@@ -228,6 +254,29 @@
                 categoryName(skill.primaryCategoryId || 'default')
             )
         );
+        var selectedFailure = failureForSkill(skill.name);
+        if (selectedFailure) {
+            var selectedFailureReason = selectedFailure.reason ||
+                tr('skill_library_failure_reason_unknown', null, '未提供具体原因');
+            var failureField = detailField(
+                tr('skill_library_failure_reason', null, '归类失败原因'),
+                selectedFailureReason
+            );
+            failureField.className += ' skl-detail-failure';
+            failureField.setAttribute(
+                'data-failure-code',
+                selectedFailure.code || 'classification_failed'
+            );
+            failureField.setAttribute(
+                'aria-label',
+                tr(
+                    'skill_library_failure_reason_aria',
+                    { reason: selectedFailureReason },
+                    '归类失败原因：' + selectedFailureReason
+                )
+            );
+            container.appendChild(failureField);
+        }
         var tagsField = document.createElement('div');
         tagsField.className = 'skl-detail-field';
         var tagsLabel = document.createElement('span');

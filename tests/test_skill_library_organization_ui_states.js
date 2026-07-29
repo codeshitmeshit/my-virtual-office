@@ -405,6 +405,45 @@ async function main() {
   }
 
   {
+    const failureCases = [
+      ['classification_failed', '摘要信息不足，无法可靠判断用途'],
+      ['archive_manager_invalid_response', '档案管理员未返回有效归类结果'],
+      ['archive_manager_timeout', '档案管理员归类超时'],
+      ['skill_unreadable', '无法读取该 Skill 的安全摘要'],
+      ['run_interrupted', 'Virtual Office 重启导致本次整理中断'],
+    ];
+    for (const [code, reason] of failureCases) {
+      const { window, document } = harness();
+      window.SkillLibraryOrganizationUI.update(
+        data({
+          organization: {
+            status: 'partial',
+            failureCount: 1,
+            failures: [{ slug: 'alpha', code, reason }],
+          },
+        }),
+      );
+      const cardReason = findByClass(
+        document.getElementById('skl-cards'),
+        'skl-failure-reason',
+      );
+      assert(cardReason, `${code} reason must render on its skill card`);
+      assert.equal(cardReason.textContent, reason);
+      assert.equal(cardReason.getAttribute('data-failure-code'), code);
+      assert.match(cardReason.getAttribute('aria-label'), new RegExp(reason));
+
+      const detailReason = findByClass(
+        document.getElementById('skl-detail'),
+        'skl-detail-failure',
+      );
+      assert(detailReason, `${code} reason must render in selected skill details`);
+      assert.equal(detailReason.getAttribute('data-failure-code'), code);
+      assert.equal(findByClass(detailReason, 'skl-detail-value').textContent, reason);
+      assert.match(detailReason.getAttribute('aria-label'), new RegExp(reason));
+    }
+  }
+
+  {
     const { window } = harness();
     let refreshes = 0;
     window.refreshSkillsList = async () => {
