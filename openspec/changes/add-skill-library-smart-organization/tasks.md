@@ -6,7 +6,7 @@
 ## 2. Archive Manager Mutual Exclusion
 
 - [x] 2.1 Add `app/services/archive_manager_work_coordinator.py` with a non-blocking single-holder lease, holder metadata, deterministic release, and stale-start recovery hooks; add unit tests for acquire, busy rejection, release-on-error, and restart reconciliation.
-- [ ] 2.2 Wire the coordinator into manual archive maintenance, archive-manager AI refinement, and archive-count audit with thin changes to existing entry points; add concurrency and regression tests proving a later operation is rejected rather than queued and manager status returns to a valid terminal state.
+- [x] 2.2 Wire the coordinator into manual archive maintenance, archive-manager AI refinement, and archive-count audit with thin changes to existing entry points; add concurrency and regression tests proving a later operation is rejected rather than queued and manager status returns to a valid terminal state.
 
 ## 3. Skill Organization Domain
 
