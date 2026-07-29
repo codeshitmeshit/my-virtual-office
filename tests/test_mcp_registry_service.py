@@ -57,3 +57,76 @@ def test_mcp_registry_registers_openclaw_with_config(monkeypatch, tmp_path):
     assert config["include"] == ["*"]
     assert calls[1] == ["mcp", "reload"]
     assert result["server"]["openclaw"]["registered"] is True
+
+
+def test_mcp_registry_tracks_agent_assignments(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_registry, "_status_dir", lambda: str(tmp_path))
+    mcp_registry._handle_mcp_registry_save(
+        {
+            "name": "vibe-trading",
+            "transport": "stdio",
+            "command": "vibe-trading-mcp",
+            "assignedAgentIds": ["market-analyst-team-agent"],
+        }
+    )
+
+    added = mcp_registry._handle_mcp_registry_assign(
+        "vibe-trading",
+        {"agentId": "market-trader-agent", "mode": "add"},
+    )
+
+    assert added["ok"] is True
+    assert added["assignedAgentIds"] == ["market-analyst-team-agent", "market-trader-agent"]
+    listed = mcp_registry._handle_mcp_registry_list()
+    assert listed["servers"][0]["assignedAgentIds"] == ["market-analyst-team-agent", "market-trader-agent"]
+
+
+def test_mcp_registry_install_skill_adds_assignment(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_registry, "_status_dir", lambda: str(tmp_path))
+    mcp_registry._handle_mcp_registry_save(
+        {
+            "name": "vibe-trading",
+            "transport": "stdio",
+            "command": "vibe-trading-mcp",
+        }
+    )
+
+    from server_services import agents, skills
+
+    calls = []
+    monkeypatch.setattr(
+        agents,
+        "_handle_agents_list",
+        lambda: {"agents": [{"id": "market-analyst-team-agent", "providerKind": "codex"}]},
+    )
+    monkeypatch.setattr(
+        mcp_registry,
+        "_handle_mcp_registry_register_native",
+        lambda name, client, body=None: calls.append(("register", name, client)) or {"ok": True},
+    )
+    monkeypatch.setattr(skills, "_hydrate", lambda: calls.append(("hydrate",)))
+    monkeypatch.setattr(
+        skills,
+        "_handle_skills_library_create",
+        lambda body: calls.append(("create", body["name"])) or {"ok": True, "skill": body["name"]},
+    )
+    monkeypatch.setattr(
+        skills,
+        "_handle_skills_library_apply",
+        lambda body: calls.append(("apply", body["skill"], body["agentId"])) or {"ok": True},
+    )
+
+    result = mcp_registry._handle_mcp_registry_install_skill(
+        "vibe-trading",
+        {"agentId": "market-analyst-team-agent"},
+    )
+
+    assert result["ok"] is True
+    assert result["client"] == "codex"
+    assert result["assignedAgentIds"] == ["market-analyst-team-agent"]
+    assert calls == [
+        ("register", "vibe-trading", "codex"),
+        ("hydrate",),
+        ("create", "mcp-vibe-trading"),
+        ("apply", "mcp-vibe-trading", "market-analyst-team-agent"),
+    ]

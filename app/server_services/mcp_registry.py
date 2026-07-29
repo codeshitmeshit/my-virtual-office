@@ -15,6 +15,7 @@ from typing import Any
 SCHEMA_VERSION = 1
 REGISTRY_FILENAME = "mcp-registry.json"
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_.-]{0,62}[a-z0-9])?$")
+_SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.:-]{0,126}[A-Za-z0-9])?$")
 
 
 def _server_module():
@@ -101,6 +102,22 @@ def _env_map(value: Any) -> dict[str, str]:
     return result
 
 
+def _agent_ids(value: Any) -> list[str]:
+    if value in (None, ""):
+        return []
+    raw_items = value if isinstance(value, list) else [value]
+    result: list[str] = []
+    for item in raw_items:
+        agent_id = str(item or "").strip()
+        if not agent_id:
+            continue
+        if not _SAFE_AGENT_ID_RE.fullmatch(agent_id):
+            raise ValueError(f"invalid agent id: {agent_id}")
+        if agent_id not in result:
+            result.append(agent_id)
+    return result
+
+
 def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
     existing = dict(existing or {})
     name = _safe_name(body.get("name") or existing.get("name"))
@@ -131,6 +148,7 @@ def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = No
         "connectTimeout": body.get("connectTimeout") if "connectTimeout" in body else existing.get("connectTimeout"),
         "disabled": bool(body.get("disabled") if "disabled" in body else existing.get("disabled", False)),
         "parallel": bool(body.get("parallel") if "parallel" in body else existing.get("parallel", False)),
+        "assignedAgentIds": _agent_ids(body.get("assignedAgentIds") if "assignedAgentIds" in body else existing.get("assignedAgentIds")),
         "createdAt": created_at,
         "updatedAt": _now(),
         "openclaw": dict(existing.get("openclaw") or {}),
@@ -328,6 +346,34 @@ def _handle_mcp_registry_register_claude(name: str, body: dict[str, Any] | None 
     return _handle_mcp_registry_register_native(name, "claude", body)
 
 
+def _handle_mcp_registry_assign(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    registry, server = _get_server(name)
+    if not server:
+        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    try:
+        requested = _agent_ids(body.get("agentIds") if "agentIds" in body else body.get("agentId"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "_status": 400}
+    mode = str(body.get("mode") or "add").strip().lower()
+    current = _agent_ids(server.get("assignedAgentIds"))
+    if mode == "replace":
+        assigned = requested
+    elif mode == "remove":
+        assigned = [agent_id for agent_id in current if agent_id not in requested]
+    elif mode == "add":
+        assigned = current[:]
+        for agent_id in requested:
+            if agent_id not in assigned:
+                assigned.append(agent_id)
+    else:
+        return {"ok": False, "error": "mode must be add, remove, or replace", "_status": 400}
+    server["assignedAgentIds"] = assigned
+    server["updatedAt"] = _now()
+    registry.setdefault("servers", {})[server["name"]] = server
+    _save_registry(registry)
+    return {"ok": True, "server": _public_server(server), "assignedAgentIds": assigned}
+
+
 def _install_mcp_skill_only(name: str, body: dict[str, Any]) -> dict[str, Any]:
     _, server = _get_server(name)
     if not server:
@@ -346,7 +392,17 @@ def _install_mcp_skill_only(name: str, body: dict[str, Any]) -> dict[str, Any]:
     apply = skills._handle_skills_library_apply({"skill": create["skill"], "agentId": agent_id, "overwrite": bool(body.get("overwrite", True))})
     if not apply.get("ok"):
         return apply
-    return {"ok": True, "skill": create["skill"], "agentId": agent_id, "library": create, "install": apply}
+    assignment = _handle_mcp_registry_assign(name, {"agentId": agent_id, "mode": "add"})
+    if not assignment.get("ok"):
+        return assignment
+    return {
+        "ok": True,
+        "skill": create["skill"],
+        "agentId": agent_id,
+        "assignedAgentIds": assignment.get("assignedAgentIds", []),
+        "library": create,
+        "install": apply,
+    }
 
 
 def _register_mcp_for_client(name: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -358,13 +414,17 @@ def _register_mcp_for_client(name: str, client: str, body: dict[str, Any]) -> di
 def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
     from server_services import agents, mcp_assignment
 
-    return mcp_assignment.assign_to_agent(
+    result = mcp_assignment.assign_to_agent(
         name,
         body,
         list_agents=agents._handle_agents_list,
         register_client=_register_mcp_for_client,
         install_skill=_install_mcp_skill_only,
     )
+    install_result = result.get("install") if isinstance(result, dict) else None
+    if result.get("ok") and isinstance(install_result, dict) and "assignedAgentIds" in install_result:
+        result["assignedAgentIds"] = install_result["assignedAgentIds"]
+    return result
 
 
 def _handle_mcp_registry_vibe_template() -> dict[str, Any]:

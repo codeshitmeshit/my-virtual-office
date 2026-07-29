@@ -1,6 +1,7 @@
 // MCP registry panel for VO-managed MCP servers.
 
 var _mcpServers = [];
+var _mcpAgentsById = {};
 
 function _mcpMutationFetch(input, init) {
     if (window.i18n && typeof window.i18n.managementFetch === 'function') {
@@ -51,11 +52,30 @@ async function refreshMcpRegistry() {
         var res = await fetch('/api/mcp-registry', { cache: 'no-store' });
         var data = await res.json();
         _mcpServers = Array.isArray(data.servers) ? data.servers : [];
+        await loadMcpAgents();
     } catch (e) {
         _mcpServers = [];
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_load_failed', { error: e.message }, 'MCP 注册表加载失败：{{error}}'));
     }
     renderMcpRegistry();
+}
+
+async function loadMcpAgents() {
+    try {
+        var res = await fetch('/api/agents', { cache: 'no-store' });
+        var data = await res.json();
+        _mcpAgentsById = {};
+        (data.agents || []).forEach(function(agent) {
+            _mcpAgentsById[agent.id] = agent;
+        });
+    } catch (e) {
+        _mcpAgentsById = {};
+    }
+}
+
+function _mcpAgentLabel(agentId) {
+    var agent = _mcpAgentsById[agentId] || {};
+    return ((agent.emoji || '') + ' ' + (agent.name || agentId)).trim();
 }
 
 function renderMcpRegistry() {
@@ -82,6 +102,10 @@ function renderMcpRegistry() {
             ? [server.command || '', (server.args || []).join(' ')].join(' ').trim()
             : [server.transport || '', server.url || ''].join(' ').trim();
         var env = server.envKeys && server.envKeys.length ? ' ' + _mcpTr('mcp_env_keys', null, '环境变量') + ': ' + server.envKeys.join(', ') : '';
+        var assigned = Array.isArray(server.assignedAgentIds) ? server.assignedAgentIds : [];
+        var assignedText = assigned.length
+            ? assigned.map(_mcpAgentLabel).join(', ')
+            : _mcpTr('mcp_unassigned', null, '暂未分配');
         return '<div class="mcp-card">' +
             '<div class="mcp-card-main">' +
                 '<div class="mcp-card-title">' + _mcpEsc(server.name) + '</div>' +
@@ -89,12 +113,13 @@ function renderMcpRegistry() {
                 '<code class="mcp-card-command">' + _mcpEsc(detail + env) + '</code>' +
                 '<div class="mcp-card-status">' + _mcpEsc(status) + '</div>' +
                 (registrationWarnings.length ? '<div class="mcp-card-warning">' + _mcpEsc(_mcpTr('mcp_registration_warning', { warning: registrationWarnings.join('; ') }, '注意：{{warning}}')) + '</div>' : '') +
+                '<div class="mcp-card-assigned">' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '分配给')) + ': ' + _mcpEsc(assignedText) + '</div>' +
             '</div>' +
             '<div class="mcp-card-actions">' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_openclaw_title', null, '注册到 OpenClaw')) + '" data-mcp-action="openclaw" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_openclaw', null, '注册 OpenClaw')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_codex_title', null, '注册到 Codex')) + '" data-mcp-action="codex" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_codex', null, '注册 Codex')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_claude_title', null, '注册到 Claude')) + '" data-mcp-action="claude" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_claude', null, '注册 Claude')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '自动注册 MCP 并分配给 Agent')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '分配 Agent')) + '</button>' +
+                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '分配给 Agent 并安装说明 skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '分配 Agent')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('delete', null, '删除')) + '</button>' +
             '</div>' +
             '<div class="mcp-install-row" id="mcp-install-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
@@ -197,16 +222,15 @@ async function toggleMcpSkillInstall(name) {
         return;
     }
     try {
-        var res = await fetch('/api/agents', { cache: 'no-store' });
-        var data = await res.json();
-        var agents = (data.agents || []).filter(function(agent) {
+        await loadMcpAgents();
+        var agents = Object.keys(_mcpAgentsById).map(function(id) { return _mcpAgentsById[id]; }).filter(function(agent) {
             return ['openclaw', 'codex', 'claude', 'claude-code'].indexOf(String(agent.providerKind || 'openclaw').toLowerCase()) >= 0;
         });
         row.innerHTML = '<select id="mcp-agent-' + _mcpEsc(name) + '">' + agents.map(function(agent) {
             var provider = String(agent.providerKind || 'openclaw').toLowerCase();
             var providerLabel = provider === 'claude-code' || provider === 'claude' ? 'Claude' : (provider === 'codex' ? 'Codex' : 'OpenClaw');
             return '<option value="' + _mcpEsc(agent.id) + '">' + _mcpEsc((agent.emoji || '') + ' ' + (agent.name || agent.id) + ' · ' + providerLabel) + '</option>';
-        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign', null, '分配')) + '</button>';
+        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign_and_install', null, '分配并安装')) + '</button>';
         row.style.display = 'flex';
     } catch (e) {
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_agent_list_failed', { error: e.message }, 'Agent 列表加载失败：{{error}}'));
@@ -228,7 +252,7 @@ async function installMcpSkill(name) {
         if (typeof _acpShowToast === 'function') {
             var labels = { openclaw: 'OpenClaw', codex: 'Codex', claude: 'Claude' };
             _acpShowToast(_mcpTr('mcp_assigned', {
-                agent: agentId,
+                agent: _mcpAgentLabel(agentId),
                 client: labels[data.client] || data.client || ''
             }, '已注册到 {{client}} 并分配给 {{agent}}'));
         }
