@@ -29,6 +29,13 @@ def repository(tmp_path: Path, **kwargs) -> SkillLibraryCatalogRepository:
     return SkillLibraryCatalogRepository(tmp_path / "skills-library", **kwargs)
 
 
+def test_repositories_for_the_same_catalog_share_one_process_lock(tmp_path):
+    first = repository(tmp_path)
+    second = repository(tmp_path)
+
+    assert first._lock is second._lock
+
+
 def category_ids(catalog: dict) -> list[str]:
     return [item["id"] for item in catalog["categories"]]
 

@@ -35,6 +35,8 @@ _SKILL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,127}$")
 _MAX_CATEGORY_NAME = 80
 _MAX_TAG_LENGTH = 48
 _MAX_TAGS_PER_SKILL = 16
+_REPOSITORY_LOCKS_GUARD = threading.Lock()
+_REPOSITORY_LOCKS: dict[str, threading.RLock] = {}
 
 
 class SkillLibraryCatalogError(ValueError):
@@ -228,7 +230,11 @@ class SkillLibraryCatalogRepository:
         self.path = self.library_dir / CATALOG_FILENAME
         self._replace = replace
         self._fsync = fsync
-        self._lock = threading.RLock()
+        lock_key = str(self.path)
+        with _REPOSITORY_LOCKS_GUARD:
+            self._lock = _REPOSITORY_LOCKS.setdefault(
+                lock_key, threading.RLock()
+            )
 
     def _assert_safe_target(self) -> None:
         if self.library_dir.is_symlink():
@@ -458,4 +464,3 @@ class SkillLibraryCatalogRepository:
             expected_revision=expected_revision,
             valid_skill_names=valid_skill_names,
         )
-
