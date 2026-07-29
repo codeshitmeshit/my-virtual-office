@@ -15,9 +15,13 @@ import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from services import archive_manager_coordinated_work
+from services.archive_manager_work_coordinator import ArchiveManagerWorkCoordinator
+
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATUS_DIR = os.environ.get("VO_STATUS_DIR") or os.path.join(APP_DIR, "status")
 WORKSPACE_BASE = os.environ.get("VO_OPENCLAW_PATH") or os.path.expanduser("~/.openclaw")
+ARCHIVE_MANAGER_WORK_COORDINATOR = ArchiveManagerWorkCoordinator()
 
 __all__ = [
     'ARCHIVE_ROOM_DIR',
@@ -987,6 +991,12 @@ def _archive_manager_public_state(ensure=True):
     if state.get("paused"):
         state["status"] = "paused"
         state["label"] = "已暂停"
+    active_work = ARCHIVE_MANAGER_WORK_COORDINATOR.holder()
+    if active_work and state.get("status") == "working":
+        state["status"] = "working"
+        state["label"] = active_work["label"]
+    else:
+        active_work = None
     return {
         "agentId": state.get("agentId") or ARCHIVE_MANAGER_AGENT_ID,
         "name": state.get("name") or ARCHIVE_MANAGER_NAME,
@@ -1003,6 +1013,7 @@ def _archive_manager_public_state(ensure=True):
         "profileUpdatedAt": state.get("profileUpdatedAt"),
         "lastAction": state.get("lastAction", ""),
         "lastError": state.get("lastError", ""),
+        "activeWork": active_work,
         "recentActivity": (state.get("recentActivity") or [])[-12:],
     }
 
@@ -1098,7 +1109,23 @@ def _handle_archive_manager_update(body):
     return {"error": "Unsupported archive manager action", "_status": 400}
 
 
-def _handle_archive_manager_manual_maintain(project_id):
+def _archive_manager_finalize_coordinated_work(error=None):
+    """Repair a stale working presentation before releasing a work lease."""
+
+    state = _archive_manager_load_state()
+    if state.get("status") != "working":
+        return
+    if error is not None:
+        state["status"] = "error"
+        state["label"] = "档案管理员工作失败"
+        state["lastError"] = str(error)
+    else:
+        state["status"] = "paused" if state.get("paused") else "idle"
+        state["label"] = "已暂停" if state.get("paused") else "已接入"
+    _archive_manager_save_state(state)
+
+
+def _archive_manager_manual_maintain_uncoordinated(project_id):
     data = _load_projects()
     project = next((p for p in data.get("projects", []) if isinstance(p, dict) and p.get("id") == project_id), None)
     if not project:
@@ -1148,6 +1175,17 @@ def _handle_archive_manager_manual_maintain(project_id):
     _archive_manager_append_activity(state, "manual_maintain", "ok", f"完成整理项目：{project.get('title', '')}", project_id=project_id)
     _archive_manager_save_state(state)
     return {"ok": True, "project": record, "archiveManager": _archive_manager_public_state(ensure=False)}
+
+
+def _handle_archive_manager_manual_maintain(project_id):
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="manual-archive-maintenance",
+        label="整理项目档案",
+        metadata={"projectId": project_id},
+        operation=lambda: _archive_manager_manual_maintain_uncoordinated(project_id),
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _archive_manager_ai_refine_prompt(project, record):
@@ -1286,7 +1324,7 @@ def _archive_validate_ai_refinement(parsed, raw_reply=""):
     return ""
 
 
-def _handle_archive_manager_ai_refine(project_id, body=None):
+def _archive_manager_ai_refine_uncoordinated(project_id, body=None):
     data = _load_projects()
     project = next((p for p in data.get("projects", []) if isinstance(p, dict) and p.get("id") == project_id), None)
     if not project:
@@ -1348,6 +1386,19 @@ def _handle_archive_manager_ai_refine(project_id, body=None):
     _archive_manager_save_state(state)
     derived = _archive_room_derive_project(project)
     return {"ok": status == "ok", "status": status, "project": derived, "archiveManager": _archive_manager_public_state(ensure=False), "maintenance": item, "error": error, "_status": 200 if status == "ok" else 502}
+
+
+def _handle_archive_manager_ai_refine(project_id, body=None):
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="archive-manager-ai-refinement",
+        label="精整项目档案",
+        metadata={"projectId": project_id},
+        operation=lambda: _archive_manager_ai_refine_uncoordinated(
+            project_id, body
+        ),
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _archive_maintenance_trigger(project_id, event_type, source=None, title="", summary="", value_level=None, reason="", impact="", allow_when_paused=False):
@@ -2418,7 +2469,7 @@ def _handle_archive_room_overview():
     }
 
 
-def _handle_archive_room_audit_count():
+def _archive_room_audit_count_uncoordinated():
     data = _load_projects()
     projects_data = [p for p in (data.get("projects", []) if isinstance(data, dict) else []) if isinstance(p, dict) and not p.get("template") and p.get("id")]
     try:
@@ -2504,6 +2555,17 @@ def _handle_archive_room_audit_count():
         "archiveManager": _archive_manager_public_state(ensure=False),
         "projects": overview.get("projects", []),
     }
+
+
+def _handle_archive_room_audit_count():
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="archive-count-audit",
+        label="检查档案数目",
+        metadata={},
+        operation=_archive_room_audit_count_uncoordinated,
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _handle_archive_room_project(project_id):

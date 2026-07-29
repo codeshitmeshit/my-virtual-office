@@ -4,6 +4,7 @@
 // ============================================================
 
 var _sklSkills = [];
+var _sklLibraryData = { skills: [], categories: [] };
 var _sklEditingName = null; // null = new, string = editing existing
 
 function openSkillsLibrary() {
@@ -13,6 +14,9 @@ function openSkillsLibrary() {
 
 function closeSkillsLibrary() {
     document.getElementById('skillsLibraryModal').classList.add('hidden');
+    if (window.SkillLibraryOrganizationUI) {
+        window.SkillLibraryOrganizationUI.stopPolling();
+    }
 }
 
 async function refreshSkillsList() {
@@ -20,13 +24,19 @@ async function refreshSkillsList() {
         var res = await fetch('/api/skills-library');
         var data = await res.json();
         _sklSkills = Array.isArray(data) ? data : (data.skills || []);
+        _sklLibraryData = Array.isArray(data) ? { skills: data, categories: [] } : data;
     } catch (e) {
         _sklSkills = [];
+        _sklLibraryData = { skills: [], categories: [] };
     }
     renderSkillCards();
 }
 
 function renderSkillCards() {
+    if (window.SkillLibraryOrganizationUI) {
+        window.SkillLibraryOrganizationUI.update(_sklLibraryData);
+        return;
+    }
     var container = document.getElementById('skl-cards');
     if (!container) return;
 

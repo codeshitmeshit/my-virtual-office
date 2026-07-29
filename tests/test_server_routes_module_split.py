@@ -207,7 +207,8 @@ def test_skills_route_uses_skills_service_compatibility(monkeypatch):
     monkeypatch.setattr(server, "_handle_skills_library_list", lambda: {"skills": [{"name": "s1"}]})
     status, payload = dispatch("GET", "/api/skills-library")
     assert status == 200
-    assert payload == {"skills": [{"name": "s1"}]}
+    assert payload["skills"] == [{"name": "s1"}]
+    assert {"categories", "catalogRevision", "organization", "archiveManager"} <= payload.keys()
 
 
 def test_mcp_registry_route_uses_mcp_service(monkeypatch):

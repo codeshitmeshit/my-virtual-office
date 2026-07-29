@@ -89,10 +89,29 @@ Skill content (markdown instructions for the agent)
 - 读取文件，从 frontmatter 或文件名中提取名称
 - POST /api/skills-library/upload
 
+## 分类与智能整理
+
+- `SKILL.md` 和技能目录仍是技能内容的事实来源；分类信息存放在技能库根目录的 `.vo-library-catalog.json` sidecar 文件中。
+- 每个技能只有 `primaryCategoryId` 和 `tags` 分类元数据。系统不增加“待入库”“已入库”或“待整理”等生命周期状态。
+- 新建、导入或尚未归类的技能进入不可删除、不可重命名的“默认标签”。智能整理每次只处理该分类中的技能，并将成功项移动到目标分类。
+- 内置通用分类包括：默认标签、开发与测试、协作与文档、项目与流程、运维与诊断、知识与内容。若技能明确不属于通用分类，档案管理员可创建普通分类，并对名称与归属拥有最终解释权。
+- “智能整理”复用档案室现有的档案管理员 AI，不创建新的整理机器人。档案管理员不存在、不可用或正在执行其他档案工作时，启动请求会明确失败或保持禁用。
+- 运行中禁止重复启动和手工改类。完成后顶部仅显示可关闭的结果标记；部分失败项留在“默认标签”，用户可从标记进入失败筛选，并手工移动单个技能。
+- 分类修改属于所有者管理操作，通过管理令牌鉴权并携带 catalog revision；revision 冲突时客户端刷新真实状态，不执行覆盖写。
+- MCP 注册表使用独立入口，不出现在技能库面板中。当前产品也没有“团队空间”概念；本功能不引入或依赖该概念。
+
+### 分类与整理 API
+
+- `GET /api/skills-library` 返回技能、分类、catalog revision、最近一次整理摘要和档案管理员可用性。
+- `POST /api/skills-library/organization/runs` 启动仅针对“默认标签”的整理任务。
+- `POST /api/skills-library/<name>/category` 手工调整单个技能分类，请求体为 `{categoryId, expectedRevision}`。
+- `POST /api/skills-library/organization/dismiss` 关闭顶部整理结果标记。
+
 ## 文件结构
 ```
 STATUS_DIR/
 └── skills-library/
+    ├── .vo-library-catalog.json
     ├── continuous-work/
     │   └── SKILL.md
     ├── another-skill/

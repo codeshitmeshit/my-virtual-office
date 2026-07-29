@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
+    <link rel="stylesheet" href="skills-library-organization.css?v=20260730">
     <link rel="stylesheet" href="fonts.css?v=1785328545.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -728,19 +729,46 @@
     <!-- Skills Library Modal -->
     <div id="skillsLibraryModal" class="modal hidden">
         <div class="modal-content skills-library-modal">
-            <div class="modal-header">
-                <span class="modal-emoji">📚</span>
-                <h2 data-i18n="skills_library_title">Skills Library</h2>
-                <span class="close-btn" onclick="closeSkillsLibrary()">&times;</span>
+            <div class="modal-header skl-modal-header">
+                <div class="skl-title-group">
+                    <span class="modal-emoji">📚</span>
+                    <div>
+                        <h2 data-i18n="skills_library_title">Skills Library</h2>
+                        <p class="skl-subtitle" data-i18n="skill_library_subtitle">Manage local skills by purpose</p>
+                    </div>
+                </div>
+                <button class="close-btn skl-close-btn" type="button" onclick="closeSkillsLibrary()" aria-label="Close" data-i18n-aria-label="close">&times;</button>
             </div>
+            <div id="skl-organization-marker" class="skl-organization-marker hidden" role="status" aria-live="polite"></div>
             <div class="skl-topbar">
-                <button class="mtg-btn" onclick="openSkillEditor(null)" data-i18n="add_skill">➕ Add Skill</button>
-                <button class="mtg-btn" onclick="openMcpRegistry()" data-i18n="mcp_registry_title">MCP 注册表</button>
-                <label class="mtg-btn skl-upload-label"><span data-i18n="upload">📎 Upload</span>
-                    <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
+                <label class="skl-search">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="skl-search-input" type="search" placeholder="Search skills" aria-label="Search skills" data-i18n-placeholder="skill_library_search" data-i18n-aria-label="skill_library_search">
                 </label>
+                <div class="skl-header-actions">
+                    <button id="skl-organize-btn" class="mtg-btn skl-organize-btn" type="button" onclick="SkillLibraryOrganizationUI.startOrganization()" data-i18n="skill_library_smart_organize">✦ Smart Organize</button>
+                    <button class="mtg-btn" type="button" onclick="openSkillEditor(null)" data-i18n="skill_library_create">＋ Create Skill</button>
+                    <label class="mtg-btn skl-upload-label"><span data-i18n="skill_library_import">⇧ Import Skill</span>
+                    <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
+                    </label>
+                </div>
             </div>
-            <div id="skl-cards" class="skl-cards"></div>
+            <div class="skl-workspace">
+                <nav class="skl-category-panel" aria-label="Skill categories" data-i18n-aria-label="skill_library_categories_label">
+                    <div class="skl-panel-heading" data-i18n="skill_library_categories">Categories</div>
+                    <div id="skl-category-list" class="skl-category-list"></div>
+                </nav>
+                <section class="skl-list-panel" aria-label="Skill list" data-i18n-aria-label="skill_library_list_label">
+                    <div class="skl-list-heading">
+                        <span id="skl-list-title" data-i18n="skill_library_all_skills">All Skills</span>
+                        <span id="skl-list-count" class="skl-list-count">0</span>
+                    </div>
+                    <div id="skl-cards" class="skl-cards"></div>
+                </section>
+                <aside id="skl-detail" class="skl-detail-panel" aria-label="Skill details" data-i18n-aria-label="skill_library_detail_label">
+                    <div class="skl-detail-empty" data-i18n="skill_library_select_detail">Select a skill to view details</div>
+                </aside>
+            </div>
         </div>
     </div>
 
@@ -1180,6 +1208,8 @@
     </script>
     <script src="internal-bubble.js?v=1785328545"></script>
     <script src="game.js?v=1785328545-intervention-auto-continue"></script>
+    <script src="skills-library-organization-ui.js?v=20260730"></script>
+    <script src="skills-library-ui.js?v=20260730"></script>
     <script src="mcp-registry-ui.js?v=1785328545-mcp-registry"></script>
     <script src="meeting-center.js?v=1785328545-status-list-colors"></script>
     <script src="agent-guide.js?v=1785328545-agent-guide-skill-md"></script>

@@ -100,6 +100,14 @@ from services import agent_management_runtime as agent_management_runtime_servic
 from services import agent_management_session_mint as agent_management_session_mint_service
 from services import agent_management_session_exchange as agent_management_session_exchange_service
 from services import agent_management_browser as agent_management_browser_service
+from services import skill_library_catalog_integration
+from services import archive_manager_coordinated_work
+from services.archive_manager_work_coordinator import ArchiveManagerWorkCoordinator
+from services.skill_library_archive_adapter import SkillLibraryArchiveManagerAdapter
+from services.skill_library_organization_admin import SkillLibraryOrganizationAdmin
+from services.skill_library_organization_runs import SkillLibraryOrganizationService
+from services.skill_library_organization_runtime import SkillLibraryOrganizationRuntime
+from services import skill_library_organization_config
 from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
@@ -2757,6 +2765,7 @@ from services.managed_skills import (
 from services.project_task_checklists import normalize_task_checklist
 
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
+ARCHIVE_MANAGER_WORK_COORDINATOR = ArchiveManagerWorkCoordinator()
 
 
 AGENT_PLATFORM_COMM_SKILL_NAME = "vo-agent-communication"
@@ -12070,7 +12079,9 @@ def _handle_skills_library_list():
             "skill": LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME,
             "reason": "legacy_content_unverified",
         })
-    return {"skills": skills, "migrationConflicts": conflicts}
+    response = skill_library_catalog_integration.enrich_skill_list(lib_dir, skills)
+    response["migrationConflicts"] = conflicts
+    return response
 
 
 def _handle_skills_library_get(skill_name):
@@ -12103,6 +12114,7 @@ def _handle_skills_library_create(body):
         return {"error": "Invalid skill name", "_status": 400}
     lib_dir = _get_skills_library_dir()
     skill_dir = os.path.join(lib_dir, slug)
+    existed = os.path.isfile(os.path.join(skill_dir, "SKILL.md"))
     os.makedirs(skill_dir, exist_ok=True)
     skill_file = os.path.join(skill_dir, "SKILL.md")
     if not content:
@@ -12110,7 +12122,13 @@ def _handle_skills_library_create(body):
     with open(skill_file, "w") as f:
         f.write(content)
     parsed_name, description = _parse_skill_frontmatter(content)
-    return {"ok": True, "skill": slug, "name": parsed_name or slug, "description": description, "path": skill_file}
+    response = {"ok": True, "skill": slug, "name": parsed_name or slug, "description": description, "path": skill_file}
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skills_library_save_from_agent(body):
@@ -12172,7 +12190,7 @@ def _handle_skills_library_save_from_agent(body):
     with open(skill_file, "w") as f:
         f.write(content)
     parsed_name, description = _parse_skill_frontmatter(content)
-    return {
+    response = {
         "ok": True,
         "status": "updated" if existed else "created",
         "skill": slug,
@@ -12180,6 +12198,12 @@ def _handle_skills_library_save_from_agent(body):
         "description": description,
         "path": skill_file,
     }
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _parse_cli_json(stdout, stderr=""):
@@ -12363,7 +12387,12 @@ def _handle_skills_library_delete(skill_name):
     if not os.path.isdir(skill_dir):
         return {"error": f"Skill '{skill_name}' not found in library", "_status": 404}
     shutil.rmtree(skill_dir)
-    return {"ok": True, "deleted": skill_name}
+    response = {"ok": True, "deleted": skill_name}
+    try:
+        skill_library_catalog_integration.compact_skill_catalog(lib_dir)
+    except Exception as exc:
+        response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skills_library_apply(body):
@@ -12416,10 +12445,17 @@ def _handle_skills_library_upload(body):
         slug = "uploaded-skill"
     lib_dir = _get_skills_library_dir()
     skill_dir = os.path.join(lib_dir, slug)
+    existed = os.path.isfile(os.path.join(skill_dir, "SKILL.md"))
     os.makedirs(skill_dir, exist_ok=True)
     with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
         f.write(content)
-    return {"ok": True, "skill": slug, "name": name, "description": description}
+    response = {"ok": True, "skill": slug, "name": name, "description": description}
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skill_delete(agent_key, skill_name):
@@ -21884,7 +21920,17 @@ def _archive_manager_profile_check_on_startup():
 
 
 def _archive_manager_public_state(ensure=True):
-    return _archive_manager_shared_adapter().public_state(ensure=ensure)
+    state = _archive_manager_shared_adapter().public_state(ensure=ensure)
+    active_work = ARCHIVE_MANAGER_WORK_COORDINATOR.holder()
+    if not active_work or state.get("status") != "working":
+        state["activeWork"] = None
+        return state
+    return {
+        **state,
+        "status": "working",
+        "label": active_work["label"],
+        "activeWork": active_work,
+    }
 
 
 def _agent_archive_manager_meta(agent_id_or_key):
@@ -22008,7 +22054,23 @@ def _handle_archive_manager_update(body):
         }
 
 
-def _handle_archive_manager_manual_maintain(project_id):
+def _archive_manager_finalize_coordinated_work(error=None):
+    """Repair a stale working presentation before releasing a work lease."""
+
+    state = _archive_manager_load_state()
+    if state.get("status") != "working":
+        return
+    if error is not None:
+        state["status"] = "error"
+        state["label"] = "档案管理员工作失败"
+        state["lastError"] = str(error)
+    else:
+        state["status"] = "paused" if state.get("paused") else "idle"
+        state["label"] = "已暂停" if state.get("paused") else "已接入"
+    _archive_manager_save_state(state)
+
+
+def _archive_manager_manual_maintain_uncoordinated(project_id):
     data = _load_projects()
     project = next((p for p in data.get("projects", []) if isinstance(p, dict) and p.get("id") == project_id), None)
     if not project:
@@ -22058,6 +22120,17 @@ def _handle_archive_manager_manual_maintain(project_id):
     _archive_manager_append_activity(state, "manual_maintain", "ok", f"完成整理项目：{project.get('title', '')}", project_id=project_id)
     _archive_manager_save_state(state)
     return {"ok": True, "project": record, "archiveManager": _archive_manager_public_state(ensure=False)}
+
+
+def _handle_archive_manager_manual_maintain(project_id):
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="manual-archive-maintenance",
+        label="整理项目档案",
+        metadata={"projectId": project_id},
+        operation=lambda: _archive_manager_manual_maintain_uncoordinated(project_id),
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _archive_manager_ai_refine_prompt(project, record):
@@ -22196,7 +22269,7 @@ def _archive_validate_ai_refinement(parsed, raw_reply=""):
     return ""
 
 
-def _handle_archive_manager_ai_refine(project_id, body=None):
+def _archive_manager_ai_refine_uncoordinated(project_id, body=None):
     data = _load_projects()
     project = next((p for p in data.get("projects", []) if isinstance(p, dict) and p.get("id") == project_id), None)
     if not project:
@@ -22258,6 +22331,19 @@ def _handle_archive_manager_ai_refine(project_id, body=None):
     _archive_manager_save_state(state)
     derived = _archive_room_derive_project(project)
     return {"ok": status == "ok", "status": status, "project": derived, "archiveManager": _archive_manager_public_state(ensure=False), "maintenance": item, "error": error, "_status": 200 if status == "ok" else 502}
+
+
+def _handle_archive_manager_ai_refine(project_id, body=None):
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="archive-manager-ai-refinement",
+        label="精整项目档案",
+        metadata={"projectId": project_id},
+        operation=lambda: _archive_manager_ai_refine_uncoordinated(
+            project_id, body
+        ),
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _archive_maintenance_trigger(project_id, event_type, source=None, title="", summary="", value_level=None, reason="", impact="", allow_when_paused=False):
@@ -23345,7 +23431,7 @@ def _handle_archive_room_overview():
     }
 
 
-def _handle_archive_room_audit_count():
+def _archive_room_audit_count_uncoordinated():
     data = _load_projects()
     projects_data = [p for p in (data.get("projects", []) if isinstance(data, dict) else []) if isinstance(p, dict) and not p.get("template") and p.get("id")]
     try:
@@ -23431,6 +23517,17 @@ def _handle_archive_room_audit_count():
         "archiveManager": _archive_manager_public_state(ensure=False),
         "projects": overview.get("projects", []),
     }
+
+
+def _handle_archive_room_audit_count():
+    return archive_manager_coordinated_work.execute(
+        ARCHIVE_MANAGER_WORK_COORDINATOR,
+        kind="archive-count-audit",
+        label="检查档案数目",
+        metadata={},
+        operation=_archive_room_audit_count_uncoordinated,
+        finalize=_archive_manager_finalize_coordinated_work,
+    )
 
 
 def _handle_archive_room_project(project_id):
@@ -28666,6 +28763,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == "/api/skills-library":
+            if server_routes.skill_library_organization.handle_get(self, parsed_url):
+                return
         if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
             if server_routes.mcp_registry.handle_get(self, parsed_url):
                 return
@@ -31336,6 +31436,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             and self._reject_untrusted_management_request()
         ):
+            return
+        if server_routes.skill_library_organization.handle_post(self, parsed_url):
             return
         if request_path == "/api/agent/project-authoring/projects":
             self._handle_agent_project_direct_create()
@@ -36996,7 +37098,62 @@ def _signal_openclaw_gateway(restart=False):
         return {"ok": False, "method": "gateway-rpc-restart-request", "error": str(exc)}
 
 
+def _skill_library_archive_manager_adapter():
+    return SkillLibraryArchiveManagerAdapter(
+        load_state=_archive_manager_load_state,
+        save_state=_archive_manager_save_state,
+        public_state=lambda: _archive_manager_public_state(ensure=False),
+        append_activity=_archive_manager_append_activity,
+        call_agent=lambda agent_id, prompt, timeout: _wf_call_agent(
+            agent_id,
+            prompt,
+            timeout=timeout,
+            project_id="",
+            task_id="skill-library-organization",
+        ),
+        set_presence=gateway_presence.set_manual_override,
+        default_agent_id=ARCHIVE_MANAGER_AGENT_ID,
+    )
+
+
+def _skill_library_organization_runtime():
+    library_dir = _get_skills_library_dir()
+    archive_adapter = _skill_library_archive_manager_adapter()
+    organizer = SkillLibraryOrganizationService(
+        library_dir,
+        coordinator=ARCHIVE_MANAGER_WORK_COORDINATOR,
+        manager_state=archive_adapter.manager_state,
+        call_archive_manager=archive_adapter.call,
+        mark_manager_working=archive_adapter.mark_working,
+        finalize_manager=archive_adapter.finalize,
+        append_terminal_activity=archive_adapter.append_terminal,
+    )
+    admin = SkillLibraryOrganizationAdmin(
+        library_dir,
+        coordinator=ARCHIVE_MANAGER_WORK_COORDINATOR,
+        finalize_manager=archive_adapter.finalize,
+        append_terminal_activity=archive_adapter.append_terminal,
+    )
+    return SkillLibraryOrganizationRuntime(
+        organizer=organizer,
+        admin=admin,
+        list_skills=lambda: _handle_skills_library_list(),
+        archive_manager_state=archive_adapter.manager_state,
+        organization_enabled=skill_library_organization_config.is_enabled,
+    )
+
+
+server_routes.skill_library_organization.configure_runtime(
+    _skill_library_organization_runtime
+)
+
+
 if __name__ == "__main__":
+    try:
+        _skill_library_organization_runtime().recover_interrupted_run()
+    except Exception as exc:
+        print(f"[SKILL LIBRARY] organization recovery failed: {exc}")
+
     # Start API usage collector background thread
     _api_usage_collector.start()
     print("📊 API usage collector started (polls every 60s)")

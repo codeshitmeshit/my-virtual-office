@@ -24,6 +24,8 @@ _POST_EXACT = frozenset(
         "/api/skills-library/apply",
         "/api/skills-library/save-from-agent",
         "/api/skills-library/upload",
+        "/api/skills-library/organization/runs",
+        "/api/skills-library/organization/dismiss",
     }
 )
 _DELETE_EXACT = frozenset({"/api/agent/delete"})
@@ -58,6 +60,10 @@ def requires_management(method: str, path: str) -> bool:
     if normalized_method == "POST":
         return (
             normalized_path in _POST_EXACT
+            or (
+                normalized_path.startswith("/api/skills-library/")
+                and normalized_path.endswith("/category")
+            )
             or normalized_path.startswith("/api/agent-workspace/")
             or (
                 normalized_path.startswith("/api/agent/")
