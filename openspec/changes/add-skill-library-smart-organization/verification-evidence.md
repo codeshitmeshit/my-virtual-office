@@ -143,3 +143,17 @@ Neither failure target is modified by this change.
 - The 103-skill capacity fixture uses deterministic archive-manager JSON. It verifies batching, persistence, recovery, and correction semantics, but not real-model latency or classification quality.
 - Production rollout remains default-off through `VO_SKILL_LIBRARY_ORGANIZATION_ENABLED`. Enable it only after the development-environment run passes, and retain the flag as the immediate rollback control.
 - The unrelated Archive Room template assertions and route-split failures should be repaired in their owning changes; they are recorded here so they are not mistaken for regressions introduced by skill organization.
+
+## Development-environment OpenClaw gate
+
+Upload or check out this branch on a dedicated development instance whose `默认标签` contains no unrelated skills. Start Virtual Office with the feature enabled and a known management token, then run:
+
+```bash
+VO_TEST_URL=http://127.0.0.1:8090 \
+VO_MANAGEMENT_TOKEN='<development token>' \
+VO_LIVE_ACCEPTANCE_ALLOW_MUTATION=1 \
+VO_LIVE_SKILL_COUNT=103 \
+.venv/bin/python tests/skill_library_organization_live_acceptance.py
+```
+
+The script first verifies unauthorized rejection, creates uniquely prefixed test skills, refuses to organize if unrelated default-category skills exist, invokes the real archive manager, polls the terminal result, repairs any failed test classifications one at a time, checks the existing Archive Room activity log, and deletes its test skills in `finally`.
