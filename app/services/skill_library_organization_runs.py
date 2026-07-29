@@ -161,6 +161,7 @@ class SkillLibraryOrganizationService:
                 "assignedCount": 0,
                 "failureCount": 0,
                 "failures": [],
+                "targetSlugs": list(slugs),
                 "dismissedAt": None,
             }
             self.mark_manager_working("整理技能库")
