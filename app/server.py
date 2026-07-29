@@ -100,6 +100,7 @@ from services import agent_management_runtime as agent_management_runtime_servic
 from services import agent_management_session_mint as agent_management_session_mint_service
 from services import agent_management_session_exchange as agent_management_session_exchange_service
 from services import agent_management_browser as agent_management_browser_service
+from services import skill_library_catalog_integration
 from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
@@ -12070,7 +12071,9 @@ def _handle_skills_library_list():
             "skill": LEGACY_AGENT_PLATFORM_COMM_SKILL_NAME,
             "reason": "legacy_content_unverified",
         })
-    return {"skills": skills, "migrationConflicts": conflicts}
+    response = skill_library_catalog_integration.enrich_skill_list(lib_dir, skills)
+    response["migrationConflicts"] = conflicts
+    return response
 
 
 def _handle_skills_library_get(skill_name):
@@ -12103,6 +12106,7 @@ def _handle_skills_library_create(body):
         return {"error": "Invalid skill name", "_status": 400}
     lib_dir = _get_skills_library_dir()
     skill_dir = os.path.join(lib_dir, slug)
+    existed = os.path.isfile(os.path.join(skill_dir, "SKILL.md"))
     os.makedirs(skill_dir, exist_ok=True)
     skill_file = os.path.join(skill_dir, "SKILL.md")
     if not content:
@@ -12110,7 +12114,13 @@ def _handle_skills_library_create(body):
     with open(skill_file, "w") as f:
         f.write(content)
     parsed_name, description = _parse_skill_frontmatter(content)
-    return {"ok": True, "skill": slug, "name": parsed_name or slug, "description": description, "path": skill_file}
+    response = {"ok": True, "skill": slug, "name": parsed_name or slug, "description": description, "path": skill_file}
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skills_library_save_from_agent(body):
@@ -12172,7 +12182,7 @@ def _handle_skills_library_save_from_agent(body):
     with open(skill_file, "w") as f:
         f.write(content)
     parsed_name, description = _parse_skill_frontmatter(content)
-    return {
+    response = {
         "ok": True,
         "status": "updated" if existed else "created",
         "skill": slug,
@@ -12180,6 +12190,12 @@ def _handle_skills_library_save_from_agent(body):
         "description": description,
         "path": skill_file,
     }
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _parse_cli_json(stdout, stderr=""):
@@ -12363,7 +12379,12 @@ def _handle_skills_library_delete(skill_name):
     if not os.path.isdir(skill_dir):
         return {"error": f"Skill '{skill_name}' not found in library", "_status": 404}
     shutil.rmtree(skill_dir)
-    return {"ok": True, "deleted": skill_name}
+    response = {"ok": True, "deleted": skill_name}
+    try:
+        skill_library_catalog_integration.compact_skill_catalog(lib_dir)
+    except Exception as exc:
+        response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skills_library_apply(body):
@@ -12416,10 +12437,17 @@ def _handle_skills_library_upload(body):
         slug = "uploaded-skill"
     lib_dir = _get_skills_library_dir()
     skill_dir = os.path.join(lib_dir, slug)
+    existed = os.path.isfile(os.path.join(skill_dir, "SKILL.md"))
     os.makedirs(skill_dir, exist_ok=True)
     with open(os.path.join(skill_dir, "SKILL.md"), "w") as f:
         f.write(content)
-    return {"ok": True, "skill": slug, "name": name, "description": description}
+    response = {"ok": True, "skill": slug, "name": name, "description": description}
+    if not existed:
+        try:
+            skill_library_catalog_integration.record_skill_in_default(lib_dir, slug)
+        except Exception as exc:
+            response["catalogWarning"] = str(exc)
+    return response
 
 
 def _handle_skill_delete(agent_key, skill_name):

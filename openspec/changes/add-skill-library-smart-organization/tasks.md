@@ -1,7 +1,7 @@
 ## 1. Classification Catalog
 
 - [x] 1.1 Add `app/services/skill_library_catalog.py` with schema-versioned categories, immutable `默认标签`, five seeded purpose categories, one primary category, optional tags, revision checks, symlink rejection, and atomic replacement; add focused repository tests for defaults, validation, corruption recovery, and atomic-write failure.
-- [ ] 1.2 Integrate catalog projection with existing skill listing and create/import/save-from-agent/delete paths so uncatalogued on-disk skills derive `默认标签` and stale entries compact only on authorized writes; add compatibility tests proving existing `skills` consumers and skill-file CRUD behavior remain valid.
+- [x] 1.2 Integrate catalog projection with existing skill listing and create/import/save-from-agent/delete paths so uncatalogued on-disk skills derive `默认标签` and stale entries compact only on authorized writes; add compatibility tests proving existing `skills` consumers and skill-file CRUD behavior remain valid.
 
 ## 2. Archive Manager Mutual Exclusion
 
