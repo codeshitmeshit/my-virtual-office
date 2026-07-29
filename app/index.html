@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
+    <link rel="stylesheet" href="skills-library-organization.css?v=20260730">
     <link rel="stylesheet" href="fonts.css?v=1785328545.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -728,19 +729,46 @@
     <!-- Skills Library Modal -->
     <div id="skillsLibraryModal" class="modal hidden">
         <div class="modal-content skills-library-modal">
-            <div class="modal-header">
-                <span class="modal-emoji">📚</span>
-                <h2 data-i18n="skills_library_title">Skills Library</h2>
-                <span class="close-btn" onclick="closeSkillsLibrary()">&times;</span>
+            <div class="modal-header skl-modal-header">
+                <div class="skl-title-group">
+                    <span class="modal-emoji">📚</span>
+                    <div>
+                        <h2 data-i18n="skills_library_title">Skills Library</h2>
+                        <p class="skl-subtitle">按用途管理本地技能</p>
+                    </div>
+                </div>
+                <button class="close-btn skl-close-btn" type="button" onclick="closeSkillsLibrary()" aria-label="关闭">&times;</button>
             </div>
+            <div id="skl-organization-marker" class="skl-organization-marker hidden" role="status" aria-live="polite"></div>
             <div class="skl-topbar">
-                <button class="mtg-btn" onclick="openSkillEditor(null)" data-i18n="add_skill">➕ Add Skill</button>
-                <button class="mtg-btn" onclick="openMcpRegistry()" data-i18n="mcp_registry_title">MCP 注册表</button>
-                <label class="mtg-btn skl-upload-label"><span data-i18n="upload">📎 Upload</span>
-                    <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
+                <label class="skl-search">
+                    <span aria-hidden="true">⌕</span>
+                    <input id="skl-search-input" type="search" placeholder="搜索技能" aria-label="搜索技能">
                 </label>
+                <div class="skl-header-actions">
+                    <button id="skl-organize-btn" class="mtg-btn skl-organize-btn" type="button" onclick="SkillLibraryOrganizationUI.startOrganization()">✦ 智能整理</button>
+                    <button class="mtg-btn" type="button" onclick="openSkillEditor(null)">＋ 创建技能</button>
+                    <label class="mtg-btn skl-upload-label"><span>⇧ 导入技能</span>
+                    <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
+                    </label>
+                </div>
             </div>
-            <div id="skl-cards" class="skl-cards"></div>
+            <div class="skl-workspace">
+                <nav class="skl-category-panel" aria-label="技能分类">
+                    <div class="skl-panel-heading">分类</div>
+                    <div id="skl-category-list" class="skl-category-list"></div>
+                </nav>
+                <section class="skl-list-panel" aria-label="技能列表">
+                    <div class="skl-list-heading">
+                        <span id="skl-list-title">全部技能</span>
+                        <span id="skl-list-count" class="skl-list-count">0</span>
+                    </div>
+                    <div id="skl-cards" class="skl-cards"></div>
+                </section>
+                <aside id="skl-detail" class="skl-detail-panel" aria-label="技能详情">
+                    <div class="skl-detail-empty">选择一个技能查看详情</div>
+                </aside>
+            </div>
         </div>
     </div>
 
@@ -1180,6 +1208,8 @@
     </script>
     <script src="internal-bubble.js?v=1785328545"></script>
     <script src="game.js?v=1785328545-intervention-auto-continue"></script>
+    <script src="skills-library-organization-ui.js?v=20260730"></script>
+    <script src="skills-library-ui.js?v=20260730"></script>
     <script src="mcp-registry-ui.js?v=1785328545-mcp-registry"></script>
     <script src="meeting-center.js?v=1785328545-status-list-colors"></script>
     <script src="agent-guide.js?v=1785328545-agent-guide-skill-md"></script>

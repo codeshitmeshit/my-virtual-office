@@ -22,7 +22,7 @@
 
 ## 5. Skills Library Interface
 
-- [ ] 5.1 Add `app/skills-library-organization-ui.js` and `app/skills-library-organization.css`, minimally update the modal bootstrap, and implement the three-column searchable library with right-aligned smart-organize/create/import actions, purpose categories, selected-skill details, and no Skills Library MCP entry; add static structure and responsive-layout checks.
+- [x] 5.1 Add `app/skills-library-organization-ui.js` and `app/skills-library-organization.css`, minimally update the modal bootstrap, and implement the three-column searchable library with right-aligned smart-organize/create/import actions, purpose categories, selected-skill details, and no Skills Library MCP entry; add static structure and responsive-layout checks.
 - [ ] 5.2 Implement running, completed, partial-failure, and resolved top markers; persist dismissal behavior, poll only while running, disable smart organization for busy/unavailable/empty-default conditions, and stop polling at terminal state; add DOM tests for every state and duplicate-click prevention.
 - [ ] 5.3 Implement partial-failure navigation to a filtered `默认标签` view and owner-authorized single-skill category correction through `managementFetch`; add DOM tests for failure badges, revision conflicts, real-time count reduction, final resolution, and disabled mutation controls during active organization.
 
