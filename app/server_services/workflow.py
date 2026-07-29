@@ -881,6 +881,15 @@ def _wf_cleanup_task_sessions(agent_id, project_id, task_id):
         print(f"[WORKFLOW] Session file cleanup error: {e}")
 
 
+def _openclaw_gateway_session_key(agent_id, session_key):
+    if not agent_id or not session_key:
+        return session_key or ""
+    raw = str(session_key)
+    if raw.startswith(f"agent:{agent_id}:"):
+        return raw
+    return f"agent:{agent_id}:{raw}"
+
+
 def _wf_call_agent(agent_id, message, timeout=600, project_id=None, task_id=None):
     """Call an agent and return its response text.
 
@@ -959,7 +968,7 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
     token = _get_gateway_token()
     if not token:
         return None
-    session_key = session_key or f"agent:{agent_id}:main"
+    session_key = _openclaw_gateway_session_key(agent_id, session_key or "main")
     gw_url = VO_CONFIG.get("openclaw", {}).get("gatewayUrl", "ws://127.0.0.1:18789")
     origin = f"http://127.0.0.1:{PORT}"
 
@@ -1092,7 +1101,7 @@ def _wf_call_agent_http(agent_id, message, timeout, session_key=None):
         "Authorization": f"Bearer {token}",
     }
     if session_key:
-        headers["x-openclaw-session-key"] = session_key
+        headers["x-openclaw-session-key"] = _openclaw_gateway_session_key(agent_id, session_key)
 
     try:
         req = urllib.request.Request(url, data=payload.encode("utf-8"), headers=headers, method="POST")
@@ -1156,15 +1165,16 @@ def _wf_build_project_context(project, task):
     task_priority = task.get("priority", "medium")
     task_assignee = task.get("assignee", "unassigned")
 
-    lines.append(f"PROJECT: {proj_title}")
+    lines.append(f"<project_context title=\"{proj_title}\">")
     if proj_desc:
-        lines.append(f"PROJECT DESCRIPTION: {proj_desc}")
+        lines.append(f"  <description>{proj_desc}</description>")
     if proj_tags:
-        lines.append(f"PROJECT TAGS: {', '.join(proj_tags)}")
+        lines.append(f"  <project_tags>{', '.join(proj_tags)}</project_tags>")
     if task_tags:
-        lines.append(f"TASK TAGS: {', '.join(task_tags)}")
-    lines.append(f"PRIORITY: {task_priority}")
-    lines.append(f"ASSIGNED TO: {task_assignee}")
+        lines.append(f"  <task_tags>{', '.join(task_tags)}</task_tags>")
+    lines.append(f"  <priority>{task_priority}</priority>")
+    lines.append(f"  <assignee>{task_assignee}</assignee>")
+    lines.append("</project_context>")
     return "\n".join(lines)
 
 
@@ -1177,41 +1187,47 @@ def _wf_build_task_prompt(task, task_file_content=None, project=None):
     checklist_text = ""
     acceptance_checklist = _project_execution_acceptance_checklist(task)
     if acceptance_checklist:
-        checklist_text = "\n\nChecklist (you must complete ALL items):\n"
+        checklist_text = "\n\n<acceptance_checklist complete_all=\"true\">\n"
         for i, item in enumerate(acceptance_checklist, 1):
             status = "✅ DONE" if item.get("done") else "⬜ TODO"
-            checklist_text += f"  {i}. [{status}] {item.get('text', '')}\n"
+            checklist_text += f"  <item index=\"{i}\" status=\"{status}\">{item.get('text', '')}</item>\n"
+        checklist_text += "</acceptance_checklist>\n"
 
     previous_work = ""
     if task_file_content:
-        previous_work = f"\n\n--- PREVIOUS WORK LOG ---\n{task_file_content}\n--- END PREVIOUS WORK LOG ---\n\nContinue from where you left off. Do NOT redo work that was already completed."
+        previous_work = f"\n\n<previous_work_log>\n{task_file_content}\n</previous_work_log>\n<continuation_rule>Continue from where you left off. Do NOT redo work that was already completed.</continuation_rule>"
 
-    return f"""You have been assigned a task. Complete it fully on your own. Do NOT ask for clarification, followups, or user input.
+    return f"""<project_task_prompt>
+<assignment>Complete the assigned task fully on your own. Do NOT ask for clarification, followups, or user input.</assignment>
 
-{project_context}TASK: {task.get('title', 'Untitled')}
+{project_context}<task title="{task.get('title', 'Untitled')}">
 
-DESCRIPTION:
+<description>
 {task.get('description', 'No description provided.')}
+</description>
+</task>
 {checklist_text}
 {previous_work}
 
-EXPECTED WORKFLOW:
-1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{{projectId}}/tasks/{{taskId}}.
-2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{{projectId}}/tasks/{{taskId}}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.
-3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.
+<workflow>
+  <step id="read-checklist">First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist via checklistUpdates. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates. The orchestration service will persist checklistUpdates from your final response; do not call the project API to persist checklist changes yourself.</step>
+  <step id="execute-task">Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{{projectId}}/tasks/{{taskId}}/meeting-requests. Include urgency and resolutionPolicy in the request: P0 uses urgency 5 with resolutionPolicy "user_decision"; every non-P0 meeting uses urgency 1-4 with resolutionPolicy "moderator_decision" so the AI moderator decides disagreements. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.</step>
+  <step id="fill-back-checklist">After executing the task, fill back the checklist in your final checklistUpdates. Inspect every checklist item, preserve its id/text, set done=true only after concrete verification, and provide non-empty evidence. If any item is unfinished, continue working until it is complete before finalizing.</step>
+</workflow>
 
-MANDATORY RULES — VIOLATIONS WILL FAIL REVIEW:
-1. You MUST use tools (read, edit, exec, browser) to make REAL changes to actual files. Text-only responses WILL BE REJECTED.
-2. Read the relevant source files FIRST to understand the codebase before making changes.
-3. Use the edit tool to modify files. Use exec to run commands, test, or verify.
-4. After making changes, verify them yourself — run the app, check the output, confirm it works.
-5. In your final response include checklistUpdates as JSON: an array of {{id, text, done, evidence}}. Set done=true only for checklist items you actually verified as complete. Include meetingDiscussionPoints as JSON when there are meeting conclusions, risks, or discussion notes for the task.
-5. Use the browser tool to visually verify UI changes on the running app/site if applicable.
-6. In your final report, list EVERY file you modified and what you changed.
+<mandatory_rules>
+  <rule id="real-changes">You MUST use tools (read, edit, exec, browser) to make REAL changes to actual files. Text-only responses WILL BE REJECTED.</rule>
+  <rule id="read-first">Read the relevant source files FIRST to understand the codebase before making changes.</rule>
+  <rule id="edit-and-verify">Use the edit tool to modify files. Use exec to run commands, test, or verify. After making changes, verify them yourself — run the app, check the output, confirm it works.</rule>
+  <rule id="checklist-updates">In your final response include checklistUpdates as JSON: an array of {{id, text, done, evidence}}. checklistUpdates is REQUIRED for regular tasks and must include every acceptance checklist item, preserving existing ids. Set done=true only for checklist items you actually verified as complete, and write concrete evidence that names the delivered content, file, result, or verification. Include meetingDiscussionPoints as JSON when there are meeting conclusions, risks, or discussion notes for the task.</rule>
+  <rule id="visual-verification">Use the browser tool to visually verify UI changes on the running app/site if applicable.</rule>
+  <rule id="report-files">In your final report, list EVERY file you modified and what you changed.</rule>
+</mandatory_rules>
 
-A reviewer will independently verify your work by reading the actual files and browsing the app. If no real file changes are found, ALL items will be marked DID_NOT_PASS.
+<review_notice>A reviewer will independently verify your work by reading the actual files and browsing the app. If no real file changes are found, ALL items will be marked DID_NOT_PASS.</review_notice>
 
-WARNING: Do NOT run 'docker restart' on this app's container — it will kill the workflow pipeline managing this task. If you need to reload server changes, the app live-mounts /app so file edits take effect on the next HTTP request for static files. For server.py changes that need a process reload, note what needs restarting in your report and the reviewer will handle it."""
+<warning>Do NOT run 'docker restart' on this app's container — it will kill the workflow pipeline managing this task. If you need to reload server changes, the app live-mounts /app so file edits take effect on the next HTTP request for static files. For server.py changes that need a process reload, note what needs restarting in your report and the reviewer will handle it.</warning>
+</project_task_prompt>"""
 
 def _wf_task_needs_visual_review(task):
     """Heuristic: determine whether a task should require browser-based review."""
@@ -1264,61 +1280,77 @@ def _wf_build_review_prompt(task, task_file_content=None, project=None):
     pass_line = "- PASS — verified in the actual files AND confirmed working in the browser/app" if needs_visual_review else "- PASS — verified in the actual files and supported by real verification steps (for example read/exec, and browser if applicable)"
     critical_line = "CRITICAL: You MUST use tools (read, exec, browser) during this review. A text-only review with no tool calls will be considered invalid." if needs_visual_review else "CRITICAL: You MUST use tools during this review. Use read and/or exec for non-visual tasks, and use browser only when the task is visually reviewable. A text-only review with no tool calls will be considered invalid."
 
-    return f"""{project_context}Review your completed work on: {task.get('title', 'Untitled')}
+    return f"""<project_review_prompt>
+{project_context}<task title="{task.get('title', 'Untitled')}" />
 
-You must INDEPENDENTLY VERIFY each checklist item. Do NOT trust your previous claims — verify by actually checking.
+<review_goal>You must INDEPENDENTLY VERIFY each checklist item. Do NOT trust your previous claims — verify by actually checking.</review_goal>
 
-MANDATORY REVIEW STEPS:
-1. Use the read tool to open the actual source files that were supposed to be modified. Confirm the changes exist in the code.
-2. Use exec to run any tests, linters, or verification commands.
-{visual_steps}
+<mandatory_review_steps>
+  <step id="read-files">Use the read tool to open the actual source files that were supposed to be modified. Confirm the changes exist in the code.</step>
+  <step id="verify-commands">Use exec to run any tests, linters, or verification commands.</step>
+  <step id="visual-review">{visual_steps.strip()}</step>
+</mandatory_review_steps>
 
-For EACH checklist item, respond with one of these statuses:
-{pass_line}
-- NEEDS_MORE_WORK — partially implemented but has issues you can identify in the code
-- DID_NOT_PASS — no real changes found in files, or changes don't work
-- REQUIRES_USER_REVIEW — ONLY if the item truly cannot be judged by an agent after using tools, such as a subjective product/design decision, required human sign-off, unavailable external system access that only the user can provide, or a genuinely destructive/approval-gated action. Do NOT use REQUIRES_USER_REVIEW for ordinary coding uncertainty, incomplete implementation, missing evidence, failed verification, or because one item previously needed rework. In those cases you MUST use NEEDS_MORE_WORK or DID_NOT_PASS.
+<review_statuses>
+  <status name="PASS">{pass_line}</status>
+  <status name="NEEDS_MORE_WORK">Partially implemented but has issues you can identify in the code.</status>
+  <status name="DID_NOT_PASS">No real changes found in files, or changes do not work.</status>
+  <status name="REQUIRES_USER_REVIEW">ONLY if the item truly cannot be judged by an agent after using tools, such as a subjective product/design decision, required human sign-off, unavailable external system access that only the user can provide, or a genuinely destructive/approval-gated action. Do NOT use REQUIRES_USER_REVIEW for ordinary coding uncertainty, incomplete implementation, missing evidence, failed verification, or because one item previously needed rework. In those cases you MUST use NEEDS_MORE_WORK or DID_NOT_PASS.</status>
+</review_statuses>
 
-If you can read the code, run tests, inspect outputs, or otherwise verify the implementation yourself, you MUST make your own judgment and use PASS, NEEDS_MORE_WORK, or DID_NOT_PASS.
+<judgment_rule>If you can read the code, run tests, inspect outputs, or otherwise verify the implementation yourself, you MUST make your own judgment and use PASS, NEEDS_MORE_WORK, or DID_NOT_PASS.</judgment_rule>
 
-Respond in this EXACT format (one line per item, after your verification):
+<response_format>Respond in this EXACT format (one line per item, after your verification):
 REVIEW_ITEM_1: <status>
 REVIEW_ITEM_2: <status>
-...
+...</response_format>
 
-Checklist items to review:
+<checklist_items_to_review>
 {items_text}
+</checklist_items_to_review>
 
-{critical_line}"""
+<critical_rule>{critical_line}</critical_rule>
+</project_review_prompt>"""
 
 def _wf_build_rework_prompt(task, failed_items, task_file_content=None, project=None):
     """Build a rework prompt for failed review items."""
     # project context not repeated in rework — agent already has it from the same session
     items_text = ""
     for i, item in enumerate(failed_items, 1):
-        items_text += f"  {i}. {item.get('text', '')} — Status: {item.get('reviewStatus', 'needs_more_work')}\n"
+        detail_parts = []
+        for key, label in (("reason", "Reason"), ("evidence", "Evidence"), ("reviewStatus", "Review status"), ("status", "Status")):
+            value = str(item.get(key) or "").strip()
+            if value and value not in detail_parts:
+                detail_parts.append(f"{label}: {value}")
+        details = ("\n     " + "\n     ".join(detail_parts)) if detail_parts else ""
+        items_text += f"  {i}. id={item.get('id', '')} {item.get('text', '')}{details}\n"
 
     previous_work = ""
     if task_file_content:
-        previous_work = f"\n\n--- PREVIOUS WORK LOG ---\n{task_file_content}\n--- END PREVIOUS WORK LOG ---"
+        previous_work = f"\n\n<previous_work_log>\n{task_file_content}\n</previous_work_log>"
 
-    return f"""These items need more work on: {task.get('title', 'Untitled')}
+    return f"""<project_rework_prompt>
+<task title="{task.get('title', 'Untitled')}" />
 
-The following checklist items did NOT pass review. Fix them yourself. Do not ask for help.
+<rework_goal>The following checklist items did NOT pass review. Fix them yourself. Do not ask for help.</rework_goal>
 
-Items that need work:
+<items_that_need_work>
 {items_text}
+</items_that_need_work>
 {previous_work}
 
-MANDATORY RULES:
-1. You MUST use tools (read, edit, exec, browser) to make REAL changes to actual files.
-2. Read the relevant files first, then use edit to fix the issues.
-3. After fixing, verify your changes work — use exec to test and browser to visually confirm UI changes.
-4. If you open any browser/session during rework or verification, you MUST close it before finishing your response. Do not leave browser instances running.
-5. Only fix the items listed above. Do NOT redo work that already passed.
-6. In your report, list EVERY file you modified and what you changed.
+<mandatory_rework_rules>
+  <rule id="real-changes">You MUST use tools (read, edit, exec, browser) to make REAL changes to actual files.</rule>
+  <rule id="read-and-edit">Read the relevant files first, then use edit to fix the issues.</rule>
+  <rule id="verify">After fixing, verify your changes work — use exec to test and browser to visually confirm UI changes.</rule>
+  <rule id="close-browser">If you open any browser/session during rework or verification, you MUST close it before finishing your response. Do not leave browser instances running.</rule>
+  <rule id="checklist-updates">For every item above, include checklistUpdates with the same id/text and done=true only after you have concrete evidence.</rule>
+  <rule id="scope">Only fix the items listed above. Do NOT redo work that already passed.</rule>
+  <rule id="report-files">In your report, list EVERY file you modified and what you changed.</rule>
+</mandatory_rework_rules>
 
-A reviewer will independently verify your fixes by reading the actual files and browsing the app."""
+<review_notice>A reviewer will independently verify your fixes by reading the actual files and browsing the app.</review_notice>
+</project_rework_prompt>"""
 
 def _wf_review_had_structured_match(review_results):
     """Check if any review results came from structured line parsing (not defaults/fallbacks).

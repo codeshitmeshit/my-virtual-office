@@ -85,7 +85,8 @@ def test_hr_message_uses_visible_vo_events_and_provider_routing():
     assert events[0]["from"]["id"] == "hr"
     assert events[0]["to"]["id"] == "codex-local"
     assert calls[0]["conversationId"] == "hr:daily:codex-local"
-    assert "[A2A from=hr" in calls[0]["message"]
+    assert "<agent_platform_message_prompt>" in calls[0]["message"]
+    assert '<from id="hr"' in calls[0]["message"]
     assert "VO-GUIDANCE" in calls[0]["message"]
     assert presence == [
         ("codex-local", "working", "Replying to OpenClaw: HR 👩‍💼"),

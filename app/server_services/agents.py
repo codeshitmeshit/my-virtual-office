@@ -931,8 +931,12 @@ def _load_comm_history(limit=200, conversation_id=None, agent_id=None):
 
 
 def _is_a2a_envelope_text(text):
-    value = str(text or "")
-    return value.startswith("[A2A ") and "Message from " in value and "Reply directly to the sender" in value
+    value = str(text or "").lstrip()
+    prefix = value[:4000]
+    return (
+        value.startswith("<agent_platform_message_prompt>")
+        or ("<agent_platform_message_prompt>" in prefix and "<reply_instruction>" in prefix)
+    )
 
 
 def _dedupe_visible_comm_history(events):
@@ -1061,7 +1065,7 @@ def _merge_comm_events_into_agent_chat(result, per_agent_limit=500):
                     filtered.append(msg)
                     continue
                 raw_text = _extract_openclaw_text(msg.get("text"))
-                if raw_text.lstrip().startswith("[A2A ") or "via My Virtual Office AgentPlatform-to-AgentPlatform Communications" in raw_text:
+                if _is_a2a_envelope_text(raw_text):
                     continue
                 ts = int(msg.get("epochMs") or msg.get("ts") or 0)
                 msg_text = _extract_openclaw_text(msg.get("text"))
@@ -1180,10 +1184,15 @@ def _handle_agent_platform_comm_send(body):
         sender_label = f"{provider_label}: {base_name}" if provider_label else base_name
         envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
     target_prompt = (
-        f"[A2A from={from_ref['id']} name={json.dumps(sender_label)} to={to_ref['id']} isUser={'true' if is_human_source else 'false'} sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
-        f"Message from {sender_label} via {envelope_source}.\n\n"
-        f"{message}\n\n"
-        "Reply directly to the sender. Keep the reply concise unless detail is needed."
+        "<agent_platform_message_prompt>\n"
+        "  <metadata trusted=\"false\">\n"
+        f"    <from id=\"{from_ref['id']}\" is_user=\"{'true' if is_human_source else 'false'}\">{json.dumps(sender_label)}</from>\n"
+        f"    <to id=\"{to_ref['id']}\" />\n"
+        f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{envelope_source}</source>\n"
+        "  </metadata>\n"
+        f"  <message>{message}</message>\n"
+        "  <reply_instruction>Reply directly to the sender. Keep the reply concise unless detail is needed.</reply_instruction>\n"
+        "</agent_platform_message_prompt>"
     )
 
     gateway_presence.set_manual_override(to_ref["id"], "working", f"Replying to {sender_label}")
@@ -1377,52 +1386,55 @@ def _gateway_rpc_call(method, params=None, timeout=20):
 def _agent_template_files(name, role, emoji, agent_kind="OpenClaw"):
     """Return non-secret bootstrap files for a newly-created agent workspace."""
     return {
-        "IDENTITY.md": f"""# IDENTITY.md
-
-- **Name:** {name}
-- **Creature:** {role} — {agent_kind} agent
-- **Vibe:** Helpful, efficient, ready to work
-- **Emoji:** {emoji}
+        "IDENTITY.md": f"""<agent_identity>
+  <name>{name}</name>
+  <kind>{agent_kind}</kind>
+  <role>{role}</role>
+  <vibe>Helpful, efficient, ready to work</vibe>
+  <emoji>{emoji}</emoji>
+</agent_identity>
 """,
-        "SOUL.md": f"""# SOUL.md — {name}
-
-You are **{name}** {emoji} — {role}.
-
-## Style
-- Be helpful and direct
-- Follow your AGENTS.md workflow strictly
-- Keep work visible through Virtual Office when possible
+        "SOUL.md": f"""<agent_soul>
+  <name>{name}</name>
+  <emoji>{emoji}</emoji>
+  <role>{role}</role>
+  <style>
+    <rule>Be helpful and direct.</rule>
+    <rule>Follow your AGENTS.md workflow strictly.</rule>
+    <rule>Keep work visible through Virtual Office when possible.</rule>
+  </style>
+</agent_soul>
 """,
-        "USER.md": """# USER.md
-
-- **Name:** (set by your owner)
-- **Timezone:** (set by your owner)
-- **Notes:** Prefers direct, clear communication.
+        "USER.md": """<agent_user_profile>
+  <name>(set by your owner)</name>
+  <timezone>(set by your owner)</timezone>
+  <notes>Prefers direct, clear communication.</notes>
+</agent_user_profile>
 """,
-        "AGENTS.md": f"""# {name} {emoji} — {role}
-
-## Role
-{role}
-
-## Core Rules
-- Follow instructions carefully
-- Log your work in memory/YYYY-MM-DD.md when useful
-- Complete the full loop: working → work → report → idle
-
-## Communication
-- Use Virtual Office communication tools when talking to other office agents
-- Your text reply IS your response — write it directly
-
-## Memory
-- Daily logs: `memory/YYYY-MM-DD.md`
-- Long-term: `MEMORY.md`
+        "AGENTS.md": f"""<agent_instructions>
+  <identity name="{name}" emoji="{emoji}" role="{role}" />
+  <role>{role}</role>
+  <core_rules>
+    <rule>Follow instructions carefully.</rule>
+    <rule>Log your work in memory/YYYY-MM-DD.md when useful.</rule>
+    <rule>Complete the full loop: working → work → report → idle.</rule>
+  </core_rules>
+  <communication>
+    <rule>Use Virtual Office communication tools when talking to other office agents.</rule>
+    <rule>Your text reply IS your response — write it directly.</rule>
+  </communication>
+  <memory>
+    <daily>memory/YYYY-MM-DD.md</daily>
+    <long_term>MEMORY.md</long_term>
+  </memory>
+</agent_instructions>
 """,
-        "HEARTBEAT.md": """# HEARTBEAT.md
-
-# Add periodic tasks below. If nothing needs attention, reply HEARTBEAT_OK.
+        "HEARTBEAT.md": """<agent_heartbeat>
+  <instruction>Add periodic tasks below. If nothing needs attention, reply HEARTBEAT_OK.</instruction>
+</agent_heartbeat>
 """,
-        "MEMORY.md": f"# MEMORY.md - {name}\n\n_No memories yet._\n",
-        "TOOLS.md": f"# TOOLS.md — {name}\n\n_Add tool-specific notes here._\n",
+        "MEMORY.md": f"<agent_memory name=\"{name}\"><note>No memories yet.</note></agent_memory>\n",
+        "TOOLS.md": f"<agent_tools name=\"{name}\"><note>Add tool-specific notes here.</note></agent_tools>\n",
     }
 
 def _default_openclaw_agent_model():

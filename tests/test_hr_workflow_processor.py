@@ -18,7 +18,6 @@ from services.hr_command_status import HRCommandStatusTracker
 from services.hr_evidence import HREvidenceCollector, HREvidencePorts
 from services.hr_reporting import (
     HRDailyReportCollector,
-    HRDailyReportNormalizer,
     HRReportingService,
 )
 from services.hr_repository import HRRepository
@@ -78,22 +77,6 @@ class AssessmentHR:
         if self.fail:
             raise RuntimeError("provider secret")
         ai_id = conversation_key.rsplit(":", 1)[-1]
-        if ":daily-report-normalize:" in conversation_key:
-            submission = json.loads(prompt.split("submission: ", 1)[1].split("\n", 1)[0])
-            return json.dumps(
-                {
-                    "schemaVersion": 1,
-                    "localDate": LOCAL_DATE,
-                    "agentAiId": ai_id,
-                    "completedWork": [f"{ai_id} done"],
-                    "relatedProjectsOrTasks": [],
-                    "artifacts": [],
-                    "blockers": [],
-                    "requestedHelp": [],
-                    "submission": submission,
-                },
-                ensure_ascii=False,
-            )
         return json.dumps(
             {
                 "schemaVersion": 1,
@@ -170,12 +153,6 @@ def setup(tmp_path, *, agent_count=4, conversation=None, assessment_hr=None, con
         HREvidencePorts(empty, empty, empty, empty, empty, empty)
     )
     assessment_hr = assessment_hr or AssessmentHR()
-    normalizer = HRDailyReportNormalizer(
-        repository,
-        assessment_hr,
-        clock=lambda: NOW,
-        timeout_seconds=1,
-    )
     assessments = HRAssessmentOrchestrator(
         repository,
         evidence,
@@ -190,7 +167,6 @@ def setup(tmp_path, *, agent_count=4, conversation=None, assessment_hr=None, con
         cfg,
         repository,
         reports,
-        normalizer,
         assessments,
         clock=lambda: NOW,
         queue_capacity=cfg.max_workers,
@@ -269,7 +245,6 @@ def test_dual_report_loops_make_one_effective_provider_call(tmp_path):
         make_config(),
         repository,
         reports,
-        first._normalizer,
         first._assessments,
         clock=lambda: NOW,
         queue_capacity=2,
@@ -340,7 +315,6 @@ def test_feature_disable_stops_new_claims_without_hiding_data(tmp_path):
         make_config(),
         repository,
         base._reports,
-        base._normalizer,
         base._assessments,
         clock=lambda: NOW,
         active=lambda: active[0],

@@ -75,7 +75,7 @@ curl -sS -X POST "$VO_BASE_URL/api/agent/projects/PROJECT_ID/project-execution/s
   -H 'Content-Type: application/json' \
   -H 'X-VO-Agent-Action: project-execution' \
   -H 'X-VO-Agent-Id: CURRENT_AGENT_ID' \
-  -d '{"mode":"continuous","skipReviewConfirmed":false}'
+  -d '{"mode":"continuous"}'
 ```
 
 Agent 单任务执行：
@@ -85,7 +85,7 @@ curl -sS -X POST "$VO_BASE_URL/api/agent/projects/PROJECT_ID/tasks/TASK_ID/proje
   -H 'Content-Type: application/json' \
   -H 'X-VO-Agent-Action: project-execution' \
   -H 'X-VO-Agent-Id: CURRENT_AGENT_ID' \
-  -d '{"skipReviewConfirmed":false}'
+  -d '{}'
 ```
 
 用户/管理控制面也保留兼容入口 `POST /api/projects/PROJECT_ID/project-execution/start` 和 `POST /api/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start`，但它们属于 management-gated 项目写操作；Agent 默认不要使用这些入口。
@@ -93,7 +93,7 @@ curl -sS -X POST "$VO_BASE_URL/api/agent/projects/PROJECT_ID/tasks/TASK_ID/proje
 如果响应包含 `confirmationRequired`：
 
 - `code=dirty_worktree_confirmation_required`：向用户展示 `dirtyFiles`、`dirtyFingerprint`，获得明确确认后才用同一 `dirtyFingerprint` 重试。
-- reviewer 缺失或要求跳过 review：必须获得用户明确确认后才设置 `skipReviewConfirmed:true`。
+- reviewer 缺失或要求跳过 review：不要在启动请求中绕过；必须先通过任务配置允许 `allowReviewerlessExecution=true` 或配置独立 reviewer。
 - `task_completed_repeat_disabled`：不要重启已完成任务，除非用户启用 repeat 或明确要求调整任务。
 
 ### 4. Review、验收和返工

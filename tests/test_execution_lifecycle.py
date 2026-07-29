@@ -180,6 +180,190 @@ def test_provider_invocation_reads_persisted_attempt_and_rejects_stale_attempt()
     assert "unexpected" not in calls
 
 
+def test_runner_plans_checklist_before_executing_empty_checklist_attempt():
+    state, repository = _repository()
+    project = state["projects"][0]
+    project.update({"columns": [{"id": "done", "order": 1}], "workflowActive": True, "activeTaskId": "t1"})
+    task = project["tasks"][0]
+    task.update({
+        "executionState": "executing",
+        "activeAttemptId": "attempt-1",
+        "checklist": [],
+        "attempts": [{
+            "id": "attempt-1",
+            "status": "executing",
+            "workspacePath": "/workspace",
+            "executor": {"id": "executor", "providerKind": "test"},
+            "skipReview": True,
+            "requiresUserAcceptance": False,
+            "autoReviewAfterExecution": False,
+            "projectFlow": False,
+        }],
+    })
+    saved = copy.deepcopy(state)
+    repository = ProjectRepository(load_projects=lambda: copy.deepcopy(saved), save_projects=lambda value: saved.update(copy.deepcopy(value)))
+    calls = []
+
+    def provider(executor, prompt, workspace, attempt_id, **ids):
+        calls.append(prompt)
+        if len(calls) == 1:
+            return {
+                "ok": True,
+                "reply": '```json\n{"checklistUpdates":[{"id":"deliverable","text":"Produce the final report","done":false,"evidence":"planned"}]}\n```',
+                "status": "completed",
+            }
+        return {
+            "ok": True,
+            "reply": '```json\n{"checklistUpdates":[{"id":"deliverable","text":"Produce the final report","done":true,"evidence":"verified"}]}\n```',
+            "status": "completed",
+        }
+
+    def apply_checklist_updates(task, result):
+        reply = str(result.get("reply") or "")
+        if '"done":false' in reply:
+            task["checklist"] = [{
+                "id": "deliverable",
+                "text": "Produce the final report",
+                "done": False,
+                "source": "project_execution_acceptance",
+                "generatedBy": "project_execution_checklist_planner",
+            }]
+            return True
+        if '"done":true' in reply:
+            task["checklist"][0]["done"] = True
+            return True
+        return False
+
+    def find(project_id, task_id):
+        project = repository.get(project_id)
+        task = next(item for item in project["tasks"] if item["id"] == task_id)
+        return {"projects": [project]}, project, task
+
+    ports = type("Ports", (), {
+        "repository": repository,
+        "build_prompt": staticmethod(lambda project, task, attempt, workspace: "EXECUTE\nCHECKLIST:\n" + "\n".join(item["text"] for item in task["checklist"])),
+        "provider": staticmethod(provider),
+        "git_snapshot": staticmethod(lambda path: {"files": [], "dirty": False}),
+        "find": staticmethod(find),
+        "find_attempt": staticmethod(lambda task, attempt_id: next(item for item in task["attempts"] if item["id"] == attempt_id)),
+        "apply_checklist_updates": staticmethod(apply_checklist_updates),
+        "apply_meeting_discussion_points": staticmethod(lambda task, result: False),
+        "redact": staticmethod(lambda value: str(value or "")),
+        "now": staticmethod(lambda: "now"),
+        "acceptance_checklist": staticmethod(lambda task: task.get("checklist") or []),
+        "test_evidence": staticmethod(lambda result: []),
+        "transition": staticmethod(lambda project, task, state, actor, reason, attempt_id: task.update({"executionState": state})),
+        "notify_intervention": staticmethod(lambda *args, **kwargs: None),
+        "mark_meeting_actions_completed": staticmethod(lambda *args, **kwargs: None),
+        "move_task_to_column": staticmethod(lambda *args, **kwargs: None),
+        "backlog_column": staticmethod(lambda project: {"id": "backlog"}),
+        "commit_projects": staticmethod(lambda *args, **kwargs: True),
+        "cancel_registry": execution_lifecycle.CancelRegistry(flags={"attempt-1": threading.Event()}),
+        "has_pending_meeting_actions": staticmethod(lambda task: False),
+        "launcher": staticmethod(lambda callback: callback()),
+        "start_task": staticmethod(lambda *args, **kwargs: {"ok": True}),
+        "attempt_requires_acceptance": staticmethod(lambda task, attempt: False),
+        "stage_acceptance": staticmethod(lambda *args, **kwargs: ""),
+        "deliver_notification": staticmethod(lambda *args, **kwargs: None),
+        "mark_done": staticmethod(lambda project, task, actor, reason, attempt_id: {"ok": True}),
+        "continue_incomplete_checklist": staticmethod(lambda *args, **kwargs: {"continued": False}),
+        "schedule_continue": staticmethod(lambda *args, **kwargs: None),
+        "transient_failure_reason": staticmethod(lambda result: None),
+        "schedule_transient_retry": staticmethod(lambda *args, **kwargs: False),
+        "start_review": staticmethod(lambda *args, **kwargs: None),
+        "finalize_cancel": staticmethod(lambda *args, **kwargs: False),
+        "is_stage_pipeline": staticmethod(lambda project: False),
+        "reconcile_terminal": staticmethod(lambda *args, **kwargs: None),
+    })()
+
+    execution_lifecycle.run_attempt("p1", "t1", "attempt-1", threading.Event(), ports=ports)
+
+    assert len(calls) == 2
+    assert "Do not execute the task yet" in calls[0]
+    assert "Produce the final report" in calls[1]
+
+
+def test_runner_skips_checklist_planning_when_checklist_exists():
+    state, repository = _repository()
+    project = state["projects"][0]
+    project.update({"columns": [{"id": "done", "order": 1}], "workflowActive": True, "activeTaskId": "t1"})
+    task = project["tasks"][0]
+    task.update({
+        "executionState": "executing",
+        "activeAttemptId": "attempt-1",
+        "checklist": [{"id": "existing", "text": "Use existing acceptance criteria", "done": False}],
+        "attempts": [{
+            "id": "attempt-1",
+            "status": "executing",
+            "workspacePath": "/workspace",
+            "executor": {"id": "executor", "providerKind": "test"},
+            "skipReview": True,
+            "requiresUserAcceptance": False,
+            "autoReviewAfterExecution": False,
+            "projectFlow": False,
+        }],
+    })
+    saved = copy.deepcopy(state)
+    repository = ProjectRepository(load_projects=lambda: copy.deepcopy(saved), save_projects=lambda value: saved.update(copy.deepcopy(value)))
+    calls = []
+
+    def provider(executor, prompt, workspace, attempt_id, **ids):
+        calls.append(prompt)
+        return {
+            "ok": True,
+            "reply": '```json\n{"checklistUpdates":[{"id":"existing","text":"Use existing acceptance criteria","done":true,"evidence":"verified"}]}\n```',
+            "status": "completed",
+        }
+
+    def find(project_id, task_id):
+        project = repository.get(project_id)
+        task = next(item for item in project["tasks"] if item["id"] == task_id)
+        return {"projects": [project]}, project, task
+
+    ports = type("Ports", (), {
+        "repository": repository,
+        "build_prompt": staticmethod(lambda project, task, attempt, workspace: "EXECUTE\nCHECKLIST:\n" + "\n".join(item["text"] for item in task["checklist"])),
+        "provider": staticmethod(provider),
+        "git_snapshot": staticmethod(lambda path: {"files": [], "dirty": False}),
+        "find": staticmethod(find),
+        "find_attempt": staticmethod(lambda task, attempt_id: next(item for item in task["attempts"] if item["id"] == attempt_id)),
+        "apply_checklist_updates": staticmethod(lambda task, result: task["checklist"][0].update({"done": True}) or True),
+        "apply_meeting_discussion_points": staticmethod(lambda task, result: False),
+        "redact": staticmethod(lambda value: str(value or "")),
+        "now": staticmethod(lambda: "now"),
+        "acceptance_checklist": staticmethod(lambda task: task.get("checklist") or []),
+        "test_evidence": staticmethod(lambda result: []),
+        "transition": staticmethod(lambda project, task, state, actor, reason, attempt_id: task.update({"executionState": state})),
+        "notify_intervention": staticmethod(lambda *args, **kwargs: None),
+        "mark_meeting_actions_completed": staticmethod(lambda *args, **kwargs: None),
+        "move_task_to_column": staticmethod(lambda *args, **kwargs: None),
+        "backlog_column": staticmethod(lambda project: {"id": "backlog"}),
+        "commit_projects": staticmethod(lambda *args, **kwargs: True),
+        "cancel_registry": execution_lifecycle.CancelRegistry(flags={"attempt-1": threading.Event()}),
+        "has_pending_meeting_actions": staticmethod(lambda task: False),
+        "launcher": staticmethod(lambda callback: callback()),
+        "start_task": staticmethod(lambda *args, **kwargs: {"ok": True}),
+        "attempt_requires_acceptance": staticmethod(lambda task, attempt: False),
+        "stage_acceptance": staticmethod(lambda *args, **kwargs: ""),
+        "deliver_notification": staticmethod(lambda *args, **kwargs: None),
+        "mark_done": staticmethod(lambda project, task, actor, reason, attempt_id: {"ok": True}),
+        "continue_incomplete_checklist": staticmethod(lambda *args, **kwargs: {"continued": False}),
+        "schedule_continue": staticmethod(lambda *args, **kwargs: None),
+        "transient_failure_reason": staticmethod(lambda result: None),
+        "schedule_transient_retry": staticmethod(lambda *args, **kwargs: False),
+        "start_review": staticmethod(lambda *args, **kwargs: None),
+        "finalize_cancel": staticmethod(lambda *args, **kwargs: False),
+        "is_stage_pipeline": staticmethod(lambda project: False),
+        "reconcile_terminal": staticmethod(lambda *args, **kwargs: None),
+    })()
+
+    execution_lifecycle.run_attempt("p1", "t1", "attempt-1", threading.Event(), ports=ports)
+
+    assert len(calls) == 1
+    assert "Do not execute the task yet" not in calls[0]
+    assert "Use existing acceptance criteria" in calls[0]
+
+
 def test_attempt_compare_token_allows_only_the_active_attempt():
     task = {"activeAttemptId": "a1", "attempts": [{"id": "a1", "status": "executing"}]}
     assert execution_lifecycle.attempt_is_committable(task, "a1") is True
@@ -292,6 +476,87 @@ def test_marked_project_terminal_attempt_reconciles_instead_of_scheduling_legacy
     assert reconciled == [("p1", "t1", "attempt-1", "review_skipped")]
     assert project["tasks"][0]["executionState"] == "done"
     assert project.get("projectExecutionFlowActive") is None
+
+
+def test_status_projects_stage_pipeline_orchestration_without_legacy_idle_reconcile():
+    state, repository = _repository()
+    project = state["projects"][0]
+    project.update({
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            **default_orchestration_state(),
+            "state": "running",
+            "currentStage": 1,
+            "currentRunId": "run-1",
+        },
+        "workflowActive": False,
+        "workflowPhase": "idle",
+    })
+    project["tasks"][0].update({
+        "executionStage": 1,
+        "stageRunId": "run-1",
+        "executionState": "executing",
+        "activeAttemptId": "attempt-1",
+    })
+    transitions = []
+
+    result = execution_lifecycle.status(
+        "p1",
+        None,
+        repository=repository,
+        is_live=lambda attempt_id: False,
+        transition_task=lambda *args: transitions.append(args),
+    )
+
+    assert result["ok"] is True
+    assert result["active"] is True
+    assert result["phase"] == "running"
+    assert result["currentTaskId"] == "t1"
+    assert result["activeTaskIds"] == ["t1"]
+    assert result["currentStage"] == 1
+    assert result["runId"] == "run-1"
+    assert result["orchestrationState"] == "running"
+    assert transitions == []
+    stored_task = repository.get("p1")["tasks"][0]
+    assert stored_task["executionState"] == "executing"
+    assert stored_task["activeAttemptId"] == "attempt-1"
+
+
+def test_status_projects_stage_pipeline_stale_running_without_active_task_is_idle():
+    state, repository = _repository()
+    project = state["projects"][0]
+    project.update({
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            **default_orchestration_state(),
+            "state": "running",
+            "currentStage": 1,
+            "currentRunId": "run-1",
+        },
+        "workflowActive": False,
+        "workflowPhase": "idle",
+    })
+    project["tasks"][0].update({
+        "executionStage": 1,
+        "stageRunId": "run-1",
+        "executionState": "backlog",
+        "activeAttemptId": None,
+    })
+
+    result = execution_lifecycle.status(
+        "p1",
+        None,
+        repository=repository,
+        is_live=lambda attempt_id: False,
+        transition_task=lambda *args: None,
+    )
+
+    assert result["ok"] is True
+    assert result["active"] is False
+    assert result["phase"] == "idle"
+    assert result["flowActive"] is False
+    assert result["activeTaskIds"] == []
+    assert result["orchestrationState"] == "running"
 
 
 def test_lifecycle_module_has_no_server_or_http_dependency():

@@ -35,8 +35,7 @@ class Lifecycle:
 
 
 class Conversation:
-    def __init__(self, *, fail_normalization_for=()):
-        self.fail_normalization_for = set(fail_normalization_for)
+    def __init__(self):
         self.agent_calls = []
         self.hr_calls = []
 
@@ -47,23 +46,6 @@ class Conversation:
     def ask_hr(self, prompt, conversation_key, _timeout):
         self.hr_calls.append(conversation_key)
         ai_id = conversation_key.rsplit(":", 1)[-1]
-        if ":daily-report-normalize:" in conversation_key:
-            if ai_id in self.fail_normalization_for:
-                raise RuntimeError("normalization provider failed")
-            submission = json.loads(prompt.split("submission: ", 1)[1].split("\n", 1)[0])
-            return json.dumps(
-                {
-                    "schemaVersion": 1,
-                    "localDate": LOCAL_DATE,
-                    "agentAiId": ai_id,
-                    "completedWork": [f"{ai_id} completed tracked work"],
-                    "relatedProjectsOrTasks": [],
-                    "artifacts": [],
-                    "blockers": [],
-                    "requestedHelp": [],
-                    "submission": submission,
-                }
-            )
         return json.dumps(
             {
                 "schemaVersion": 1,
@@ -136,22 +118,20 @@ def build(tmp_path, conversation):
     return repository, runtime
 
 
-def test_tick_syncs_roster_collects_and_normalizes_before_close_assessment(tmp_path):
+def test_tick_syncs_roster_collects_before_close_assessment(tmp_path):
     conversation = Conversation()
     repository, runtime = build(tmp_path, conversation)
 
     opened = runtime.loop.tick()
     assert opened.schedule.action == "opened"
     assert opened.reports.accepted == 2
-    assert opened.normalizations.accepted == 2
     assert opened.assessments is None
     assert all(
-        repository.get_daily_report(ai_id, LOCAL_DATE).normalized is not None
+        repository.get_daily_report(ai_id, LOCAL_DATE).raw_response is not None
         for ai_id in ("agent-1", "agent-2")
     )
 
     closed = runtime.loop.close_and_assess("hr-cycle:2026-07-19")
-    assert closed.normalizations.status == "idle"
     assert closed.assessments.accepted == 2
     assert all(
         repository.get_current_assessment(ai_id, LOCAL_DATE) is not None
@@ -159,23 +139,18 @@ def test_tick_syncs_roster_collects_and_normalizes_before_close_assessment(tmp_p
     )
 
 
-def test_normalization_failure_is_isolated_and_retryable_before_assessment(tmp_path):
-    conversation = Conversation(fail_normalization_for=("agent-1",))
+def test_raw_report_assessment_failure_isolated_and_retryable(tmp_path):
+    conversation = Conversation()
     repository, runtime = build(tmp_path, conversation)
 
     first = runtime.loop.tick()
-    statuses = {item.ai_id: item.status for item in first.normalizations.results}
-    assert statuses == {"agent-1": "failed", "agent-2": "normalized"}
     assert repository.get_daily_report("agent-1", LOCAL_DATE).raw_response is not None
-    assert repository.get_daily_report("agent-1", LOCAL_DATE).normalized is None
 
     closed = runtime.loop.close_and_assess("hr-cycle:2026-07-19")
-    assert repository.get_current_assessment("agent-1", LOCAL_DATE) is None
+    assert closed.assessments.accepted == 2
+    assert repository.get_current_assessment("agent-1", LOCAL_DATE) is not None
     assert repository.get_current_assessment("agent-2", LOCAL_DATE) is not None
-
-    conversation.fail_normalization_for.clear()
     retried = runtime.loop.retry("hr-cycle:2026-07-19")
-    assert retried.normalizations.results[0].status == "normalized"
     assert repository.get_current_assessment("agent-1", LOCAL_DATE) is not None
 
 
@@ -193,6 +168,8 @@ def test_application_runtime_ignores_legacy_env_schedule_switch_for_page_timer(t
 
     assert runtime.scheduler_loop is not None
     assert commands._commands is not None
+    result = runtime.scheduler_loop.tick()
+    assert result.schedule.action != "scheduler_disabled"
 
 
 def test_running_loop_reads_page_schedule_changes_without_restart(tmp_path):

@@ -5149,6 +5149,34 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .skl-textarea { background: #12121e; border: 1px solid #2a2a4e; color: #eee; border-radius: 6px; padding: 10px; font-size: 11px; font-family: 'Courier New', monospace; min-height: 320px; resize: vertical; white-space: pre; width: 100%; box-sizing: border-box; }
 .skl-editor-actions { display: flex; gap: 8px; }
 
+/* === MCP Registry === */
+.mcp-registry-modal { max-width: 920px; width: min(94vw, 920px); max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
+.mcp-registry-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.mcp-form { display: flex; flex-direction: column; gap: 7px; padding-right: 12px; border-right: 1px solid var(--ui-border); }
+.mcp-description { min-height: 66px; resize: vertical; }
+.mcp-env { min-height: 72px; resize: vertical; font-family: 'Courier New', monospace; }
+.mcp-form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+.mcp-registry-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mcp-empty { color: #777; font-size: 11px; padding: 24px 12px; text-align: center; border: 1px dashed #2a2a4e; border-radius: 6px; }
+.mcp-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
+.mcp-card-main { min-width: 0; }
+.mcp-card-title { color: #eee; font-size: 12px; font-weight: bold; overflow-wrap: anywhere; }
+.mcp-card-desc { color: #aaa; font-size: 10px; line-height: 1.45; margin-top: 4px; overflow-wrap: anywhere; }
+.mcp-card-command { display: block; color: #9fd3ff; background: #10101c; border: 1px solid #242447; border-radius: 4px; padding: 5px 6px; margin-top: 6px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mcp-card-status { color: #8bd17c; font-size: 9px; margin-top: 5px; }
+.mcp-card-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.mcp-card-actions button, .mcp-install-row button { font-size: 9px; padding: 4px 8px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
+.mcp-card-actions button:hover, .mcp-install-row button:hover { border-color: var(--gold); color: var(--gold); }
+.mcp-install-row { grid-column: 1 / -1; gap: 6px; align-items: center; }
+.mcp-install-row select { flex: 1; min-width: 0; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; padding: 5px 8px; font-size: 10px; }
+
+@media (max-width: 760px) {
+    .mcp-registry-grid { grid-template-columns: 1fr; }
+    .mcp-form { border-right: 0; border-bottom: 1px solid var(--ui-border); padding-right: 0; padding-bottom: 12px; }
+    .mcp-card { grid-template-columns: 1fr; }
+    .mcp-card-actions { justify-content: flex-start; }
+}
+
 /* === Agent Guide === */
 .agent-guide-modal {
     max-width: 860px;

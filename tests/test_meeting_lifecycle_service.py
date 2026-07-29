@@ -3,10 +3,12 @@ import threading
 from app.services.meeting_repository import MeetingDomainRepository
 from app.services.meeting_lifecycle import (
     AgentTurnHooks, ArbitrationHooks, ConflictHooks, CreateHooks, MeetingLifecycleError,
-    MutationHooks, TargetedQuestionHooks, TerminalHooks, TimeoutHooks, TransitionHooks,
+    ModeratorHooks, MutationHooks, TargetedQuestionHooks, TerminalHooks, TimeoutHooks, TransitionHooks,
     agenda_change_command, arbitration_command, claim_occupancy, commit_agent_turn,
+    commit_moderator_summary,
     compare_token, conflict_action_command, create_command,
     commit_targeted_question, complete_meeting, intervention_command, prepare_agent_turn, prepare_targeted_question,
+    prepare_moderator_summary,
     rebuild_occupancy, release_occupancy,
     release_timed_out_preparing, replace_participant, validate_participant_eligibility,
     token_is_current, transition_command, validate_transition,
@@ -85,6 +87,29 @@ def test_transition_command_owns_terminal_cleanup_event_and_idempotency():
     assert data["occupancy"] == {} and value["awarded"] is True
     repeated = transition_command(data, "m1", {"stage": "completed", "idempotencyKey": "done"}, hooks)
     assert repeated["idempotent"] is True
+
+
+def test_decision_window_can_pause_and_resume_to_same_window():
+    value = {**meeting(stage="awaiting_user_decision", version=2), "decisionForStage": "active_discussion"}
+    data = {"meetings": {"m1": value}, "events": {"m1": []}, "occupancy": {"a1": "m1", "a2": "m1"}, "idempotency": {}}
+    def append_event(store, current, event_type, **kwargs):
+        current["version"] += 1
+        event = {"sequence": len(store["events"]["m1"]) + 1, "type": event_type, "payload": kwargs.get("payload", {})}
+        store["events"]["m1"].append(event)
+        return event
+    hooks = TransitionHooks(
+        append_event=append_event, continue_decision=lambda *args, **kwargs: None,
+        mark_preparing=lambda current: None, resume_original_work=lambda *args: None,
+        ensure_action_items=lambda *args: None, award_points=lambda current: None,
+    )
+    paused = transition_command(data, "m1", {"action": "pause", "expectedVersion": 2}, hooks)
+    assert paused["ok"] is True
+    assert value["stage"] == "paused"
+    assert value["previousStage"] == "awaiting_user_decision"
+    assert data["occupancy"] == {"a1": "m1", "a2": "m1"}
+    resumed = transition_command(data, "m1", {"action": "await_decision", "expectedVersion": 3}, hooks)
+    assert resumed["ok"] is True
+    assert value["stage"] == "awaiting_user_decision"
 
 
 def test_create_command_owns_conflict_and_atomic_initial_state():
@@ -223,6 +248,46 @@ def test_complete_meeting_cleans_up_without_releasing_a_new_owner():
     )
     assert value["stage"] == "completed" and completed["releasedParticipants"] == ["a2"]
     assert data["occupancy"] == {"a1": "m2"} and value["awarded"] is True
+
+
+def test_non_p0_moderator_policy_coerces_user_decision_to_no_consensus():
+    value = {
+        **meeting(stage="summarizing"),
+        "moderator": "a1",
+        "lastEventSequence": 0,
+        "resolutionPolicy": "moderator_decision",
+        "source": {"urgency": 4},
+    }
+    data = {"meetings": {"m1": value}, "events": {"m1": []}, "occupancy": {"a1": "m1", "a2": "m1"}}
+
+    def append_event(store, current, kind, **kwargs):
+        current["version"] = int(current.get("version") or 0) + 1
+        current["lastEventSequence"] = int(current.get("lastEventSequence") or 0) + 1
+        event = {"sequence": current["lastEventSequence"], "type": kind, "payload": kwargs.get("payload", {})}
+        store["events"]["m1"].append(event)
+        return event
+
+    terminal = TerminalHooks(
+        append_event=append_event, resume_original_work=lambda *args: None,
+        ensure_action_items=lambda *args: None, award_points=lambda *args: None,
+    )
+    hooks = ModeratorHooks(
+        append_event=append_event, build_prompt=lambda *args: "prompt",
+        pending_calls=lambda *args: [], normalize_reply=lambda reply: {"text": reply, "rawText": reply},
+        parse_result=lambda raw: {"outcome": "needs_user_decision", "summary": "Needs user.", "actionItems": []},
+        fallback_result=lambda *args: {"outcome": "approved", "summary": "fallback", "actionItems": []},
+        provider_ref=lambda moderator: {"agentId": moderator}, append_ignored=lambda *args, **kwargs: {},
+        terminal=terminal,
+    )
+    prepared = prepare_moderator_summary(data, "m1", {"type": "user", "id": "user"}, hooks)
+    committed = commit_moderator_summary(
+        data, "m1", prepared, {"ok": True, "reply": "{}"}, {"type": "user", "id": "user"},
+        failure_deadline="deadline", decision_window_seconds=60, hooks=hooks,
+    )
+    assert committed["ok"] is True
+    assert value["stage"] == "completed"
+    assert value["result"]["outcome"] == "no_consensus"
+    assert value["result"]["moderatorPolicyCoercedOutcomeFrom"] == "needs_user_decision"
 
 
 def test_conflict_replacement_rejects_archive_manager_and_updates_participant_atomically():

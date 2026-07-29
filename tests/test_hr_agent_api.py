@@ -62,10 +62,8 @@ def setup(tmp_path):
         cycle_id=None,
         ai_id="agent-2",
         local_date="2026-07-19",
-        submission_state="normalized",
+        submission_state="submitted",
         raw_response="PRIVATE RAW REPORT",
-        normalized={"completedWork": ["Delivered public API"], "blockers": ["PRIVATE"]},
-        normalizer_id="hr",
         expected_revision=0,
     )
     repository.save_assessment(

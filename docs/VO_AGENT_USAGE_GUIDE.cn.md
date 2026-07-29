@@ -767,7 +767,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/project-execution
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/project-execution/start \
   -H 'Content-Type: application/json' \
-  -d '{"mode":"continuous","skipReviewConfirmed":false}'
+  -d '{"mode":"continuous"}'
 ```
 
 启动单个任务：
@@ -775,7 +775,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/project-execution
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start \
   -H 'Content-Type: application/json' \
-  -d '{"skipReviewConfirmed":false}'
+  -d '{}'
 ```
 
 读取状态：
@@ -817,8 +817,9 @@ curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/tasks/TASK_ID/pro
 重要的启动字段：
 
 - `mode`：项目启动时可选 `single` 或 `continuous`。
-- `skipReviewConfirmed`：仅在用户明确确认后设置为 true。
 - `dirtyFingerprint`：当在脏工作空间确认后重试时需要。
+
+没有独立 reviewer 的任务必须先配置 `allowReviewerlessExecution=true` 才能启动。
 
 重要状态：
 

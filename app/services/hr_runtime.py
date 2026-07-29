@@ -30,7 +30,7 @@ from services.hr_manual_daily_sync import (
 )
 from services.hr_http import HRHTTPRoutes
 from services.hr_observability import HRObservability
-from services.hr_reporting import HRDailyReportNormalizer, HRReportingProjection, HRReportingService
+from services.hr_reporting import HRReportingProjection, HRReportingService
 from services.hr_repository import HRRepository
 from services.hr_scheduler import HRCommandReceipt, HRManualCommands, HRReconciliationLoop
 from services.hr_schedule_settings import HRScheduleSettingsService
@@ -165,9 +165,6 @@ def build_hr_application_runtime(
                     evidence_port, evidence_port, evidence_port,
                 )
             )
-            normalizer = HRDailyReportNormalizer(
-                repository, daily_conversation, timeout_seconds=config.agent_timeout_seconds,
-            )
             assessments = HRAssessmentOrchestrator(
                 repository,
                 evidence,
@@ -177,13 +174,11 @@ def build_hr_application_runtime(
             )
         else:
             reporting = automatic_reporting.reporting
-            normalizer = automatic_reporting.normalizer
             assessments = automatic_reporting.assessments
         manual_daily_sync = HRManualDailySyncCommands(
             HRManualDailySyncService(
                 repository,
                 reporting,
-                normalizer,
                 assessments,
                 daily_conversation,
                 timezone_name=config.timezone_name,

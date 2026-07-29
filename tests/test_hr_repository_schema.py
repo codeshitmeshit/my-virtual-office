@@ -59,7 +59,7 @@ def test_construction_has_no_side_effect_and_initialize_creates_fixed_authority(
     assert stat.S_IMODE(repo.path.stat().st_mode) == 0o600
     assert info.path == str(repo.path)
     assert info.schema_name == SCHEMA_NAME
-    assert info.schema_version == 7
+    assert info.schema_version == 8
     assert info.initialized_at == FIXED_NOW.isoformat()
     assert set(repo.table_names()) == EXPECTED_TABLES
     assert not hasattr(repo, "rotate_access_grant")
@@ -67,8 +67,14 @@ def test_construction_has_no_side_effect_and_initialize_creates_fixed_authority(
     assert not hasattr(repo, "get_access_grant")
     with sqlite3.connect(repo.path) as connection:
         agent_columns = {row[1] for row in connection.execute("PRAGMA table_info(agents)")}
+        report_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(daily_reports)")
+        }
     assert "skill_readiness" not in agent_columns
     assert "grant_readiness" not in agent_columns
+    assert "normalized_json" not in report_columns
+    assert "normalizer_id" not in report_columns
+    assert "normalized_at" not in report_columns
 
     repeated = repo.initialize()
     assert repeated == info
@@ -81,12 +87,12 @@ def test_schema_metadata_matches_sqlite_user_version(tmp_path):
     with sqlite3.connect(repo.path) as connection:
         user_version = connection.execute("PRAGMA user_version").fetchone()[0]
         metadata = dict(connection.execute("SELECT key, value FROM metadata"))
-    assert user_version == 7
+    assert user_version == 8
     assert metadata == {
         "initialized_at": FIXED_NOW.isoformat(),
-        "last_migration": "reserved_hr_queue_schema",
+        "last_migration": "remove_daily_report_legacy_normalization_columns",
         "schema_name": SCHEMA_NAME,
-        "schema_version": "7",
+        "schema_version": "8",
     }
 
 
@@ -131,7 +137,7 @@ def test_existing_v2_repository_drops_legacy_authorization_table_columns_and_row
         )
 
     upgraded = repository(tmp_path)
-    assert upgraded.initialize().schema_version == 7
+    assert upgraded.initialize().schema_version == 8
     assert "access_grants" not in upgraded.table_names()
     with sqlite3.connect(upgraded.path) as connection:
         columns = {row[1] for row in connection.execute("PRAGMA table_info(agents)")}
@@ -238,14 +244,14 @@ def test_failed_upgrade_rolls_back_all_schema_and_metadata_changes(tmp_path):
 
     upgraded = repository(
         tmp_path,
-        migrations=(*DEFAULT_MIGRATIONS, HRMigration(8, "failing_upgrade", fail_after_ddl)),
+        migrations=(*DEFAULT_MIGRATIONS, HRMigration(9, "failing_upgrade", fail_after_ddl)),
     )
     with pytest.raises(HRRepositoryMigrationError, match="initialization failed"):
         upgraded.initialize()
 
     assert repo.info() == original
     with sqlite3.connect(repo.path) as connection:
-        assert connection.execute("PRAGMA user_version").fetchone()[0] == 7
+        assert connection.execute("PRAGMA user_version").fetchone()[0] == 8
         assert connection.execute(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='must_rollback'"
         ).fetchone()[0] == 0
@@ -294,7 +300,7 @@ def test_concurrent_initializers_serialize_without_duplicate_schema(tmp_path):
         thread.join(timeout=5)
     assert not failures
     assert len(results) == 2
-    assert results[0].schema_version == results[1].schema_version == 7
+    assert results[0].schema_version == results[1].schema_version == 8
     assert set(repo.table_names()) == EXPECTED_TABLES
 
 

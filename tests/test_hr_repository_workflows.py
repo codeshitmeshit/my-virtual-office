@@ -233,12 +233,10 @@ def test_daily_report_is_unique_versioned_and_json_validated(repository):
         local_date="2026-07-19",
         submission_state="submitted",
         raw_response="  raw answer  ",
-        normalized={"completed": ["Task 5.3"]},
         submitted_at="2026-07-19T02:00:00Z",
         expected_revision=0,
     )
     assert first.raw_response == "  raw answer  "
-    assert first.normalized == {"completed": ["Task 5.3"]}
     assert repository.save_daily_report(
         report_id="report-1",
         cycle_id="cycle-19",
@@ -246,7 +244,6 @@ def test_daily_report_is_unique_versioned_and_json_validated(repository):
         local_date="2026-07-19",
         submission_state="submitted",
         raw_response=first.raw_response,
-        normalized=first.normalized,
         submitted_at="2026-07-19T02:00:00+00:00",
         expected_revision=1,
     ) == first
@@ -255,12 +252,9 @@ def test_daily_report_is_unique_versioned_and_json_validated(repository):
         cycle_id="cycle-19",
         ai_id="agent-1",
         local_date="2026-07-19",
-        submission_state="normalized",
+        submission_state="complete",
         raw_response=first.raw_response,
-        normalized={"completed": ["Task 5.3"], "blockers": []},
-        normalizer_id="hr",
         submitted_at="2026-07-19T02:00:00Z",
-        normalized_at="2026-07-19T02:01:00Z",
         expected_revision=1,
     )
     assert revised.revision == 2
@@ -272,21 +266,19 @@ def test_daily_report_is_unique_versioned_and_json_validated(repository):
             cycle_id="cycle-19",
             ai_id="agent-1",
             local_date="2026-07-19",
-            submission_state="normalized",
+            submission_state="complete",
             raw_response="rewritten claim",
-            normalized=revised.normalized,
             expected_revision=2,
         )
 
-    with pytest.raises(HRRepositoryValidationError, match="valid JSON"):
+    with pytest.raises(HRRepositoryValidationError, match="unsupported daily report state"):
         repository.save_daily_report(
             report_id="report-1",
             cycle_id="cycle-19",
             ai_id="agent-1",
             local_date="2026-07-19",
-            submission_state="normalized",
+            submission_state="legacy_report_state",
             raw_response="answer",
-            normalized="{broken",
             expected_revision=2,
         )
     assert repository.get_daily_report("agent-1", "2026-07-19") == revised
@@ -303,7 +295,6 @@ def test_daily_report_cursor_pagination(repository):
             local_date=local_date,
             submission_state="not_submitted",
             raw_response=None,
-            normalized=None,
             expected_revision=0,
         )
     first = repository.list_daily_reports(limit=2)
@@ -321,7 +312,6 @@ def test_late_report_retains_request_and_window_timestamps(repository):
         local_date="2026-07-18",
         submission_state="not_submitted",
         raw_response=None,
-        normalized=None,
         requested_at="2026-07-18T01:00:00Z",
         window_closed_at="2026-07-18T10:00:00Z",
         expected_revision=0,
@@ -333,7 +323,6 @@ def test_late_report_retains_request_and_window_timestamps(repository):
         local_date="2026-07-18",
         submission_state="late_submitted",
         raw_response="Late original response",
-        normalized=None,
         submitted_at="2026-07-19T01:00:00Z",
         expected_revision=missing.revision,
     )

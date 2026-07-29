@@ -5,6 +5,27 @@ var _mainMenuOpen = false;
 
 var DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:9224';
 var DEFAULT_BROWSER_VIEWER_URL = 'https://localhost:6901';
+var _mmSettingsConfigRequest = null;
+var _mmSettingsConfigCached = null;
+var _mmSettingsConfigCachedAt = 0;
+var _mmSettingsConfigCacheMs = 10000;
+
+function _mmFetchSettingsConfig(force) {
+    var now = Date.now();
+    if (!force && _mmSettingsConfigCached && now - _mmSettingsConfigCachedAt < _mmSettingsConfigCacheMs) {
+        return Promise.resolve(_mmSettingsConfigCached);
+    }
+    if (!force && _mmSettingsConfigRequest) return _mmSettingsConfigRequest;
+    _mmSettingsConfigRequest = fetch('/vo-config')
+        .then(function(r){ return r.json(); })
+        .then(function(cfg) {
+            _mmSettingsConfigCached = cfg;
+            _mmSettingsConfigCachedAt = Date.now();
+            return cfg;
+        })
+        .finally(function() { _mmSettingsConfigRequest = null; });
+    return _mmSettingsConfigRequest;
+}
 
 function toggleMainMenu() {
     var panel = document.getElementById('main-menu-panel');
@@ -18,7 +39,7 @@ function toggleMainMenu() {
 
 function _mmLoadCurrentSettings() {
     // Populate fields from current server config
-    fetch('/vo-config').then(function(r){ return r.json(); }).then(function(cfg) {
+    _mmFetchSettingsConfig(false).then(function(cfg) {
         var gwInput = document.getElementById('mm-gateway-url');
         var nameInput = document.getElementById('mm-office-name');
         var weatherCityInput = document.getElementById('mm-weather-city');

@@ -324,5 +324,4 @@ def test_project_cron_dispatch_passes_legacy_start_mode_to_project_start():
         "mode": "single",
         "by": "project-cron",
         "source": "cron",
-        "skipReviewConfirmed": True,
     })]

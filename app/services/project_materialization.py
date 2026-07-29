@@ -419,7 +419,7 @@ def materialize_task_base(
         "executorAgentId": copy.deepcopy(configuration.get("executorAgentId")),
         "reviewerAgentId": copy.deepcopy(configuration.get("reviewerAgentId")),
         "requiresUserAcceptance": configuration.get("requiresUserAcceptance") is True,
-        "allowReviewerlessExecution": configuration.get("allowReviewerlessExecution") is True,
+        "allowReviewerlessExecution": configuration.get("allowReviewerlessExecution", True) is True,
         "scheduledRepeatEnabled": configuration.get("scheduledRepeatEnabled") is True,
         "executionState": "backlog",
         "activeAttemptId": None,

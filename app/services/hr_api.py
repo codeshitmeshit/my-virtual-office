@@ -292,7 +292,6 @@ class HRManagementAPI:
         )
         latest_assessment = assessments.items[0] if assessments.items else None
         latest_report = reports.items[0] if reports.items else None
-        normalized = latest_report.normalized if latest_report is not None else None
         record = {
             "aiId": agent.ai_id,
             "name": agent.name,
@@ -313,7 +312,9 @@ class HRManagementAPI:
             ),
             "identityHistory": _json_safe(identity_history.items),
             "publicWorkSummary": (
-                normalized.get("completedWork", []) if isinstance(normalized, dict) else []
+                list(latest_assessment.principal_contributions)
+                if latest_assessment
+                else []
             ),
             "workload": latest_assessment.workload if latest_assessment else "insufficient_information",
             "reports": _json_safe(reports.items),

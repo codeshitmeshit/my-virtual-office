@@ -27,7 +27,7 @@
         dragState: null,       // {taskId, projectId, sourceColId, ghost}
         touchDrag: null,
         filters: { status: '', priority: '', tag: '', search: '', sort: 'updatedAt' },
-        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null },
+        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null, chatSignature: '', chatScopeKey: '' },
         acceptanceDialog: null,
         pendingActions: new Map(),
         duplicateActionToastAt: {},
@@ -43,19 +43,36 @@
     }
 
     function projectActiveTaskIds(project) {
-        return Array.isArray(project && project.activeTaskIds)
+        const explicit = Array.isArray(project && project.activeTaskIds)
             ? project.activeTaskIds.map(String).filter(Boolean)
             : [];
+        if (explicit.length) return explicit;
+        const activeStates = new Set(['validating', 'executing', 'retrying', 'reworking', 'reviewing', 'execution_complete', 'awaiting_user_acceptance', 'awaiting_meeting_resolution']);
+        return ((project && project.tasks) || [])
+            .filter(task => task && task.activeAttemptId && activeStates.has(String(task.executionState || '').toLowerCase()))
+            .map(task => String(task.id || ''))
+            .filter(Boolean);
+    }
+
+    function stagePipelineWorkflowActive(project, activeIds) {
+        if (activeIds && activeIds.length) return true;
+        if (project && project.projectExecutionActive) return true;
+        const orchestration = project && project.orchestration || {};
+        const phase = String((project && (project.projectExecutionPhase || project.orchestrationState)) || orchestration.state || '').toLowerCase();
+        return ['running', 'dispatching', 'executing', 'reviewing', 'reworking', 'awaiting_user_review', 'awaiting_user_acceptance', 'awaiting_meeting_resolution'].includes(phase);
     }
 
     function syncWorkflowFromProject(project) {
         if (!project) return;
         if (isStagePipelineProject(project)) {
+            const orchestration = project.orchestration || {};
             const activeIds = projectActiveTaskIds(project);
-            state.workflow.active = !!(project.projectExecutionActive || activeIds.length);
-            state.workflow.phase = project.projectExecutionPhase || project.orchestrationState || 'idle';
+            state.workflow.active = stagePipelineWorkflowActive(project, activeIds);
+            state.workflow.phase = state.workflow.active
+                ? (project.projectExecutionPhase || project.orchestrationState || orchestration.state || 'running')
+                : 'idle';
             state.workflow.currentTaskId = activeIds.length === 1 ? activeIds[0] : null;
-            state.workflow.flowStopReason = project.pauseReason || null;
+            state.workflow.flowStopReason = orchestration.pauseReason || project.pauseReason || null;
             state.workflow.startMode = null;
             return;
         }
@@ -313,7 +330,7 @@
         },
         async updateTask(projectId, taskId, body) {
             const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-            return r.json();
+            return parseProjectJson(r, '任务保存失败');
         },
         async deleteTask(projectId, taskId) {
             const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}`, { method: 'DELETE' });
@@ -390,17 +407,20 @@
             return r.json();
         },
         async projectExecutionStart(projectId, taskId, dirtyFingerprint, opts = {}) {
-            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', skipReviewConfirmed: !!opts.skipReviewConfirmed, resetExecutionContext: opts.resetExecutionContext === true }) });
+            const r = await projectMutationFetch(`/api/projects/${projectId}/tasks/${taskId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dirtyFingerprint: dirtyFingerprint || '', resetExecutionContext: opts.resetExecutionContext === true }) });
             return r.json();
         },
         async projectExecutionProjectStart(projectId, mode, dirtyFingerprint, opts = {}) {
             const body = {
                 dirtyFingerprint: dirtyFingerprint || '',
-                skipReviewConfirmed: !!opts.skipReviewConfirmed,
             };
             if (opts.stagePipeline !== true) {
                 body.mode = mode || 'continuous';
                 body.restartPipeline = !!opts.restartPipeline;
+            } else {
+                if (opts.stage != null) body.stage = opts.stage;
+                if (opts.revision != null) body.revision = opts.revision;
+                body.allowSkipReviewer = true;
             }
             const r = await projectMutationFetch(`/api/projects/${projectId}/project-execution/start`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
             return r.json();
@@ -644,7 +664,11 @@
             state.currentProject.tasks.forEach(t => { if (t.assignee) assignees.add(t.assignee); });
             const relevant = lb.filter(e => assignees.has(e.agent));
             if (relevant.length === 0) { el.remove(); return; }
-            el.innerHTML = relevant.slice(0, 5).map((entry, i) => {
+            const top = relevant.slice(0, 5);
+            const signature = JSON.stringify(top.map(entry => [entry.agent, entry.score, entry.streak || 0]));
+            if (el.dataset.scoreboardSignature === signature) return;
+            el.dataset.scoreboardSignature = signature;
+            el.innerHTML = top.map((entry, i) => {
                 const agent = state.agentRoster.find(a => a.key === entry.agent);
                 const emoji = agent ? agent.emoji : '🤖';
                 const name = agent ? agent.name : entry.agent;
@@ -1009,6 +1033,7 @@
             state.currentProject.scheduledCronLoading = true;
             state.meetingRequestsByTask = {};
             syncWorkflowFromProject(state.currentProject);
+            state.workflow.chatSignature = '';
             mc.innerHTML = renderBoardView();
             bindBoardEvents();
             scheduleProjectIdleWork(populateBoardScoreboard);
@@ -1020,7 +1045,14 @@
 
     function refreshBoardAfterAuxiliary(projectId) {
         if (!state.currentProject || state.currentProject.id !== projectId || state.view !== 'board') return;
-        rerenderProjectBoard({ lightweight: true });
+        if (workflowChatShouldBeLive(state.currentProject)) {
+            updateWorkflowUI();
+            updateActiveColumnIndicator();
+            pollWorkflowChat();
+            return;
+        }
+        clearWorkflowChat();
+        rerenderProjectBoard({ lightweight: true, preserveWorkflowChat: false });
     }
 
     function loadProjectBoardAuxiliaryData(projectId) {
@@ -1037,13 +1069,73 @@
             .catch(() => refreshBoardAfterAuxiliary(projectId));
     }
 
+    function shouldPreserveWorkflowChatDom() {
+        if (!state.currentProject) return false;
+        if (!workflowChatShouldBeLive(state.currentProject)) return false;
+        const scopeKey = workflowChatScopeKey(state.currentProject);
+        return !!scopeKey && (!state.workflow.chatScopeKey || state.workflow.chatScopeKey === scopeKey);
+    }
+
+    function workflowChatShouldBeLive(project) {
+        return !!(project && (state.workflow.active || projectExecutionHasRunningTask(project)));
+    }
+
+    function workflowChatScopeKey(project) {
+        if (!project) return '';
+        const taskId = workflowChatTaskScope(project);
+        if (!taskId) return '';
+        const task = ((project && project.tasks) || []).find(item => item && String(item.id || '') === String(taskId));
+        const attemptId = task && task.activeAttemptId ? String(task.activeAttemptId) : '';
+        return `${String(taskId)}:${attemptId}`;
+    }
+
+    function clearWorkflowChat() {
+        state.workflow.chatSignature = '';
+        state.workflow.chatScopeKey = '';
+        const container = document.getElementById('proj-wf-chat-messages');
+        if (container) {
+            container.dataset.workflowChatTaskId = '';
+            container.dataset.workflowChatScopeKey = '';
+            container.innerHTML = `<div class="proj-chat-empty">${_t('proj_workflow_chat_empty')}</div>`;
+        }
+        const liveDot = document.getElementById('proj-chat-live-dot');
+        if (liveDot) liveDot.className = 'proj-wf-chat-live';
+    }
+
+    function snapshotWorkflowChatDom() {
+        if (!shouldPreserveWorkflowChatDom()) return null;
+        const container = document.getElementById('proj-wf-chat-messages');
+        if (!container) return null;
+        const liveDot = document.getElementById('proj-chat-live-dot');
+        return {
+            html: container.innerHTML,
+            liveClass: liveDot ? liveDot.className : '',
+            signature: state.workflow.chatSignature || '',
+            scopeKey: state.workflow.chatScopeKey || '',
+        };
+    }
+
+    function restoreWorkflowChatDom(snapshot) {
+        if (!snapshot) return;
+        const container = document.getElementById('proj-wf-chat-messages');
+        if (container && snapshot.html) container.innerHTML = snapshot.html;
+        const liveDot = document.getElementById('proj-chat-live-dot');
+        if (liveDot && snapshot.liveClass) liveDot.className = snapshot.liveClass;
+        state.workflow.chatSignature = snapshot.signature || state.workflow.chatSignature || '';
+        state.workflow.chatScopeKey = snapshot.scopeKey || state.workflow.chatScopeKey || '';
+    }
+
     function rerenderProjectBoard(opts = {}) {
         const mc = getMainContent();
         if (!mc || state.view !== 'board' || !state.currentProject) return;
         const selectedTaskId = state.currentTask && state.currentTask.id;
+        const chatSnapshot = opts.preserveWorkflowChat !== false ? snapshotWorkflowChatDom() : null;
+        if (!chatSnapshot) state.workflow.chatSignature = '';
         mc.innerHTML = renderBoardView();
         bindBoardEvents();
         populateBoardScoreboard();
+        restoreWorkflowChatDom(chatSnapshot);
+        if (!workflowChatShouldBeLive(state.currentProject)) clearWorkflowChat();
         if (selectedTaskId) {
             state.currentTask = (state.currentProject.tasks || []).find(t => t.id === selectedTaskId) || null;
         }
@@ -1357,8 +1449,30 @@
         return id === 'backlog' || title === 'backlog' || title === '待办';
     }
 
+    function projectTaskBoardSortValue(task) {
+        const stage = Number(task && task.executionStage);
+        const order = Number(task && task.order);
+        const normalizedStage = Number.isInteger(stage) && stage > 0 ? stage : 999999;
+        const normalizedOrder = Number.isFinite(order) ? order : 999999;
+        return [normalizedStage, normalizedOrder, String((task && task.createdAt) || ''), String((task && task.id) || '')];
+    }
+
+    function sortProjectColumnTasks(tasks) {
+        if (!isStagePipelineProject(state.currentProject)) {
+            return tasks.slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+        }
+        return tasks.slice().sort((a, b) => {
+            const va = projectTaskBoardSortValue(a);
+            const vb = projectTaskBoardSortValue(b);
+            return va[0] - vb[0]
+                || va[1] - vb[1]
+                || va[2].localeCompare(vb[2])
+                || va[3].localeCompare(vb[3]);
+        });
+    }
+
     function renderColumn(col, allTasks, executionOrderByTaskId = new Map()) {
-        const tasks = allTasks.filter(t => t.columnId === col.id).slice().sort((a, b) => (a.order || 0) - (b.order || 0));
+        const tasks = sortProjectColumnTasks(allTasks.filter(t => t.columnId === col.id));
         const colTitle = col._titleKey ? _t(col._titleKey) : col.title;
         const backlogOrderButton = !isStagePipelineProject(state.currentProject) && isBacklogColumn(col)
             ? `<button class="proj-col-order-btn" onclick="ProjMgr.showProjectOrderDialog()" title="${escHtml(_tf('proj_project_order_edit_hint', 'Edit project execution order', '编辑项目执行顺序'))}">↕</button>`
@@ -1376,7 +1490,7 @@
                 ondragover="ProjMgr.onDragOver(event, '${col.id}')"
                 ondragleave="ProjMgr.onDragLeave(event, '${col.id}')"
                 ondrop="ProjMgr.onDrop(event, '${col.id}')">
-                ${tasks.map(t => renderTaskCard(t, executionOrderByTaskId.get(t.id))).join('')}
+                ${renderColumnTasks(tasks, executionOrderByTaskId)}
             </div>
             <div class="proj-quick-add hidden" id="quick-add-${col.id}">
                 <input class="proj-quick-add-input" id="quick-input-${col.id}" type="text" placeholder="${_t('proj_task_title_placeholder')}">
@@ -1387,6 +1501,21 @@
                 </div>
             </div>
         </div>`;
+    }
+
+    function renderColumnTasks(tasks, executionOrderByTaskId = new Map()) {
+        return (tasks || []).map(t => renderTaskCard(t, executionOrderByTaskId.get(t.id))).join('');
+    }
+
+    function updateProjectColumnTasks(colId, project, executionOrderByTaskId = new Map()) {
+        const colEl = document.getElementById(`col-${colId}`);
+        const taskList = document.getElementById(`tasks-${colId}`);
+        if (!colEl || !taskList || !project) return false;
+        const tasks = sortProjectColumnTasks((project.tasks || []).filter(t => t.columnId === colId));
+        taskList.innerHTML = renderColumnTasks(tasks, executionOrderByTaskId);
+        const count = colEl.querySelector('.proj-col-count');
+        if (count) count.textContent = String(tasks.length);
+        return true;
     }
 
     function renderTaskCard(task, executionOrder = null) {
@@ -1709,7 +1838,10 @@
         try {
             const acceptance = document.getElementById(`quick-acceptance-${colId}`);
             const body = { title, columnId: colId };
-            if (p.projectExecutionEnabled) body.requiresUserAcceptance = acceptance ? acceptance.checked : false;
+            if (p.projectExecutionEnabled) {
+                body.requiresUserAcceptance = acceptance ? acceptance.checked : false;
+                body.allowReviewerlessExecution = true;
+            }
             const d = await api.createTask(p.id, body);
             if (d.task) {
                 p.tasks.push(d.task);
@@ -1825,6 +1957,10 @@
         const reviewResult = task.reviewResult || {};
         const attemptId = task.activeAttemptId || (task.attempts && task.attempts.length ? task.attempts[task.attempts.length - 1].id : '');
         const evidenceAttemptId = evidence.attemptId || attemptId;
+        const projectExecutionLastErrorText = task.lastError ? projectExecutionErrorText(task.lastError) : '';
+        const projectExecutionBlockedReasonText = task.blockedReason ? projectExecutionReasonText(task.blockedReason) : '';
+        const projectExecutionShowBlockedReason = projectExecutionBlockedReasonText
+            && !sameProjectExecutionMessage(projectExecutionLastErrorText, projectExecutionBlockedReasonText);
         const projectExecutionReviewHtml = reviewResult.status ? `
             <div class="proj-exec-review state-${escHtml(reviewResult.status)}">
                 <div><strong>${escHtml(_tf('proj_exec_reviewer', 'Reviewer', '审查人'))}</strong> ${escHtml(projectExecutionReviewStatusLabel(reviewResult.status))}</div>
@@ -1838,7 +1974,7 @@
             if (task.executionState === 'awaiting_meeting_resolution') return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(projectExecutionStateLabel(task))}</button>`;
             if (task.executionState === 'execution_complete') return `
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionReviewStart('${task.id}', '${escHtml(evidenceAttemptId)}')">${escHtml(_tf('proj_exec_start_review', 'Start review', '启动审查'))}</button>
-                ${markedPipeline ? '' : `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_rerun', 'Run again', '重新执行'))}</button>`}`;
+                ${markedPipeline ? `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStageStart('${task.id}')">${escHtml(_tf('proj_exec_rerun_stage', 'Run stage again', '重新执行当前阶段'))}</button>` : `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_rerun', 'Run again', '重新执行'))}</button>`}`;
             if (task.executionState === 'awaiting_user_acceptance') {
                 const rejectLabel = reviewResult.status === 'skipped'
                     ? _tf('proj_exec_rework_skipped', 'Return for rework', '退回返工')
@@ -1847,6 +1983,9 @@
                 <button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'accept', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(_tf('proj_exec_accept', 'Accept', '验收通过'))}</button>
                 <button class="proj-btn proj-btn-sm" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'reject_and_rework', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(rejectLabel)}</button>
                 <button class="proj-btn proj-btn-sm proj-btn-stop" onclick="ProjMgr.projectExecutionAccept('${task.id}', 'mark_blocked', '${escHtml(reviewResult.attemptId || evidenceAttemptId)}')">${escHtml(_tf('proj_exec_mark_blocked', 'Mark blocked', '标记阻塞'))}</button>`;
+            }
+            if (markedPipeline && task.executionState === 'blocked') {
+                return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStageStart('${task.id}')">${escHtml(_tf('proj_exec_rerun_stage', 'Run stage again', '重新执行当前阶段'))}</button>`;
             }
             if (markedPipeline) return `<button class="proj-btn proj-btn-sm" disabled>${escHtml(_tf('proj_exec_stage_start_only', 'Start from project pipeline', '请从项目编排启动'))}</button>`;
             return `<button class="proj-btn proj-btn-sm proj-btn-start" onclick="ProjMgr.projectExecutionStart('${task.id}', '', { resetExecutionContext: true })">${escHtml(_tf('proj_exec_start_task', 'Start this task', '启动此任务'))}</button>`;
@@ -1945,7 +2084,7 @@
                 </div>
                 ${renderMeetingBlocker(task)}
                 ${renderProjectExecutionError(task)}
-                ${renderProjectExecutionBlockedReason(task)}
+                ${projectExecutionShowBlockedReason ? renderProjectExecutionBlockedReason(task) : ''}
                 ${evidence.capturedAt ? `<div class="proj-exec-evidence">
                     <div><strong>${escHtml(_tf('proj_exec_summary_title', 'Execution summary', '执行总结'))}</strong></div><div class="proj-exec-summary">${escHtml(evidence.executorSummary || _tf('proj_none', 'None', '无'))}</div>
                     <div><strong>${escHtml(_tf('proj_exec_changed_files', 'Changed files', '修改文件'))}</strong> ${(evidence.changedFiles || []).length}</div>
@@ -2282,6 +2421,9 @@
     }
 
     function projectExecutionHasRunningTask(project) {
+        if (isStagePipelineProject(project)) {
+            return stagePipelineWorkflowActive(project, projectActiveTaskIds(project));
+        }
         const runningStates = ['validating', 'executing', 'retrying', 'reworking', 'reviewing'];
         return ((project && project.tasks) || []).some(task => task.activeAttemptId && runningStates.includes(task.executionState));
     }
@@ -2378,6 +2520,8 @@
     function renderProjectExecutionBlockedReason(task) {
         const reason = task && task.blockedReason ? String(task.blockedReason).trim() : '';
         if (!reason) return '';
+        const err = task && task.lastError ? String(task.lastError).trim() : '';
+        if (err && projectExecutionReasonText(err) === projectExecutionReasonText(reason)) return '';
         const text = projectExecutionReasonText(reason);
         return `
             <div class="proj-exec-warning">
@@ -2390,6 +2534,17 @@
         return projectExecutionReasonText(err);
     }
 
+    function sameProjectExecutionMessage(left, right) {
+        const normalize = (value) => String(value || '')
+            .replace(/[“”]/g, '"')
+            .replace(/[‘’]/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+        const a = normalize(left);
+        const b = normalize(right);
+        return !!a && !!b && a === b;
+    }
+
     function projectExecutionReasonText(err) {
         const raw = String(err || '').trim();
         if (!raw) return '';
@@ -2399,6 +2554,13 @@
                 'proj_exec_error_previous_not_resumable',
                 'The previous execution could not be resumed after the service restarted. Start the task again to create a new execution attempt.',
                 '服务重启后无法恢复上一次执行。请重新启动任务，创建新的执行尝试。'
+            );
+        }
+        if (normalized === 'stage_attempt_not_resumable_after_restart') {
+            return _tf(
+                'proj_exec_error_stage_attempt_not_resumable_after_restart',
+                'The service restarted while this stage was running. Virtual Office cannot safely resume that interrupted attempt, so start the current stage again to create a fresh execution attempt.',
+                '服务重启时这个阶段正在执行。Virtual Office 不能安全续跑被打断的 attempt，请点击“重新执行当前阶段”创建新的执行尝试。'
             );
         }
         if (normalized === 'checklist_incomplete' || normalized === 'checklist is incomplete; finish all acceptance checklist items before marking the task done.') {
@@ -2446,6 +2608,16 @@
         const unfinished = response && Array.isArray(response.unfinishedChecklist) ? response.unfinishedChecklist : [];
         if ((code === 'checklist_incomplete' || code === 'checklist_empty') && unfinished.length) {
             text += '\n' + unfinished.slice(0, 8).map(item => `- ${item && item.text ? item.text : ''}`).filter(Boolean).join('\n');
+        }
+        const blockers = response && Array.isArray(response.blockers) ? response.blockers : [];
+        if (blockers.length) {
+            const details = blockers.slice(0, 6).map(item => {
+                const stage = Number.isInteger(Number(item && item.stage)) ? `S${Number(item.stage)} ` : '';
+                const codeText = item && item.code ? String(item.code) : '';
+                const message = item && item.message ? String(item.message) : codeText;
+                return `- ${stage}${message}`;
+            }).filter(Boolean).join('\n');
+            if (details) text += '\n' + details;
         }
         return text;
     }
@@ -2536,7 +2708,11 @@
         const saveBtn = el.parentElement && el.parentElement.querySelector('.proj-btn-gold');
         if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '⏳ ' + _t('proj_saving'); }
         try {
-            await api.updateTask(projId, taskId, { description: desc });
+            const result = await api.updateTask(projId, taskId, { description: desc });
+            if (!result || result.error || result._status || result.ok === false) {
+                throw new Error((result && result.error) || _t('proj_failed_save_desc'));
+            }
+            if (result.task) Object.assign(task, result.task);
             // Also update the card on the board
             const cardEl = document.getElementById(`task-${taskId}`);
             if (cardEl) {
@@ -2550,11 +2726,18 @@
             setTimeout(() => { if (saveBtn) { saveBtn.textContent = '💾 ' + _t('proj_save'); saveBtn.disabled = false; } }, 1500);
         } catch (e) {
             if (saveBtn) { saveBtn.textContent = '💾 ' + _t('proj_save'); saveBtn.disabled = false; }
-            toast(_t('proj_failed_save_desc'), 'error');
+            toast((e && e.message) || _t('proj_failed_save_desc'), 'error');
         }
     }
 
-    async function saveTaskField(field, value) {
+    function cloneTaskFieldValue(value) {
+        if (Array.isArray(value)) {
+            return value.map(item => item && typeof item === 'object' ? { ...item } : item);
+        }
+        return value && typeof value === 'object' ? { ...value } : value;
+    }
+
+    async function saveTaskField(field, value, opts = {}) {
         let task = state.currentTask;
         const p = state.currentProject;
         if (!task || !p) return;
@@ -2564,11 +2747,23 @@
             state.currentTask = liveTask;
             task = liveTask;
         }
+        const previousValue = opts.previousValue !== undefined
+            ? cloneTaskFieldValue(opts.previousValue)
+            : cloneTaskFieldValue(task[field]);
         task[field] = value;
         try {
             const result = await api.updateTask(p.id, task.id, { [field]: value });
+            if (!result || result.error || result._status || result.ok === false) {
+                throw new Error((result && result.error) || _t('proj_save_failed'));
+            }
             if (result && result.task) {
                 Object.assign(task, result.task);
+            }
+            const projectTask = (p.tasks || []).find(item => item && item.id === task.id);
+            if (projectTask && projectTask !== task) {
+                Object.assign(projectTask, result.task || task);
+                state.currentTask = projectTask;
+                task = projectTask;
             }
             // Re-render board card
             const cardEl = document.getElementById(`task-${task.id}`);
@@ -2578,7 +2773,14 @@
                 const rendered = newCard.firstElementChild;
                 if (rendered) cardEl.replaceWith(rendered);
             }
-        } catch (e) { toast(_t('proj_save_failed'), 'error'); }
+            return task;
+        } catch (e) {
+            task[field] = previousValue;
+            const projectTask = (p.tasks || []).find(item => item && item.id === task.id);
+            if (projectTask && projectTask !== task) projectTask[field] = previousValue;
+            toast((e && e.message) || _t('proj_save_failed'), 'error');
+            throw e;
+        }
     }
 
     async function updateTaskField(field, value) {
@@ -2615,20 +2817,33 @@
         if (!task || !task.checklist) return;
         const sourceIdx = visibleChecklistSourceIndexes(task)[idx];
         if (sourceIdx === undefined || !task.checklist[sourceIdx]) return;
+        const previousChecklist = cloneTaskFieldValue(task.checklist);
         task.checklist[sourceIdx].done = done;
         const li = document.querySelectorAll('#detail-checklist .proj-checklist-item')[idx];
         if (li) li.classList.toggle('done', done);
-        await saveTaskField('checklist', task.checklist);
-        renderDetailPanel(task);
+        try {
+            const savedTask = await saveTaskField('checklist', task.checklist, { previousValue: previousChecklist });
+            renderDetailPanel(savedTask || state.currentTask || task);
+        } catch (e) {
+            task.checklist = previousChecklist;
+            if (li) li.classList.toggle('done', !done);
+            renderDetailPanel(task);
+        }
     }
     async function deleteChecklistItem(idx) {
         const task = state.currentTask;
         if (!task || !task.checklist) return;
         const sourceIdx = visibleChecklistSourceIndexes(task)[idx];
         if (sourceIdx === undefined) return;
+        const previousChecklist = cloneTaskFieldValue(task.checklist);
         task.checklist.splice(sourceIdx, 1);
-        await saveTaskField('checklist', task.checklist);
-        renderDetailPanel(task);
+        try {
+            const savedTask = await saveTaskField('checklist', task.checklist, { previousValue: previousChecklist });
+            renderDetailPanel(savedTask || state.currentTask || task);
+        } catch (e) {
+            task.checklist = previousChecklist;
+            renderDetailPanel(task);
+        }
     }
     async function addChecklistItem() {
         const inp = document.getElementById('new-checklist-item');
@@ -2637,10 +2852,17 @@
         const task = state.currentTask;
         if (!task) return;
         if (!task.checklist) task.checklist = [];
+        const previousChecklist = cloneTaskFieldValue(task.checklist);
         task.checklist.push({ id: genId(), text, done: false });
         if (inp) inp.value = '';
-        await saveTaskField('checklist', task.checklist);
-        renderDetailPanel(task);
+        try {
+            const savedTask = await saveTaskField('checklist', task.checklist, { previousValue: previousChecklist });
+            renderDetailPanel(savedTask || state.currentTask || task);
+        } catch (e) {
+            task.checklist = previousChecklist;
+            if (inp) inp.value = text;
+            renderDetailPanel(task);
+        }
     }
 
     function editChecklistItem(idx) {
@@ -2668,8 +2890,13 @@
         async function save() {
             const newText = inp.value.trim();
             if (newText && newText !== item.text) {
+                const previousChecklist = cloneTaskFieldValue(task.checklist);
                 item.text = newText;
-                await saveTaskField('checklist', task.checklist);
+                try {
+                    await saveTaskField('checklist', task.checklist, { previousValue: previousChecklist });
+                } catch (e) {
+                    task.checklist = previousChecklist;
+                }
             }
             renderDetailPanel(task);
         }
@@ -3297,6 +3524,17 @@
             stopWorkflowPolling();
             state.workflow.active = false;
             state.workflow.phase = 'idle';
+            if (d.project) {
+                state.currentProject = d.project;
+                state.currentProject.scheduledCronJobs = p.scheduledCronJobs || state.currentProject.scheduledCronJobs || [];
+                state.currentProject.scheduledCronLoading = p.scheduledCronLoading;
+                state.currentTask = null;
+                syncWorkflowFromProject(state.currentProject);
+                state.workflow.chatSignature = '';
+                rerenderProjectBoard();
+            } else {
+                await refreshProjectExecutionProject(null, { lightweight: true });
+            }
             await refreshProjectScheduledCronPanel();
             toast(formatTextTemplate(_t('proj_reset_success'), { count: d.resetTaskCount || 0 }), 'success');
         } catch (e) {
@@ -3955,6 +4193,8 @@
 
     function renderReportView(r) {
         const { stats, columns, agentWorkload, timeline, title } = r;
+        const finalReport = r.finalReport || null;
+        const finalReportContent = finalReport && finalReport.content ? String(finalReport.content) : '';
         const maxColCount = Math.max(...columns.map(c => c.count), 1);
         const maxAgentCount = Math.max(...Object.values(agentWorkload || {}), 1);
 
@@ -3970,8 +4210,16 @@
                 <div>
                     <div class="proj-report-title">${escHtml(title)}</div>
                     <div class="proj-report-subtitle">${_t('proj_generated_at')} ${new Date(r.generatedAt).toLocaleString()}</div>
+                    ${finalReport && finalReport.markdownPath ? `<div class="proj-report-subtitle">最终报告：${escHtml(finalReport.markdownPath)}</div>` : ''}
                 </div>
             </div>
+
+            ${finalReportContent ? `
+            <div class="proj-chart-section">
+                <div class="proj-chart-title">最终报告</div>
+                <div class="proj-artifact-content">${renderMarkdownPreview(finalReportContent)}</div>
+                ${finalReport.truncated ? `<div class="proj-artifact-warn">文件较大，内容已截断。</div>` : ''}
+            </div>` : ''}
 
             <div class="proj-stats-grid">
                 <div class="proj-stat-card">
@@ -4050,6 +4298,11 @@
     function exportReport() {
         const mc = getMainContent();
         if (!mc) return;
+        const finalReport = mc.querySelector('.proj-artifact-content');
+        if (finalReport && finalReport.textContent) {
+            navigator.clipboard.writeText(finalReport.textContent).then(() => toast(_t('proj_report_copied'), 'success')).catch(() => {});
+            return;
+        }
         // Build markdown from DOM
         const title = mc.querySelector('.proj-report-title');
         const stats = mc.querySelectorAll('.proj-stat-card');
@@ -4167,15 +4420,13 @@
             if (d.confirmationRequired) {
                 if (d.code === 'reviewer_skip_confirmation_required') {
                     const task = (p.tasks || []).find(t => t.id === taskId) || {};
-                    const confirmed = await showConfirmDialog({
-                        title: '确认跳过审查',
-                        message: '当前项目/任务没有配置 Reviewer。是否确认跳过独立审查并继续执行？',
+                    await showConfirmDialog({
+                        title: '需要配置审查策略',
+                        message: '当前任务没有配置 Reviewer，且任务未允许无独立 Reviewer 执行。请先勾选“允许无独立 reviewer 执行”或配置 Reviewer。',
                         detail: task.title ? `任务：${task.title}` : '',
-                        confirmText: '跳过审查并继续',
+                        confirmText: '知道了',
+                        cancelText: null,
                     });
-                    if (confirmed) {
-                        return projectExecutionStartAction(taskId, confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true, _guarded: true, actionKey });
-                    }
                     await refreshProjectExecutionProject(taskId);
                     return;
                 }
@@ -4210,6 +4461,7 @@
             state.workflow.active = true;
             state.workflow.phase = 'executing';
             state.workflow.currentTaskId = taskId;
+            clearWorkflowChat();
             startProjectExecutionPolling();
             await refreshProjectExecutionProject(taskId);
     } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
@@ -4415,15 +4667,13 @@
             if (d.confirmationRequired) {
                 if (d.code === 'reviewer_skip_confirmation_required') {
                     const taskTitle = (d.selectedTask || {}).title || '';
-                    const confirmed = await showConfirmDialog({
-                        title: '确认跳过审查',
-                        message: '当前项目/任务没有配置 Reviewer。是否确认跳过独立审查并继续执行？',
+                    await showConfirmDialog({
+                        title: '需要配置审查策略',
+                        message: '当前项目/任务没有配置 Reviewer，且任务未允许无独立 Reviewer 执行。请先勾选“允许无独立 reviewer 执行”或配置 Reviewer。',
                         detail: taskTitle ? `任务：${taskTitle}` : '',
-                        confirmText: '跳过审查并继续',
+                        confirmText: '知道了',
+                        cancelText: null,
                     });
-                    if (confirmed) {
-                        return projectExecutionProjectStartAction(confirmedDirtyFingerprint, { ...opts, dirtyFingerprint: confirmedDirtyFingerprint, skipReviewConfirmed: true, _guarded: true, actionKey });
-                    }
                     await refreshProjectExecutionProject((d.selectedTask || {}).id || d.taskId);
                     return;
                 }
@@ -4450,6 +4700,15 @@
                         cancelText: null,
                     });
                     await refreshProjectExecutionProject(selectedTaskId);
+                } else if (markedPipeline && Array.isArray(d.blockers) && d.blockers.length) {
+                    await showConfirmDialog({
+                        title: '项目无法启动',
+                        message: '阶段编排启动前检查未通过。',
+                        detail: text,
+                        confirmText: '知道了',
+                        cancelText: null,
+                    });
+                    await refreshProjectExecutionProject(selectedTaskId);
                 } else {
                     toast(text, 'error');
                 }
@@ -4460,9 +4719,28 @@
             state.workflow.phase = 'executing';
             state.workflow.currentTaskId = markedPipeline ? null : d.taskId;
             state.workflow.startMode = markedPipeline ? null : mode;
+            clearWorkflowChat();
             startProjectExecutionPolling();
-            await refreshProjectExecutionProject(markedPipeline ? null : d.taskId);
+            await refreshProjectExecutionProject(markedPipeline ? (opts.selectedTaskId || null) : d.taskId);
         } catch (e) { toast(_t('proj_start_task_failed'), 'error'); }
+    }
+
+    async function projectExecutionStageStartAction(taskId) {
+        const p = state.currentProject;
+        if (!p || !isStagePipelineProject(p)) return;
+        const task = (p.tasks || []).find(t => t.id === taskId);
+        if (!task) return;
+        const stage = Number(task.executionStage || task.stage || (p.orchestration && p.orchestration.currentStage) || 1);
+        const revision = p.orchestration && p.orchestration.revision != null
+            ? p.orchestration.revision
+            : p.orchestrationRevision;
+        return projectExecutionProjectStartAction('', {
+            stagePipeline: true,
+            stage,
+            revision,
+            selectedTaskId: taskId,
+            actionKey: `project-exec-stage-start:${p.id}:${stage}`,
+        });
     }
 
     async function projectExecutionProjectRestartAction(dirtyFingerprint, opts = {}) {
@@ -4720,21 +4998,96 @@
     }
 
     function projectExecutionBoardSignature(project) {
-        return JSON.stringify(((project && project.tasks) || []).map(t => [
-            t.id,
-            t.columnId,
-            t.order || 0,
-            t.executionState || '',
-            t.activeAttemptId || '',
-            t.completedAt || '',
-            t.blockedReason || '',
-            (t.reviewResult || {}).status || '',
-        ]));
+        const orchestration = project && project.orchestration || {};
+        return JSON.stringify({
+            projectExecutionActive: !!(project && project.projectExecutionActive),
+            projectExecutionPhase: (project && project.projectExecutionPhase) || '',
+            orchestrationState: (project && project.orchestrationState) || orchestration.state || '',
+            activeTaskIds: Array.isArray(project && project.activeTaskIds) ? project.activeTaskIds.map(String).sort() : [],
+            currentStage: orchestration.currentStage || null,
+            tasks: ((project && project.tasks) || []).map(t => [
+                t.id,
+                t.columnId,
+                t.order || 0,
+                t.executionStage || '',
+                t.executionState || '',
+                t.activeAttemptId || '',
+                t.completedAt || '',
+                t.blockedReason || '',
+                (t.reviewResult || {}).status || '',
+                ((t.checklist || []).filter(item => item && item.source !== 'meeting_action_item' && item.source !== 'meeting_risk')).map(item => !!item.done),
+            ]),
+        });
+    }
+
+    function updateTaskCardElement(task) {
+        if (!task || !task.id) return false;
+        const cardEl = document.getElementById(`task-${String(task.id)}`);
+        if (!cardEl) return false;
+        const wrapper = document.createElement('div');
+        wrapper.innerHTML = renderTaskCard(task);
+        const rendered = wrapper.firstElementChild;
+        if (!rendered) return false;
+        cardEl.replaceWith(rendered);
+        return true;
+    }
+
+    function updateProjectExecutionBoardInPlace(previousProject, nextProject) {
+        if (!previousProject || !nextProject || state.view !== 'board') return false;
+        const previousById = new Map(((previousProject && previousProject.tasks) || []).map(task => [String(task.id || ''), task]));
+        const nextById = new Map(((nextProject && nextProject.tasks) || []).map(task => [String(task.id || ''), task]));
+        const nextTasks = (nextProject.tasks || []).filter(task => task && task.id);
+        const affectedColumnIds = new Set();
+        for (const previous of (previousProject.tasks || [])) {
+            const previousId = String(previous && previous.id || '');
+            if (previousId && !nextById.has(previousId)) {
+                affectedColumnIds.add(previous.columnId);
+            }
+        }
+        for (const task of nextTasks) {
+            const previous = previousById.get(String(task.id || ''));
+            if (!previous) {
+                affectedColumnIds.add(task.columnId);
+                continue;
+            }
+            if (previous.columnId !== task.columnId || previous.order !== task.order || previous.executionStage !== task.executionStage) {
+                affectedColumnIds.add(previous.columnId);
+                affectedColumnIds.add(task.columnId);
+                continue;
+            }
+            const before = JSON.stringify([
+                previous.executionState || '',
+                previous.activeAttemptId || '',
+                previous.completedAt || '',
+                previous.blockedReason || '',
+                (previous.reviewResult || {}).status || '',
+                ((previous.checklist || []).filter(item => item && item.source !== 'meeting_action_item' && item.source !== 'meeting_risk')).map(item => !!item.done),
+            ]);
+            const after = JSON.stringify([
+                task.executionState || '',
+                task.activeAttemptId || '',
+                task.completedAt || '',
+                task.blockedReason || '',
+                (task.reviewResult || {}).status || '',
+                ((task.checklist || []).filter(item => item && item.source !== 'meeting_action_item' && item.source !== 'meeting_risk')).map(item => !!item.done),
+            ]);
+            if (before !== after) updateTaskCardElement(task);
+        }
+        if (affectedColumnIds.size) {
+            const knownColumns = new Set(((nextProject.columns || []).map(col => String(col.id || ''))));
+            const executionOrderByTaskId = isStagePipelineProject(nextProject) ? new Map() : projectExecutionOrderMap(nextProject.tasks || []);
+            for (const colId of affectedColumnIds) {
+                if (!colId || !knownColumns.has(String(colId))) return false;
+                if (!updateProjectColumnTasks(String(colId), nextProject, executionOrderByTaskId)) return false;
+            }
+        }
+        return true;
     }
 
     async function refreshProjectExecutionProject(selectedTaskId, opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        const previousProject = p;
         const oldSignature = projectExecutionBoardSignature(p);
         const fresh = await api.getProject(p.id);
         if (!fresh.project) return;
@@ -4750,14 +5103,23 @@
         const mc = getMainContent();
         const newSignature = projectExecutionBoardSignature(state.currentProject);
         if (mc && state.view === 'board' && (!opts.lightweight || oldSignature !== newSignature)) {
-            rerenderProjectBoard({ lightweight: opts.lightweight === true });
+            if (!opts.lightweight || !updateProjectExecutionBoardInPlace(previousProject, state.currentProject)) {
+                rerenderProjectBoard({ lightweight: opts.lightweight === true });
+            }
         }
         if (state.currentTask && !detailPanelActiveEditor()) renderDetailPanel(state.currentTask, { preserveScroll: opts.lightweight === true });
         updateWorkflowUI();
         if (!opts.skipAuxiliary) {
             scheduleProjectIdleWork(() => loadProjectMeetingRequests(state.currentProject.id).then(function () {
                 if (state.currentProject && state.currentProject.id === p.id && state.view === 'board') {
-                    rerenderProjectBoard({ lightweight: true });
+                    if (workflowChatShouldBeLive(state.currentProject)) {
+                        updateWorkflowUI();
+                        updateActiveColumnIndicator();
+                        pollWorkflowChat();
+                    } else {
+                        clearWorkflowChat();
+                        rerenderProjectBoard({ lightweight: true, preserveWorkflowChat: false });
+                    }
                 }
             }), 80);
         }
@@ -4780,8 +5142,12 @@
                 }
                 const openTaskId = state.currentTask && state.currentTask.id;
                 await refreshProjectExecutionProject(openTaskId || null, { lightweight: true });
-                pollWorkflowChat();
-                if (!(d ? d.active : state.workflow.active) && !projectExecutionHasRunningTask(state.currentProject)) stopWorkflowPolling();
+                if (workflowChatShouldBeLive(state.currentProject)) {
+                    pollWorkflowChat();
+                } else {
+                    clearWorkflowChat();
+                }
+                if (!workflowChatShouldBeLive(state.currentProject)) stopWorkflowPolling();
             } catch (e) { /* keep the last visible state */ }
         }, 2500);
     }
@@ -4945,13 +5311,22 @@
         const p = state.currentProject;
         if (!p) { stopWorkflowPolling(); return; }
         try {
-            const d = await api.workflowStatus(p.id);
+            const d = isStagePipelineProject(p)
+                ? await api.projectExecutionStatus(p.id)
+                : await api.workflowStatus(p.id);
             const prevPhase = state.workflow.phase;
             const prevTaskId = state.workflow.currentTaskId;
             state.workflow.active = d.active;
             state.workflow.autoMode = d.autoMode;
             state.workflow.phase = d.phase;
             state.workflow.currentTaskId = d.currentTaskId;
+            state.workflow.flowStopReason = d.flowStopReason || null;
+            if (isStagePipelineProject(p) && Array.isArray(d.activeTaskIds)) {
+                p.activeTaskIds = d.activeTaskIds;
+                p.projectExecutionActive = d.active;
+                p.projectExecutionPhase = d.phase;
+                p.orchestrationState = d.orchestrationState || d.phase;
+            }
             state.workflow.error = d.error;
             updateWorkflowUI();
 
@@ -5002,11 +5377,34 @@
         } catch (e) { /* silent */ }
     }
 
-    async function pollWorkflowChat() {
+    async function pollWorkflowChat(opts = {}) {
         const p = state.currentProject;
         if (!p) return;
+        if (!workflowChatShouldBeLive(p)) {
+            clearWorkflowChat();
+            return;
+        }
+        const scopeKey = workflowChatScopeKey(p);
+        if (!scopeKey) {
+            clearWorkflowChat();
+            return;
+        }
+        if (state.workflow.chatScopeKey && state.workflow.chatScopeKey !== scopeKey) {
+            clearWorkflowChat();
+        }
+        state.workflow.chatScopeKey = scopeKey;
+        const container = document.getElementById('proj-wf-chat-messages');
+        if (container) container.dataset.workflowChatScopeKey = scopeKey;
         try {
             const d = await api.workflowChat(p.id, workflowChatTaskScope(p));
+            if (d && d.ok === false && d.code === 'invalid_task_scope' && d.displayTaskId && !opts.retried) {
+                state.workflow.currentTaskId = String(d.displayTaskId || '');
+                state.workflow.chatSignature = '';
+                state.workflow.chatScopeKey = workflowChatScopeKey(p);
+                const retry = await api.workflowChat(p.id, state.workflow.currentTaskId);
+                renderWorkflowChat(retry);
+                return;
+            }
             renderWorkflowChat(d);
         } catch (e) { /* silent */ }
     }
@@ -5028,17 +5426,43 @@
 
         const msgs = data.messages || [];
         const isActive = data.phase && data.phase !== 'idle' && data.phase !== 'stopped';
+        const scopeKey = state.workflow.chatScopeKey || '';
+        const signature = JSON.stringify({
+            taskId: data.taskId || '',
+            scopeKey,
+            phase: data.phase || '',
+            sessionActive: data.sessionActive === true,
+            messages: msgs.map(m => [
+                m.role || '',
+                m.text || '',
+                m.thinking || '',
+                m.reasoningStatus || '',
+                m.timestamp || m.epochMs || m.ts || '',
+                (m.tools || []).map(t => t && t.name).join(','),
+            ]),
+        });
 
         if (liveDot) {
             liveDot.className = 'proj-wf-chat-live' + (isActive ? ' live' : '');
         }
 
+        if (state.workflow.chatSignature === signature) return;
+        state.workflow.chatSignature = signature;
+
         if (msgs.length === 0) {
-            container.innerHTML = `<div class="proj-chat-empty">${_t('proj_workflow_chat_empty')}</div>`;
+            const taskId = String(data.taskId || '');
+            if (isActive && taskId && container.dataset.workflowChatTaskId === taskId && container.querySelector('.proj-chat-msg')) {
+                return;
+            }
+            container.dataset.workflowChatTaskId = taskId;
+            container.dataset.workflowChatScopeKey = scopeKey;
+            container.innerHTML = `<div class="proj-chat-empty">${isActive ? '执行会话已启动，等待 Agent 输出...' : _t('proj_workflow_chat_empty')}</div>`;
             return;
         }
 
         const wasAtBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 20;
+        container.dataset.workflowChatTaskId = String(data.taskId || '');
+        container.dataset.workflowChatScopeKey = scopeKey;
 
         container.innerHTML = msgs.map(m => {
             const isAssistant = m.role === 'assistant';
@@ -5354,6 +5778,7 @@
         saveReviewCheck: saveReviewCheckAction,
         projectExecutionStart: projectExecutionStartAction,
         projectExecutionProjectStart: projectExecutionProjectStartAction,
+        projectExecutionStageStart: projectExecutionStageStartAction,
         projectExecutionProjectRestart: projectExecutionProjectRestartAction,
         openProjectOrchestration: openProjectOrchestrationAction,
         setProjectExecutionStartMode: setProjectExecutionStartModeAction,

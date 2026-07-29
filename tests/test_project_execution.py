@@ -8,6 +8,7 @@ import sys
 import tempfile
 import threading
 import time
+import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -77,6 +78,27 @@ def test_workflow_provider_message_activity_does_not_count_as_review_evidence():
     assert server._wf_activity_tool_count(activity) == 0
     assert server._wf_activity_has_review_evidence(activity) is False
     assert server._wf_activity_has_browser_evidence(activity) is False
+
+
+def test_task_create_defaults_to_allow_reviewerless_execution_but_respects_false():
+    with tempfile.TemporaryDirectory() as status_dir:
+        old = with_store(status_dir)
+        try:
+            project = server._handle_project_create({"title": "Reviewerless default"})["project"]
+            default_task = server._handle_task_create(project["id"], {
+                "title": "Default reviewerless",
+                "columnId": project["columns"][0]["id"],
+            })["task"]
+            strict_task = server._handle_task_create(project["id"], {
+                "title": "Strict reviewer",
+                "columnId": project["columns"][0]["id"],
+                "allowReviewerlessExecution": False,
+            })["task"]
+
+            assert default_task["allowReviewerlessExecution"] is True
+            assert strict_task["allowReviewerlessExecution"] is False
+        finally:
+            restore_store(old)
 
 
 def test_legacy_workflow_applies_executor_checklist_updates():
@@ -176,6 +198,13 @@ def create_project_execution_project(workspace):
     })["task"]
     project.setdefault("tasks", []).append(task)
     return project, task
+
+
+def unmark_project_for_legacy_execution(project_id):
+    data, stored = server._project_find(project_id)
+    stored.pop("executionModel", None)
+    stored.pop("orchestration", None)
+    server._save_projects(data)
 
 
 def test_task_compatibility_log_and_project_update_are_concurrency_safe():
@@ -341,7 +370,7 @@ def test_workflow_chat_recovers_active_attempt_after_workflow_timeout():
             restore_store(old)
 
 
-def test_openclaw_workflow_chat_reads_gateway_prefixed_session_file():
+def test_openclaw_workflow_chat_reads_agent_owned_gateway_prefixed_attempt_session_file():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as openclaw_home:
         old = with_store(status_dir)
         old_config = server.VO_CONFIG
@@ -434,7 +463,7 @@ def test_project_execution_hermes_call_uses_attempt_conversation_id():
         server._handle_hermes_chat = old_handle
 
 
-def test_project_execution_openclaw_executor_uses_attempt_session_id():
+def test_project_execution_openclaw_executor_uses_task_session_id():
     calls = []
     old_call = server._wf_call_agent
     try:
@@ -452,7 +481,7 @@ def test_project_execution_openclaw_executor_uses_attempt_session_id():
             task_id="task-1",
         )
         assert result["ok"] is True
-        assert calls == [{"agentId": "executor", "projectId": "project-1", "taskId": "attempt-openclaw-call"}]
+        assert calls == [{"agentId": "executor", "projectId": "project-1", "taskId": "task-1"}]
     finally:
         server._wf_call_agent = old_call
 
@@ -585,6 +614,8 @@ def test_project_from_template_auto_workspace_matches_project_create():
             assert project["workspaceManagedBy"] == "system"
             assert os.path.isdir(project["workspacePath"])
             assert os.path.basename(project["workspacePath"]).startswith("template-project-")
+            assert project["tasks"]
+            assert all(task["allowReviewerlessExecution"] is True for task in project["tasks"])
 
             normal = server._handle_project_from_template({
                 "templateId": "tpl-software",
@@ -799,6 +830,10 @@ def test_project_artifacts_include_phase7_source_records():
                 f.write("# Hermes Summary")
             with open(os.path.join(workspace, "other", "artifact.md"), "w", encoding="utf-8") as f:
                 f.write("# Other")
+            final_result_rel = ".vo/project-final-task/20260729120230/TASK_FINAL_RESULT.md"
+            os.makedirs(os.path.join(workspace, ".vo", "project-final-task", "20260729120230"), exist_ok=True)
+            with open(os.path.join(workspace, *final_result_rel.split("/")), "w", encoding="utf-8") as f:
+                f.write("# TASK_FINAL_RESULT\n\nFinal answer")
             project, task = create_project_execution_project(workspace)
             data = server._load_projects()
             project = data["projects"][0]
@@ -806,8 +841,25 @@ def test_project_artifacts_include_phase7_source_records():
             later_task = server._handle_task_create(project["id"], {"title": "Refresh fixture", "columnId": project["columns"][0]["id"]})["task"]
             data = server._load_projects()
             project = data["projects"][0]
+            project["projectType"] = "reusable"
             task = project["tasks"][0]
             later_task = project["tasks"][1]
+            project_report_rel = ".vo/project-final-reports/20260729121000/PROJECT_FINAL_REPORT.md"
+            os.makedirs(os.path.join(workspace, ".vo", "project-final-reports", "20260729121000"), exist_ok=True)
+            with open(os.path.join(workspace, *project_report_rel.split("/")), "w", encoding="utf-8") as f:
+                f.write("# PROJECT_FINAL_REPORT\n\nProject complete")
+            project.setdefault("orchestration", {})["finalReport"] = {
+                "schemaVersion": 1,
+                "status": "available",
+                "markdownPath": project_report_rel,
+                "generatedAt": "2026-07-29T12:10:00+00:00",
+                "taskCount": 2,
+                "completedTaskCount": 1,
+            }
+            historical_result_rel = f".vo/{task['id']}/20260729120046/TASK_FINAL_RESULT.md"
+            os.makedirs(os.path.join(workspace, ".vo", task["id"], "20260729120046"), exist_ok=True)
+            with open(os.path.join(workspace, *historical_result_rel.split("/")), "w", encoding="utf-8") as f:
+                f.write("# TASK_FINAL_RESULT\n\nEarlier run")
             task["evidence"] = {
                 "attemptId": "attempt-1",
                 "changedFiles": ["docs/artifact.md", "docs/not-shown.json"],
@@ -819,6 +871,12 @@ def test_project_artifacts_include_phase7_source_records():
                 "executor": {"id": "codex-executor", "providerKind": "codex"},
                 "evidence": task["evidence"],
             }]
+            task["finalResult"] = {
+                "status": "available",
+                "markdownPath": final_result_rel,
+                "sourceAttemptId": "attempt-1",
+                "generatedAt": "2026-07-29T12:00:46+00:00",
+            }
             later_task["evidence"] = {
                 "attemptId": "attempt-2",
                 "changedFiles": ["docs/artifact.md"],
@@ -845,7 +903,7 @@ def test_project_artifacts_include_phase7_source_records():
             listed = server._handle_project_artifacts_list(project["id"])
             assert listed["ok"] is True
             by_path = {a["path"]: a for a in listed["artifacts"]}
-            assert set(by_path) == {"docs/artifact.md", "docs/hermes-summary.md", "docs/manual.md", "other/artifact.md"}
+            assert set(by_path) == {"docs/artifact.md", "docs/hermes-summary.md", "docs/manual.md", "other/artifact.md", final_result_rel, historical_result_rel, project_report_rel}
             source = by_path["docs/artifact.md"]["sources"][0]
             assert source["taskId"] == later_task["id"]
             assert source["taskTitle"] == later_task["title"]
@@ -859,12 +917,35 @@ def test_project_artifacts_include_phase7_source_records():
             assert hermes_summary_source["agentId"] == "hermes-executor"
             assert hermes_summary_source["providerKind"] == "hermes"
             assert hermes_summary_source["attemptId"] == "attempt-3"
+            final_result_source = by_path[final_result_rel]["sources"][0]
+            assert final_result_source["taskId"] == task["id"]
+            assert final_result_source["attemptId"] == "attempt-1"
+            assert final_result_source["capturedAt"] == "2026-07-29T12:00:46+00:00"
+            historical_result_source = by_path[historical_result_rel]["sources"][0]
+            assert historical_result_source["taskId"] == task["id"]
+            assert historical_result_source["attemptId"] == "attempt-1"
+            project_report_source = by_path[project_report_rel]["sources"][0]
+            assert project_report_source["sourceType"] == "project_final_report"
+            assert project_report_source["projectId"] == project["id"]
             assert by_path["docs/manual.md"]["unassociated"] is True
             assert by_path["other/artifact.md"]["unassociated"] is True
 
             read = server._handle_project_artifact_read(project["id"], "path=docs%2Fartifact.md")
             assert read["ok"] is True
             assert read["artifact"]["content"] == "# Artifact"
+            final_result_read = server._handle_project_artifact_read(
+                project["id"], "path=" + urllib.parse.quote(final_result_rel, safe=""),
+            )
+            assert final_result_read["ok"] is True
+            assert final_result_read["artifact"]["content"].startswith("# TASK_FINAL_RESULT")
+            historical_result_read = server._handle_project_artifact_read(
+                project["id"], "path=" + urllib.parse.quote(historical_result_rel, safe=""),
+            )
+            assert historical_result_read["ok"] is True
+            assert historical_result_read["artifact"]["content"].startswith("# TASK_FINAL_RESULT")
+            report = server._handle_project_report(project["id"])["report"]
+            assert report["finalReport"]["markdownPath"] == project_report_rel
+            assert report["finalReport"]["content"].startswith("# PROJECT_FINAL_REPORT")
             unassociated = server._handle_project_artifact_read(
                 project["id"], "archive=1&path=docs%2Fmanual.md",
             )
@@ -1027,22 +1108,31 @@ def test_project_execution_prompt_requires_checklist_lifecycle_and_meeting_conte
     task = {"id": "task-1", "title": "日报", "description": "整理日报内容", "checklist": []}
     attempt = {"id": "attempt-1"}
     prompt = server._project_execution_build_prompt(project, task, attempt, "/tmp/workspace")
+    assert "<workflow>" in prompt
+    assert '<step id="fill-back-checklist">' in prompt
+    assert "<final_response>" in prompt
     assert "Write the task/deliverable acceptance criteria into the task checklist" in prompt
     assert "not a meeting action-item queue" in prompt
     assert "vo-operating-guidelines" in prompt
     assert "Do not confirm or reject meetings yourself" in prompt
     assert "POST /api/projects/project-1/tasks/task-1/meeting-requests" in prompt
+    assert "Include urgency and resolutionPolicy in the request" in prompt
+    assert 'P0 uses urgency 5 with resolutionPolicy "user_decision"' in prompt
+    assert 'non-P0 meeting uses urgency 1-4 with resolutionPolicy "moderator_decision"' in prompt
     assert "/api/projects/{projectId}/tasks/{taskId}" not in prompt
     assert "proactively request a meeting" in prompt
     assert "Do not put those meeting action items or risks into the checklist" in prompt
-    assert "Mark completed checklist items done" in prompt
+    assert "After executing the task, fill back the checklist in your final checklistUpdates" in prompt
+    assert "preserve its id/text" in prompt
+    assert "provide non-empty evidence" in prompt
     assert "continue working until it is complete" in prompt
     assert "checklistUpdates" in prompt
     assert "checklistUpdates is REQUIRED" in prompt
     assert "PUT /api/projects/{projectId}/tasks/{taskId}" not in prompt
     assert "The orchestration service will persist checklistUpdates" in prompt
     assert "meetingDiscussionPoints" in prompt
-    assert "FINAL RESPONSE FORMAT (strict)" in prompt
+    assert "<final_response>" in prompt
+    assert "<json_block>" in prompt
     assert "Do not print raw JSON outside the fenced json block" in prompt
     assert "tests must be an array of short strings only" in prompt
 
@@ -1392,6 +1482,68 @@ def test_project_flow_reset_keeps_added_tasks_config_and_clean_reset_needs_no_co
             assert fresh["projectExecutionStartMode"] == "single"
             assert fresh["defaultExecutorAgentId"] == "executor"
             assert fresh["defaultReviewerAgentId"] == "reviewer"
+        finally:
+            restore_store(old)
+
+
+def test_marked_project_reset_clears_stage_pipeline_runtime_bindings():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, _first = create_project_execution_project(workspace)
+            server._handle_task_create(project["id"], {
+                "title": "Stage 2",
+                "columnId": col_id(project, "Backlog"),
+                "executorAgentId": "executor",
+            })
+            data = server._load_projects()
+            stored = next(p for p in data["projects"] if p["id"] == project["id"])
+            stored["executionModel"] = "stage_pipeline_v1"
+            stored["orchestration"] = {
+                "schemaVersion": 1,
+                "revision": 3,
+                "state": "blocked",
+                "currentStage": 2,
+                "currentRunId": "run-1",
+                "pauseReason": "stage_attempt_not_resumable_after_restart",
+                "startedAt": "2026-07-28T00:00:00+08:00",
+                "completedAt": None,
+            }
+            stored["workflowActive"] = True
+            stored["workflowPhase"] = "blocked"
+            stored["projectExecutionFlowActive"] = True
+            stored["projectExecutionFlowStopReason"] = "active_attempt_exists"
+            for idx, task in enumerate(stored["tasks"]):
+                task["executionStage"] = idx + 1
+                task["stageRunId"] = "run-1"
+                task["executionState"] = "executing"
+                task["activeAttemptId"] = f"attempt-{idx + 1}"
+                task["attempts"] = [{"id": f"attempt-{idx + 1}", "status": "executing", "stageRunId": "run-1"}]
+            stored["tasks"][0]["orchestrationSkip"] = {"status": "approved", "requestedBy": "user"}
+            server._save_projects(data)
+
+            blocked = server._handle_project_reset(project["id"], {"mode": "project_flow"})
+            assert blocked["_status"] == 409
+            assert blocked["confirmationRequired"] is True
+
+            result = server._handle_project_reset(project["id"], {"mode": "project_flow", "confirmed": True, "by": "test"})
+
+            assert result["ok"] is True
+            fresh = next(p for p in server._load_projects()["projects"] if p["id"] == project["id"])
+            assert fresh["orchestration"]["state"] == "draft"
+            assert fresh["orchestration"]["currentStage"] is None
+            assert fresh["orchestration"]["currentRunId"] is None
+            assert fresh["orchestration"]["revision"] == 4
+            assert fresh["workflowActive"] is False
+            assert fresh["workflowPhase"] == "idle"
+            assert fresh["projectExecutionFlowActive"] is False
+            assert fresh["projectExecutionFlowStopReason"] is None
+            for task in fresh["tasks"]:
+                assert task["stageRunId"] is None
+                assert task["activeAttemptId"] is None
+                assert task["executionState"] == "backlog"
+                assert task["orchestrationSkip"]["status"] == "none"
+                assert task["attempts"][0]["status"] == "cancelled"
         finally:
             restore_store(old)
 
@@ -1768,7 +1920,7 @@ def test_project_execution_mark_done_rejects_incomplete_checklist():
 
             assert result["_status"] == 409
             assert result["code"] == "checklist_incomplete"
-            assert result["unfinishedChecklist"] == [{"id": "c2", "text": "Still pending"}]
+            assert result["unfinishedChecklist"] == [{"id": "c2", "text": "Still pending", "evidence": ""}]
             assert task.get("executionState") != "done"
             assert task.get("completedAt") is None
             assert task["columnId"] != col_id(project, "Done")
@@ -1815,6 +1967,48 @@ def test_project_execution_empty_checklist_is_seeded_for_automatic_rework():
             assert task["executionState"] == "reworking"
             assert server._project_execution_acceptance_checklist(task)
             assert "完成任务目标" in task["reworkFeedback"]
+        finally:
+            restore_store(old)
+
+
+def test_project_execution_incomplete_checklist_feedback_includes_review_details():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            task["checklist"] = [{
+                "id": "deliverable",
+                "text": "Write the final comparison report.",
+                "done": False,
+                "evidence": "Draft exists but omits Task-3.",
+            }]
+            task["reviewResult"] = {
+                "status": "needs_more_work",
+                "items": [{
+                    "id": "deliverable",
+                    "status": "needs_more_work",
+                    "reason": "Task-3 and Task-5 are not covered.",
+                }],
+            }
+            task["attempts"] = [{"id": "attempt-1", "evidence": {"providerStatus": "completed", "changedFiles": ["report.md"]}}]
+            done_result = {
+                "code": "checklist_incomplete",
+                "unfinishedChecklist": [{
+                    "id": "deliverable",
+                    "text": "Write the final comparison report.",
+                    "evidence": "Draft exists but omits Task-3.",
+                }],
+            }
+
+            feedback = server._project_execution_incomplete_checklist_rework_feedback(
+                project, task, "attempt-1", done_result,
+            )
+
+            assert "id=deliverable text=Write the final comparison report." in feedback
+            assert "currentEvidence=Draft exists but omits Task-3." in feedback
+            assert "lastReview=reviewStatus=needs_more_work; Task-3 and Task-5 are not covered." in feedback
+            assert "concrete deliverable files needed by the unfinished checklist items" in feedback
+            assert "buy/sell-list" not in feedback
         finally:
             restore_store(old)
 
@@ -1945,6 +2139,7 @@ def test_project_execution_auto_pass_continues_when_checklist_incomplete():
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_task_update(project["id"], task["id"], {
                 "requiresUserAcceptance": False,
                 "checklist": [
@@ -1961,11 +2156,135 @@ def test_project_execution_auto_pass_continues_when_checklist_incomplete():
                                  else None)
             assert reworking.get("blockedReason") in (None, "")
             assert "Still pending" in reworking.get("reworkFeedback", "")
-            assert calls["executor"] >= 2
+            assert "id=c2 text=Still pending" in reworking.get("reworkFeedback", "")
+            assert "currentEvidence=empty" in reworking.get("reworkFeedback", "")
+            assert "Previous attempt did not satisfy the VO completion gate" in reworking.get("reworkFeedback", "")
+            assert "Checklist updates applied: no" in reworking.get("reworkFeedback", "")
+            assert "TASK_FINAL_RESULT.md" in reworking.get("reworkFeedback", "")
+            wait_for(lambda: calls["executor"] >= 2)
         finally:
             server._project_execution_call_executor = old_executor
             server._project_execution_call_reviewer = old_reviewer
             restore_store(old)
+
+
+def test_project_execution_checklist_rework_blocks_after_three_cycles():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        old_executor = server._project_execution_call_executor
+        old_reviewer = server._project_execution_call_reviewer
+        calls = {"executor": 0, "reviewer": 0}
+
+        def fake_executor(executor, prompt, workspace, attempt_id, project_id=None, task_id=None, timeout=600):
+            calls["executor"] += 1
+            return {
+                "ok": True,
+                "status": "completed",
+                "reply": f"attempt {calls['executor']} produced no acceptance update",
+                "modifiedFiles": [],
+            }
+
+        def fake_reviewer(reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600):
+            calls["reviewer"] += 1
+            return {
+                "ok": True,
+                "status": "completed",
+                "reply": '{"status":"pass","summary":"ready","rationale":"review passed","items":[]}',
+            }
+
+        server._project_execution_call_executor = fake_executor
+        server._project_execution_call_reviewer = fake_reviewer
+        try:
+            project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
+            server._handle_task_update(project["id"], task["id"], {
+                "requiresUserAcceptance": False,
+                "checklist": [{"id": "done", "text": "Complete implementation", "done": False}],
+            })
+            task = complete_project_task_execution(project["id"], task["id"])
+            started = server._handle_project_execution_review_start(
+                project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]},
+            )
+            assert started["ok"] is True
+
+            def blocked_after_reworks():
+                current = server._handle_project_get(project["id"])["project"]
+                task = current["tasks"][0]
+                return task if task.get("executionState") == "blocked" and int(task.get("reworkCount") or 0) == 3 else None
+
+            task = wait_for(blocked_after_reworks)
+            assert calls["executor"] == 4
+            assert calls["reviewer"] == 4
+            assert len(task["attempts"]) == 4
+            assert task["activeAttemptId"] in (None, "")
+            assert task["lastError"] == "checklist_incomplete_rework_limit"
+            assert "three automatic rework cycles" in task["blockedReason"]
+            assert "Missing checklist items" in task["blockedReason"]
+            assert "id=done text=Complete implementation" in task["blockedReason"]
+            assert task["blockedChecklistItems"] == [{
+                "id": "done",
+                "text": "Complete implementation",
+                "evidence": "",
+            }]
+            assert "id=done text=Complete implementation" in task["reworkFeedback"]
+        finally:
+            server._project_execution_call_executor = old_executor
+            server._project_execution_call_reviewer = old_reviewer
+            restore_store(old)
+
+
+def test_project_execution_rework_prompt_highlights_unfinished_checklist_focus(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = {
+        "id": "project-focus",
+        "title": "Reusable finance pipeline",
+        "workspacePath": str(workspace),
+    }
+    task = {
+        "id": "task-focus",
+        "title": "Produce evidence",
+        "description": "Create deliverable evidence.",
+        "checklist": [
+            {"id": "evidence", "text": "Produce multi-source evidence.", "done": False, "evidence": ""},
+            {"id": "summary", "text": "Write final summary.", "done": True, "evidence": "Summary exists"},
+        ],
+        "reworkFeedback": "Previous attempt missed required evidence.",
+    }
+    attempt = {"id": "attempt-focus", "rework": True, "checklistCompletionRetry": True}
+
+    prompt = server._project_execution_build_prompt(project, task, attempt, str(workspace))
+
+    assert "UNFINISHED CHECKLIST FOCUS" in prompt
+    assert "id=evidence text=Produce multi-source evidence." in prompt
+    assert "id=summary text=Write final summary." not in prompt.split("UNFINISHED CHECKLIST FOCUS", 1)[1].split("PRIOR STAGE", 1)[0]
+
+
+def test_checklist_updates_infer_risk_verdict_completion_from_executor_output():
+    task = {
+        "id": "risk",
+        "checklist": [
+            {
+                "id": "risk-verdict",
+                "text": "输出最终风险裁决和必须遵守的风险限制。",
+                "done": False,
+            },
+        ],
+    }
+    result = {
+        "ok": True,
+        "reply": "风险裁决：调整后通过。必须遵守风险限制：单票仓位不超过 10%，触发止损立即退出。",
+        "modifiedFiles": [".vo/risk/20260728153213/TASK_FINAL_RESULT.md"],
+    }
+
+    changed = server._project_execution_apply_checklist_updates(task, result)
+
+    assert changed is True
+    item = task["checklist"][0]
+    assert item["done"] is True
+    assert item["completedBy"] == "executor"
+    assert "Inferred from executor output" in item["completionEvidence"]
+
 
 def test_project_load_repairs_stale_acceptance_state_when_user_acceptance_disabled():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
@@ -2205,8 +2524,12 @@ def test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_sta
         old = with_store(status_dir)
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
-            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "allowReviewerlessExecution": False,
+            })
             result = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert result["_status"] == 409
             assert result["confirmationRequired"] is True
@@ -2219,7 +2542,7 @@ def test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_sta
             restore_store(old)
 
 
-def test_missing_reviewer_skip_completes_by_default_after_explicit_confirmation():
+def test_missing_reviewer_skip_completes_by_default_after_task_allows_reviewerless_execution():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
         old_executor = server._project_execution_call_executor
@@ -2229,16 +2552,21 @@ def test_missing_reviewer_skip_completes_by_default_after_explicit_confirmation(
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
-            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "allowReviewerlessExecution": False,
+            })
             first = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert first["_status"] == 409
             assert first["confirmationRequired"] is True
             assert first["code"] == "reviewer_skip_confirmation_required"
             assert first["selectedTask"]["id"] == task["id"]
 
-            confirmed = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "skipReviewConfirmed": True})
-            assert confirmed["ok"] is True
+            server._handle_task_update(project["id"], task["id"], {"allowReviewerlessExecution": True})
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
+            assert started["ok"] is True
 
             def done():
                 current = server._handle_project_get(project["id"])["project"]
@@ -2265,6 +2593,7 @@ def test_task_can_allow_missing_reviewer_without_confirmation_and_complete_by_de
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
             server._handle_task_update(project["id"], task["id"], {
                 "reviewerAgentId": None,
@@ -2349,13 +2678,19 @@ def test_skipped_review_waits_for_acceptance_when_required():
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             done_col = next(c["id"] for c in project["columns"] if c["title"] == "Done")
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
-            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None, "requiresUserAcceptance": True})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "requiresUserAcceptance": True,
+                "allowReviewerlessExecution": False,
+            })
             first = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
             assert first["code"] == "reviewer_skip_confirmation_required"
-            confirmed = server._handle_project_execution_project_start(project["id"], {"mode": "single", "skipReviewConfirmed": True})
-            assert confirmed["ok"] is True
+            server._handle_task_update(project["id"], task["id"], {"allowReviewerlessExecution": True})
+            started = server._handle_project_execution_project_start(project["id"], {"mode": "single"})
+            assert started["ok"] is True
 
             task = wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
                             if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") == "awaiting_user_acceptance"
@@ -2379,7 +2714,7 @@ def test_skipped_review_waits_for_acceptance_when_required():
             restore_store(old)
 
 
-def test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirmation():
+def test_project_start_preserves_dirty_confirmation_after_task_allows_reviewerless_execution():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         subprocess.run(["git", "init", "-q"], cwd=workspace, check=True)
         with open(os.path.join(workspace, "dirty.txt"), "w", encoding="utf-8") as f:
@@ -2392,21 +2727,25 @@ def test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirma
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
-            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "allowReviewerlessExecution": False,
+            })
 
             reviewer_confirm = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert reviewer_confirm["_status"] == 409
             assert reviewer_confirm["code"] == "reviewer_skip_confirmation_required"
 
-            dirty_confirm = server._handle_project_execution_project_start(project["id"], {"mode": "continuous", "skipReviewConfirmed": True})
+            server._handle_task_update(project["id"], task["id"], {"allowReviewerlessExecution": True})
+            dirty_confirm = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert dirty_confirm["_status"] == 409
             assert dirty_confirm["code"] == "dirty_worktree_confirmation_required"
             assert dirty_confirm["dirtyFingerprint"]
 
             started = server._handle_project_execution_project_start(project["id"], {
                 "mode": "continuous",
-                "skipReviewConfirmed": True,
                 "dirtyFingerprint": dirty_confirm["dirtyFingerprint"],
             })
             assert started["ok"] is True
@@ -2434,19 +2773,23 @@ def test_direct_task_start_supports_reviewer_skip_and_dirty_confirmation_chain()
         }
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultReviewerAgentId": None})
-            server._handle_task_update(project["id"], task["id"], {"reviewerAgentId": None})
+            server._handle_task_update(project["id"], task["id"], {
+                "reviewerAgentId": None,
+                "allowReviewerlessExecution": False,
+            })
 
             reviewer_confirm = server._handle_project_execution_start(project["id"], task["id"], {})
             assert reviewer_confirm["_status"] == 409
             assert reviewer_confirm["code"] == "reviewer_skip_confirmation_required"
 
-            dirty_confirm = server._handle_project_execution_start(project["id"], task["id"], {"skipReviewConfirmed": True})
+            server._handle_task_update(project["id"], task["id"], {"allowReviewerlessExecution": True})
+            dirty_confirm = server._handle_project_execution_start(project["id"], task["id"], {})
             assert dirty_confirm["_status"] == 409
             assert dirty_confirm["code"] == "dirty_worktree_confirmation_required"
 
             started = server._handle_project_execution_start(project["id"], task["id"], {
-                "skipReviewConfirmed": True,
                 "dirtyFingerprint": dirty_confirm["dirtyFingerprint"],
             })
             assert started["ok"] is True
@@ -2466,6 +2809,7 @@ def test_direct_task_start_requires_explicit_executor_agent():
         old = with_store(status_dir)
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             server._handle_project_update(project["id"], {"defaultExecutorAgentId": None, "defaultReviewerAgentId": None})
             server._handle_task_update(project["id"], task["id"], {
                 "assignee": None,
@@ -2474,7 +2818,7 @@ def test_direct_task_start_requires_explicit_executor_agent():
                 "allowReviewerlessExecution": True,
             })
 
-            started = server._handle_project_execution_start(project["id"], task["id"], {"skipReviewConfirmed": True})
+            started = server._handle_project_execution_start(project["id"], task["id"], {})
             assert started["_status"] == 409
             assert started["code"] == "executor_required"
             current_task = server._handle_project_get(project["id"])["project"]["tasks"][0]
@@ -3147,6 +3491,7 @@ def test_reviewer_needs_more_work_auto_reworks_and_rechecks_to_done_by_default()
         server._project_execution_call_reviewer = reviewer_call
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             task = complete_project_task_execution(project["id"], task["id"])
             started = server._handle_project_execution_review_start(project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]})
             assert started["ok"] is True
@@ -3194,6 +3539,7 @@ def test_reviewer_needs_more_work_blocks_after_three_rework_cycles():
         server._project_execution_call_reviewer = reviewer_call
         try:
             project, task = create_project_execution_project(workspace)
+            unmark_project_for_legacy_execution(project["id"])
             task = complete_project_task_execution(project["id"], task["id"])
             started = server._handle_project_execution_review_start(project["id"], task["id"], {"attemptId": task["evidence"]["attemptId"]})
             assert started["ok"] is True
@@ -3918,10 +4264,10 @@ if __name__ == "__main__":
     test_project_store_round_trip_and_legacy_defaults()
     test_workflow_chat_reads_project_execution_codex_attempt_reasoning()
     test_workflow_chat_recovers_active_attempt_after_workflow_timeout()
-    test_openclaw_workflow_chat_reads_gateway_prefixed_session_file()
+    test_openclaw_workflow_chat_reads_agent_owned_gateway_prefixed_attempt_session_file()
     test_workflow_chat_reads_project_execution_hermes_attempt_history_only()
     test_project_execution_hermes_call_uses_attempt_conversation_id()
-    test_project_execution_openclaw_executor_uses_attempt_session_id()
+    test_project_execution_openclaw_executor_uses_task_session_id()
     test_project_execution_openclaw_reviewer_uses_review_session_id()
     test_project_create_auto_workspace_and_store_round_trip()
     test_project_create_normal_and_manual_workspace_provenance()
@@ -3958,11 +4304,11 @@ if __name__ == "__main__":
     test_project_level_start_skips_done_columns_and_reports_no_eligible_task()
     test_project_pipeline_restart_requires_every_task_to_allow_retriggering()
     test_project_level_start_persists_reviewer_skip_confirmation_for_toolbar_state()
-    test_missing_reviewer_skip_completes_by_default_after_explicit_confirmation()
+    test_missing_reviewer_skip_completes_by_default_after_task_allows_reviewerless_execution()
     test_task_can_allow_missing_reviewer_without_confirmation_and_complete_by_default()
     test_skip_review_completion_uses_attempt_acceptance_snapshot()
     test_skipped_review_waits_for_acceptance_when_required()
-    test_project_start_preserves_dirty_confirmation_after_reviewer_skip_confirmation()
+    test_project_start_preserves_dirty_confirmation_after_task_allows_reviewerless_execution()
     test_direct_task_start_supports_reviewer_skip_and_dirty_confirmation_chain()
     test_direct_task_start_requires_explicit_executor_agent()
     test_continuous_flow_auto_continues_when_task_does_not_require_acceptance()

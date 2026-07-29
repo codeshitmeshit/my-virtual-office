@@ -120,7 +120,7 @@ def test_archive_manager_auto_create_idempotent_and_profile_files():
             with open(agent_md, "r", encoding="utf-8") as f:
                 assert "不承担普通执行任务" in f.read()
             with open(os.path.join(oc_home, "workspace-archive-manager", "AGENTS.md"), "r", encoding="utf-8") as f:
-                assert "vo-archive-manager" in f.read()
+                assert "<archive_manager_output" in f.read()
 
             second = server._handle_archive_room_overview()
             assert second["archiveManager"]["agentId"] == "archive-manager"
@@ -135,7 +135,7 @@ def test_archive_manager_profile_files_load_from_template():
     assert profile["IDENTITY.md"].count("档案管理员") == 1
     assert "🗄️" in profile["IDENTITY.md"]
     assert server._archive_manager_profile_template_version() in profile["IDENTITY.md"]
-    assert "vo-archive-manager" in profile["AGENTS.md"]
+    assert "<archive_manager_output" in profile["AGENTS.md"]
     assert "Manual Current-Project Maintenance Procedure" in profile["AGENTS.md"]
     assert "Field Rules" in profile["AGENTS.md"]
     assert "Use `status: needs_confirmation`" in profile["AGENTS.md"]
@@ -184,7 +184,7 @@ def test_archive_manager_existing_agent_repairs_profile_files():
             assert manager["status"] == "idle"
             assert manager["label"] == "已接入"
             with open(os.path.join(oc_home, "workspace-archive-manager", "AGENTS.md"), "r", encoding="utf-8") as f:
-                assert "vo-archive-manager" in f.read()
+                assert "<archive_manager_output" in f.read()
             with open(os.path.join(oc_home, "workspace-archive-manager", "agent.md"), "r", encoding="utf-8") as f:
                 assert "不承担普通执行任务" in f.read()
             create_calls = [c for c in calls if c[0] == "agents.create"]

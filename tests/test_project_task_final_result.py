@@ -75,7 +75,8 @@ def test_prior_stage_prompt_uses_compact_indexes_not_full_result_bodies():
 
     block = prior_stage_result_prompt_block(project, project["tasks"][1])
 
-    assert "PRIOR STAGE RESULT INDEX" in block
+    assert "<prior_stage_result_index>" in block
+    assert "<task_result" in block
     assert "Collect facts" in block
     assert "projects-md/project/tasks/collect/TASK_FINAL_RESULT.md" in block
     assert "Collected the facts." in block

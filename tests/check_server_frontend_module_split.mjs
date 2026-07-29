@@ -18,6 +18,7 @@ const requiredFiles = [
   'app/server_routes/agent_bridges.py',
   'app/server_routes/agents.py',
   'app/server_routes/skills.py',
+  'app/server_routes/mcp_registry.py',
   'app/server_routes/config.py',
   'app/server_routes/browser.py',
   'app/server_services/__init__.py',
@@ -30,6 +31,7 @@ const requiredFiles = [
   'app/server_services/agent_bridges.py',
   'app/server_services/agents.py',
   'app/server_services/skills.py',
+  'app/server_services/mcp_registry.py',
   'app/server_services/config_runtime.py',
   'app/server_services/browser_runtime.py',
   'app/settings-common.js',
@@ -49,6 +51,7 @@ const requiredFiles = [
   'app/agent-skills-management.js',
   'app/meetings-ui.js',
   'app/skills-library-ui.js',
+  'app/mcp-registry-ui.js',
   'app/game-bootstrap.js',
 ];
 
@@ -86,7 +89,7 @@ for (const marker of [
 }
 
 const routeInit = read('app/server_routes/__init__.py');
-for (const marker of ['ROUTE_MODULES', 'def dispatch', 'config', 'browser', 'notifications', 'providers', 'skills', 'agents', 'agent_bridges', 'meetings', 'archive_room', 'workflow', 'projects']) {
+for (const marker of ['ROUTE_MODULES', 'def dispatch', 'config', 'browser', 'notifications', 'providers', 'skills', 'mcp_registry', 'agents', 'agent_bridges', 'meetings', 'archive_room', 'workflow', 'projects']) {
   if (!routeInit.includes(marker)) throw new Error(`missing route init marker: ${marker}`);
 }
 
@@ -105,6 +108,7 @@ for (const [file, markers] of Object.entries({
   'app/server_routes/agent_bridges.py': ['/api/codex/runs', '/api/hermes/chat', '/api/claude-code/runs', 'from server_services import agent_bridges', 'service._handle_codex_chat'],
   'app/server_routes/agents.py': ['/api/agents', '/api/agent-workspace/', '/api/agent-platform-communications/send', 'from server_services import agents', 'service._handle_agent_create'],
   'app/server_routes/skills.py': ['/api/skills-library', '/api/skills-workshop', '/api/agent/', 'from server_services import skills', 'service._handle_skills_library_list'],
+  'app/server_routes/mcp_registry.py': ['/api/mcp-registry', 'from server_services import mcp_registry', 'service._handle_mcp_registry_list', 'service._handle_mcp_registry_register_openclaw'],
   'app/server_routes/config.py': ['/health', '/vo-config', '/setup/save', 'from server_services import config_runtime', 'service._handle_vo_config'],
   'app/server_routes/browser.py': ['/browser-status', '/browser-tabs', '/browser-viewer-status', 'from server_services import browser_runtime', 'service._handle_browser_status'],
 })) {
@@ -124,6 +128,7 @@ for (const [file, markers] of Object.entries({
   'app/server_services/agent_bridges.py': ['__all__', 'class ProviderRunBridge', 'def _handle_codex_chat', 'def _handle_hermes_chat', 'def _handle_claude_code_run_start', 'def _wrap_exports'],
   'app/server_services/agents.py': ['__all__', 'def _get_agent_workspace_payload', 'def _handle_agent_platform_comm_send', 'def _handle_agent_create', 'def _handle_agent_delete', 'def _wrap_exports'],
   'app/server_services/skills.py': ['__all__', 'def _handle_skill_list', 'def _handle_skills_library_list', 'def _handle_skill_workshop_action', 'def _wrap_exports'],
+  'app/server_services/mcp_registry.py': ['REGISTRY_FILENAME', 'def _handle_mcp_registry_list', 'def _handle_mcp_registry_save', 'def _handle_mcp_registry_register_openclaw'],
   'app/server_services/config_runtime.py': ['__all__', 'def _persist_setup_payload', 'def _build_safe_vo_config', 'def _handle_office_config_get', 'def _wrap_exports'],
   'app/server_services/browser_runtime.py': ['__all__', 'def _browser_viewer_probe', 'def _handle_browser_status', 'def _handle_browser_tabs', 'def _wrap_exports'],
 })) {
@@ -248,6 +253,7 @@ for (const marker of [
   'agent-skills-management.js',
   'meetings-ui.js',
   'skills-library-ui.js',
+  'mcp-registry-ui.js',
   'game-bootstrap.js',
 ]) {
   if (!indexHtml.includes(marker)) throw new Error(`index.html missing script: ${marker}`);

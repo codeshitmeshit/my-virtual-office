@@ -1,4 +1,4 @@
-"""Composition for the automatic HR collection, normalization, and assessment cycle."""
+"""Composition for the automatic HR collection and assessment cycle."""
 
 from __future__ import annotations
 
@@ -17,7 +17,6 @@ from services.hr_manual_daily_sync import (
 )
 from services.hr_reporting import (
     HRDailyReportCollector,
-    HRDailyReportNormalizer,
     HRReportingService,
 )
 from services.hr_repository import AgentRecord, HRRepository
@@ -44,7 +43,6 @@ class HRLifecycleStatePort(Protocol):
 class HRAutomaticReportingRuntime:
     loop: HRReconciliationLoop
     reporting: HRReportingService
-    normalizer: HRDailyReportNormalizer
     assessments: HRAssessmentOrchestrator
     team_sync: HRTeamSyncService
 
@@ -96,12 +94,6 @@ def build_hr_automatic_reporting(
             evidence_port,
         )
     )
-    normalizer = HRDailyReportNormalizer(
-        repository,
-        conversation,
-        clock=clock,
-        timeout_seconds=config.agent_timeout_seconds,
-    )
     assessments = HRAssessmentOrchestrator(
         repository,
         evidence,
@@ -122,7 +114,6 @@ def build_hr_automatic_reporting(
         config,
         repository,
         collector,
-        normalizer,
         assessments,
         clock=clock,
     )
@@ -167,7 +158,6 @@ def build_hr_automatic_reporting(
     return HRAutomaticReportingRuntime(
         loop,
         reporting,
-        normalizer,
         assessments,
         team_sync,
     )

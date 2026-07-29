@@ -728,6 +728,44 @@ def test_strict_maintenance_request_is_idempotent_and_applies_only_after_confirm
     assert markdown.load_all()["projects"][0]["title"] == "Managed title"
 
 
+def test_confirmed_maintenance_can_update_task_reviewerless_execution(tmp_path):
+    markdown, _, service = _service(tmp_path)
+    secret = "reviewerless-maintenance-secret"
+    draft = _draft()
+    draft["tasks"][0]["allowReviewerlessExecution"] = False
+    _create(service, draft=draft, request_secret_hash=hash_request_secret(secret))
+    materialized = service.confirm_and_materialize(
+        "request-1", expected_revision=1, confirmation_key="confirm:reviewerless",
+    )
+    project_id = materialized["project"]["id"]
+    task_id = materialized["project"]["tasks"][0]["id"]
+    assert materialized["project"]["tasks"][0]["allowReviewerlessExecution"] is False
+
+    requested = service.create_maintenance_request(
+        project_id,
+        {
+            "operation": "update_task",
+            "taskId": task_id,
+            "changes": {"allowReviewerlessExecution": True},
+        },
+        requesting_agent_id="author",
+        grant_secret=secret,
+        idempotency_key="maintenance:reviewerless-1",
+    )
+
+    stored_before_confirmation = markdown.load_all()["projects"][0]["tasks"][0]
+    assert stored_before_confirmation["allowReviewerlessExecution"] is False
+
+    applied = service.confirm_maintenance_request(
+        project_id,
+        requested["request"]["id"],
+        expected_revision=1,
+    )
+
+    assert applied["project"]["tasks"][0]["allowReviewerlessExecution"] is True
+    assert markdown.load_all()["projects"][0]["tasks"][0]["allowReviewerlessExecution"] is True
+
+
 def test_autonomous_protected_role_change_stays_pending_and_revalidates_actors(tmp_path):
     markdown, _, service = _service(tmp_path)
     draft = _draft()

@@ -565,15 +565,18 @@ class HRIntroductionSummarizer:
     def _prompt(ai_id: str, raw_response: str, previous_introduction: str) -> str:
         previous = previous_introduction or "(none)"
         return (
-            "Return only JSON with keys schemaVersion, introduction, supportingEvidence, "
-            "materialConflict, clarificationQuestion. schemaVersion must be 1. "
-            "supportingEvidence must contain exact excerpts from the Agent response. "
-            "Do not invent responsibilities. If the response materially conflicts with the "
-            "previous introduction, set materialConflict=true, keep introduction empty, and "
-            "provide one neutral clarificationQuestion.\n"
-            f"Agent AI ID: {ai_id}\n"
-            f"Previous introduction: {previous}\n"
-            f"Agent response:\n{raw_response}"
+            "<hr_introduction_summary_prompt>\n"
+            "  <output_contract>Return only JSON with keys schemaVersion, introduction, supportingEvidence, materialConflict, clarificationQuestion.</output_contract>\n"
+            "  <schema_rules>\n"
+            "    <rule>schemaVersion must be 1.</rule>\n"
+            "    <rule>supportingEvidence must contain exact excerpts from the Agent response.</rule>\n"
+            "    <rule>Do not invent responsibilities.</rule>\n"
+            "    <rule>If the response materially conflicts with the previous introduction, set materialConflict=true, keep introduction empty, and provide one neutral clarificationQuestion.</rule>\n"
+            "  </schema_rules>\n"
+            f"  <agent ai_id=\"{ai_id}\" />\n"
+            f"  <previous_introduction>{previous}</previous_introduction>\n"
+            f"  <agent_response>{raw_response}</agent_response>\n"
+            "</hr_introduction_summary_prompt>"
         )
 
     @staticmethod

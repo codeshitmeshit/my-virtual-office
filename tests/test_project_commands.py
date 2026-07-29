@@ -102,8 +102,24 @@ def test_create_project_and_task_preserve_contract_without_http():
     assert task["executorActor"] is None
     assert task["reviewerActor"] is None
     assert task["reviewerRecommendation"] == {}
+    assert task["allowReviewerlessExecution"] is True
     assert task_outcome.post_commit["columnTitle"] == "Backlog"
     assert repo.get(project["id"])["tasks"][0]["id"] == task["id"]
+
+
+def test_create_task_preserves_explicit_reviewerless_false():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+
+    outcome = project_commands.create_task(
+        project["id"],
+        {"title": "Needs reviewer", "allowReviewerlessExecution": False},
+        repository=repo,
+        **common,
+    )
+
+    assert outcome.result.status == 200
+    assert outcome.result.payload["task"]["allowReviewerlessExecution"] is False
 
 
 def test_create_task_uses_canonical_column_checklist_and_atomic_validation():

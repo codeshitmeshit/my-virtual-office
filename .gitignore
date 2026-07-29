@@ -1,6 +1,7 @@
 __pycache__/
 .venv/
 data/
+data.backup-*/
 *.pyc
 *.bak
 *.bak2

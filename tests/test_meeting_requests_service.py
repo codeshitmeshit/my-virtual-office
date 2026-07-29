@@ -59,6 +59,7 @@ def test_create_validates_and_deduplicates_unresolved_task_request():
     data = empty_data()
     assert create_command(data, {"id": "p1"}, {"id": "t1"}, request_body(goal=""), [], hooks())["code"] == "goal_required"
     created = create_pending(data)
+    assert data["requests"][created["id"]]["requestedContext"]["selectedContextIds"] == ["task:t1"]
     repeated = create_command(data, {"id": "p1"}, {"id": "t1"}, request_body(idempotencyKey="other"), [], hooks())
     assert repeated["idempotent"] is True and repeated["request"]["id"] == created["id"]
 
@@ -76,6 +77,77 @@ def test_confirm_atomically_creates_meeting_conversion_event_and_occupancy():
     assert result["ok"] is True and result["meetingId"] == "m1"
     assert data["requests"][request["id"]]["conversion"]["meetingId"] == "m1"
     assert data["meetings"]["m1"]["source"]["meetingRequestId"] == request["id"]
+
+
+def test_ai_request_resolution_policy_defaults_to_user_decision_only_for_p0():
+    non_p0 = empty_data()
+    non_p0_request = create_pending(non_p0)
+    non_p0_confirmed = confirm_command(
+        non_p0, non_p0_request["id"], {"confirmedBy": "user"},
+        project_title="Project",
+        lifecycle_defaults={
+            "meetingId": "m-non-p0", "preparingTimeoutSec": 300, "decisionWindowSec": 60,
+            "contextBudget": {}, "allowConflicts": False,
+        }, hooks=hooks(),
+    )
+    assert non_p0_confirmed["ok"] is True
+    assert non_p0["meetings"]["m-non-p0"]["resolutionPolicy"] == "moderator_decision"
+
+    p0 = empty_data()
+    p0_created = create_command(
+        p0, {"id": "p1", "title": "Project"}, {"id": "t1", "title": "Task"},
+        request_body(idempotencyKey="request-p0", urgency=5),
+        [{"id": "task:t1", "sourceKind": "task", "title": "Task", "summary": "Context"}],
+        hooks(),
+    )
+    p0_request = p0_created["request"]
+    p0_confirmed = confirm_command(
+        p0, p0_request["id"], {"confirmedBy": "user"},
+        project_title="Project",
+        lifecycle_defaults={
+            "meetingId": "m-p0", "preparingTimeoutSec": 300, "decisionWindowSec": 60,
+            "contextBudget": {}, "allowConflicts": False,
+        }, hooks=hooks(),
+    )
+    assert p0_confirmed["ok"] is True
+    assert p0["meetings"]["m-p0"]["resolutionPolicy"] == "user_decision"
+
+
+def test_confirm_uses_default_detailed_context_when_not_overridden():
+    data = empty_data(); request = create_pending(data)
+    result = confirm_command(
+        data, request["id"], {"confirmedBy": "user"},
+        project_title="Project",
+        lifecycle_defaults={
+            "meetingId": "m1", "preparingTimeoutSec": 300, "decisionWindowSec": 60,
+            "contextBudget": {}, "allowConflicts": False,
+        }, hooks=hooks(),
+    )
+    assert result["ok"] is True
+    assert "Context" in data["meetings"]["m1"]["context"]
+    assert data["requests"][request["id"]]["review"]["selectedContextIds"] == ["task:t1"]
+
+
+def test_explicit_empty_context_selection_is_respected():
+    data = empty_data()
+    result = create_command(
+        data, {"id": "p1", "title": "Project"}, {"id": "t1", "title": "Task"},
+        request_body(selectedContextIds=[]),
+        [{"id": "task:t1", "sourceKind": "task", "title": "Task", "summary": "Context"}],
+        hooks(),
+    )
+    request = result["request"]
+    assert data["requests"][request["id"]]["requestedContext"]["selectedContextIds"] == []
+    confirmed = confirm_command(
+        data, request["id"], {"confirmedBy": "user"},
+        project_title="Project",
+        lifecycle_defaults={
+            "meetingId": "m1", "preparingTimeoutSec": 300, "decisionWindowSec": 60,
+            "contextBudget": {}, "allowConflicts": False,
+        }, hooks=hooks(),
+    )
+    assert confirmed["ok"] is True
+    assert data["meetings"]["m1"]["context"] == ""
     assert data["events"]["m1"][0]["type"] == "meeting_created"
     assert data["occupancy"] == {"a1": "m1", "a2": "m1"}
     repeated = confirm_command(

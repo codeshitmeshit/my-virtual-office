@@ -5,7 +5,10 @@ so this mechanical split can preserve the existing module-level helpers and
 configuration while removing domain business bodies from server.py.
 """
 
+import re
 import sys
+
+from services.project_orchestration import active_task_ids, is_marked_project, orchestration_state
 
 __all__ = ['_project_execution_related', '_project_execution_notification_container', '_project_execution_open_url', '_project_execution_completed_task_count', '_scores_file', '_load_scores', '_save_scores', '_award_points', '_handle_scores_leaderboard', '_handle_score_award', '_project_execution_repair_acceptance_state', '_load_projects', '_save_projects', '_proj_uuid', '_proj_now', '_log_activity', '_project_cron_bindings_file', '_project_find', '_project_cron_reason_label', '_project_cron_target_snapshot', '_project_cron_normalize_history_status', '_project_cron_append_history', '_project_cron_alerts', '_project_agent_fields', '_project_cron_validate_project', '_project_cron_validate_schedule', '_project_cron_validate_target', '_project_cron_default_agent', '_project_cron_gateway_job_from_body', '_project_cron_extract_jobs', '_project_cron_extract_job_id', '_project_cron_task_title', '_project_cron_job_state', '_project_cron_enrich_item', '_handle_project_scheduled_cron_list', '_handle_project_scheduled_cron_all', '_handle_project_scheduled_cron_create', '_handle_project_scheduled_cron_update', '_handle_project_scheduled_cron_delete', '_project_cron_update_binding_status', '_project_execution_reopen_completed_task', '_handle_project_scheduled_cron_dispatch', '_handle_project_scheduled_cron_run', '_handle_projects_list', '_handle_project_get', '_handle_projects_templates', '_handle_project_report', '_project_workspace_slug', '_project_auto_workspace_root', '_project_create_auto_workspace', '_project_prepare_workspace', '_handle_project_create', '_handle_task_create', '_handle_task_comment', '_handle_project_from_template', '_handle_save_as_template', '_handle_project_update', '_handle_task_update', '_handle_columns_update', '_handle_tasks_reorder', '_handle_project_delete', '_handle_task_delete', '_project_execution_enabled', '_project_execution_redact', '_project_execution_compact_evidence_line', '_project_execution_allowed_roots', '_project_execution_validate_workspace', '_project_execution_git_snapshot', '_project_execution_resolve_roles', '_project_execution_resolve_start_roles', '_project_execution_find', '_project_execution_attempt', '_project_execution_active_task', '_project_execution_done_column_ids', '_project_execution_requires_user_acceptance', '_project_execution_attempt_requires_user_acceptance', '_project_execution_acceptance_checklist_complete', '_project_execution_column_locked', '_project_execution_can_complete_after_checklist_update', '_project_execution_start_mode', '_project_execution_is_startable_task', '_project_execution_next_task', '_project_execution_all_tasks_repeatable', '_project_execution_reset_project_tasks_for_restart', '_project_execution_clear_restart_bindings', '_project_execution_mark_done', '_project_execution_incomplete_checklist_feedback', '_project_execution_transient_failure_reason', '_project_execution_attempt_retry_count', '_project_execution_schedule_transient_retry', '_project_execution_continue_for_incomplete_checklist', '_project_execution_column_for_state', '_project_execution_sync_task_column', '_project_execution_move_task_to_column', '_project_execution_transition', '_project_execution_meeting_blocker_unresolved', '_project_execution_block_for_meeting_request', '_project_execution_update_meeting_blocker', '_project_execution_action_item_text', '_project_execution_action_item_description', '_project_execution_action_item_owner', '_project_execution_normalize_meeting_risks', '_project_execution_task_executor_id', '_project_execution_owner_matches', '_project_execution_meeting_action_key', '_project_execution_find_checklist_item', '_project_execution_acceptance_checklist', '_project_execution_seed_acceptance_checklist', '_project_execution_checklist_key', '_project_execution_reset_checklist_completion', '_project_execution_checklist_compact_key', '_project_execution_checklist_prefix', '_project_execution_checklist_ascii_tokens', '_project_execution_checklist_match_score', '_project_execution_find_checklist_update_target', '_project_execution_checklist_done_value', '_project_execution_result_checklist_updates', '_project_execution_checklist_update_key', '_project_execution_apply_checklist_updates', '_project_execution_result_meeting_discussion_points', '_project_execution_apply_meeting_discussion_points', '_project_execution_meeting_discussion_key', '_project_execution_meeting_record_key', '_project_execution_meeting_action_summaries', '_project_execution_upsert_meeting_record', '_project_execution_all_required_meeting_actions_done', '_project_execution_mark_meeting_actions_completed', '_project_execution_has_pending_meeting_actions', '_project_execution_apply_meeting_output_to_task', '_project_execution_apply_meeting_result', '_handle_project_execution_workspace_validate', '_artifact_kind_for_ext', '_artifact_normalize_relpath', '_artifact_safe_path', '_artifact_source_relpath', '_artifact_context_list', '_artifact_context_read', '_artifact_context_file_response', '_artifact_context_delete', '_artifact_context_delete_dir', '_project_artifact_source_records', '_project_artifact_context', '_handle_project_artifacts_list', '_handle_project_artifact_read', '_handle_project_artifact_file', '_handle_project_artifact_delete', '_project_execution_build_prompt', '_project_execution_test_evidence', '_project_execution_call_executor', '_project_execution_latest_attempt', '_project_execution_build_review_prompt', '_project_execution_call_reviewer', '_project_execution_review_feedback', '_project_execution_extract_json', '_project_execution_normalize_review', '_project_execution_run_review', '_project_execution_run_attempt', '_handle_project_execution_start', '_handle_project_execution_project_start', '_project_execution_schedule_continue', '_handle_project_execution_status', '_handle_project_execution_cancel', '_handle_project_execution_review_start', '_handle_project_execution_acceptance', '_handle_project_execution_meeting_blocker_action', '_handle_workflow_chat', '_handle_workflow_start', '_handle_workflow_stop', '_handle_workflow_auto_mode', '_handle_workflow_status', '_handle_review_check_update', '_handle_template_delete']
 
@@ -64,6 +67,11 @@ _hydrate()
 
 _PROJECT_RETURN_REFERENCES = {}
 _PROJECT_EXECUTION_BACKGROUND_THREADS = []
+_PROJECT_EXECUTION_MAX_TEXT = 12000
+_PROJECT_EXECUTION_MAX_EVIDENCE_LINE = 360
+_PROJECT_EXECUTION_SECRET_RE = re.compile(
+    r"(?i)(api[_-]?key|token|secret|password|authorization|cookie)\s*[:=]\s*([^\s]+)"
+)
 
 
 def _project_execution_launch_thread(target, args=()):
@@ -243,7 +251,7 @@ def _project_execution_repair_acceptance_state(data):
                         project["activeTaskId"] = None
                         project["activeAgent"] = None
                         project["projectExecutionFlowActive"] = False
-                        if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete"}:
+                        if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete", "checklist_incomplete_rework_limit"}:
                             project["projectExecutionFlowStopReason"] = None
                 continue
             review = task.get("reviewResult") or {}
@@ -264,6 +272,8 @@ def _project_execution_repair_acceptance_state(data):
             task["activeAttemptId"] = None
             task["blockedReason"] = None
             task["lastError"] = None
+            task["blockedChecklistItems"] = []
+            task["reworkFeedback"] = None
             if done_col and done_col.get("id"):
                 task["columnId"] = done_col.get("id")
             if attempt and attempt.get("status") == "review_skipped_waiting_acceptance":
@@ -279,7 +289,7 @@ def _project_execution_repair_acceptance_state(data):
             task["stateHistory"] = task["stateHistory"][-100:]
             if project.get("workflowPhase") in {"awaiting_user_acceptance", "blocked_by_active_task", "blocked", "executing", "reworking", "reviewing", "execution_complete"} or project.get("activeTaskId") == task.get("id"):
                 project["workflowPhase"] = "done"
-            if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete"}:
+            if project.get("projectExecutionFlowStopReason") in {"awaiting_user_acceptance", "previous_execution_not_resumable", "checklist_incomplete", "checklist_incomplete_rework_limit"}:
                 project["projectExecutionFlowStopReason"] = None
             project["projectExecutionFlowActive"] = False
             project["workflowActive"] = False
@@ -879,7 +889,7 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
             data["projects"] = [project if p.get("id") == project_id else p for p in data.get("projects", [])]
             _save_projects(data)
         if _project_execution_enabled(project):
-            result = _handle_project_execution_start(project_id, task_id, {"by": "project-cron", "source": source, "skipReviewConfirmed": True})
+            result = _handle_project_execution_start(project_id, task_id, {"by": "project-cron", "source": source})
         else:
             result = _handle_workflow_start(project_id, {"autoMode": False})
         if reopened and isinstance(result, dict):
@@ -911,7 +921,7 @@ def _handle_project_scheduled_cron_dispatch(project_id, cron_id, source="manual"
             return {"ok": True, "status": "skipped", "reason": "project_all_tasks_completed", "projectId": project_id, "id": cron_id, "allCompleted": True, "cronDisabled": True}
 
         if _project_execution_enabled(project):
-            result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source, "skipReviewConfirmed": True})
+            result = _handle_project_execution_project_start(project_id, {"mode": project.get("projectExecutionStartMode") or "continuous", "by": "project-cron", "source": source})
         else:
             result = _handle_workflow_start(project_id, {"autoMode": True})
     if result.get("ok"):
@@ -998,7 +1008,25 @@ def _handle_project_get(project_id):
     project = PROJECT_STORE.get_project(project_id)
     if project is not None:
         repaired = _project_execution_repair_acceptance_state({"projects": [project], "templates": []})
-        return {"ok": True, "project": (repaired.get("projects") or [project])[0]}
+        project = (repaired.get("projects") or [project])[0]
+        if is_marked_project(project):
+            state = orchestration_state(project)
+            active_ids = list(active_task_ids(project))
+            active = bool(active_ids)
+            project.update({
+                "activeTaskIds": active_ids,
+                "activeTaskCount": len(active_ids),
+                "currentStage": state.get("currentStage"),
+                "orchestrationState": state.get("state"),
+                "pauseReason": state.get("pauseReason"),
+                "projectExecutionActive": active,
+                "projectExecutionPhase": (state.get("state") or "") if active else "idle",
+            })
+            project.pop("activeTaskId", None)
+            project.pop("activeAgent", None)
+            project.pop("projectExecutionFlowActive", None)
+            project.pop("projectExecutionFlowStopReason", None)
+        return {"ok": True, "project": project}
     return {"error": "Project not found", "_status": 404}
 
 def _handle_projects_templates():
@@ -1045,15 +1073,37 @@ def _handle_project_report(project_id):
         if t.get("dueDate"):
             timeline.append({"id": t["id"], "title": t["title"], "dueDate": t["dueDate"], "completedAt": t.get("completedAt"), "assignee": t.get("assignee"), "priority": t.get("priority", "medium")})
     timeline.sort(key=lambda x: x["dueDate"])
+    final_report = _project_final_report_payload(p)
     return {"ok": True, "report": {
         "projectId": project_id,
         "title": p.get("title", ""),
         "generatedAt": now_str,
+        "finalReport": final_report,
         "stats": {"total": total, "done": done, "inProgress": in_progress, "overdue": overdue},
         "columns": col_stats,
         "agentWorkload": agent_load,
         "timeline": timeline,
     }}
+
+def _project_final_report_payload(project):
+    orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), dict) else {}
+    final_report = orchestration.get("finalReport") if isinstance(orchestration.get("finalReport"), dict) else {}
+    path = str(final_report.get("markdownPath") or "").strip()
+    if not path:
+        return None
+    payload = dict(final_report)
+    try:
+        context = _project_artifact_context(project)
+        if context.get("ok"):
+            read = _artifact_context_read(context, path, allow_text=True, associated_only=True)
+            if read.get("ok"):
+                artifact = read.get("artifact") or {}
+                payload["content"] = artifact.get("content") or ""
+                payload["truncated"] = bool(artifact.get("truncated"))
+                payload["size"] = artifact.get("size")
+    except Exception:
+        pass
+    return payload
 
 def _project_workspace_slug(value):
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", str(value or "").strip().lower()).strip("-")
@@ -1231,7 +1281,7 @@ def _handle_task_create(project_id, body):
         "executorAgentId": default_executor_id,
         "reviewerAgentId": body.get("reviewerAgentId"),
         "requiresUserAcceptance": body.get("requiresUserAcceptance", False) is True,
-        "allowReviewerlessExecution": body.get("allowReviewerlessExecution", False) is True,
+        "allowReviewerlessExecution": body.get("allowReviewerlessExecution", True) is True,
         "scheduledRepeatEnabled": body.get("scheduledRepeatEnabled", False) is True,
         "executionState": "backlog",
         "activeAttemptId": None,
@@ -1333,7 +1383,7 @@ def _handle_project_from_template(body):
                 "executorAgentId": None,
                 "reviewerAgentId": None,
                 "requiresUserAcceptance": tt.get("requiresUserAcceptance", False) is True,
-                "allowReviewerlessExecution": tt.get("allowReviewerlessExecution", False) is True,
+                "allowReviewerlessExecution": tt.get("allowReviewerlessExecution", True) is True,
                 "scheduledRepeatEnabled": tt.get("scheduledRepeatEnabled", False) is True,
                 "executionState": "backlog",
                 "activeAttemptId": None,
@@ -2056,6 +2106,7 @@ def _project_execution_mark_done(project, task, actor, reason, attempt_id=None, 
                 {
                     "id": item.get("id") or "",
                     "text": item.get("text") or "",
+                    "evidence": item.get("evidence") or "",
                 }
                 for item in unfinished[:20]
             ],
@@ -2093,14 +2144,102 @@ def _project_execution_incomplete_checklist_feedback(done_result):
     for item in unfinished or []:
         if not isinstance(item, dict):
             continue
+        item_id = str(item.get("id") or "").strip()
         text = str(item.get("text") or "").strip()
         if text:
-            lines.append(f"- {text}")
+            prefix = f"[{item_id}] " if item_id else ""
+            lines.append(f"- {prefix}{text}")
     detail = "\n".join(lines) if lines else "- Review the task acceptance checklist and complete every unfinished item."
     return _project_execution_redact(
         "Acceptance checklist is incomplete. Continue executing the task until all acceptance checklist items are complete:\n"
         + detail
     )
+
+def _project_execution_review_item_details(task, checklist_item):
+    review = task.get("reviewResult") if isinstance(task.get("reviewResult"), dict) else {}
+    items = review.get("items") if isinstance(review.get("items"), list) else []
+    item_id = str(checklist_item.get("id") or "").strip()
+    item_text = str(checklist_item.get("text") or "").strip()
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        review_id = str(item.get("id") or item.get("checklistId") or item.get("itemId") or "").strip()
+        review_text = str(item.get("text") or item.get("summary") or "").strip()
+        if (item_id and review_id == item_id) or (item_text and review_text == item_text):
+            parts = []
+            status = str(item.get("status") or item.get("result") or item.get("outcome") or "").strip()
+            if status:
+                parts.append(f"reviewStatus={status}")
+            for key in ("reason", "rationale", "summary", "evidence", "detail"):
+                value = str(item.get(key) or "").strip()
+                if value and value not in parts:
+                    parts.append(value)
+            return "; ".join(parts)
+    return ""
+
+def _project_execution_unfinished_checklist_details(task, done_result):
+    raw_unfinished = done_result.get("unfinishedChecklist") if isinstance(done_result, dict) else []
+    checklist = _project_execution_acceptance_checklist(task)
+    by_id = {str(item.get("id") or "").strip(): item for item in checklist if isinstance(item, dict)}
+    details = []
+    for raw in raw_unfinished or []:
+        if not isinstance(raw, dict):
+            continue
+        item_id = str(raw.get("id") or "").strip()
+        checklist_item = by_id.get(item_id) or raw
+        text = str(checklist_item.get("text") or raw.get("text") or "").strip()
+        if not text:
+            continue
+        evidence = str(checklist_item.get("evidence") or raw.get("evidence") or "").strip()
+        review_detail = _project_execution_review_item_details(task, checklist_item)
+        line = f"- id={item_id or '(missing)'} text={text}"
+        missing_reasons = []
+        if evidence:
+            missing_reasons.append(f"currentEvidence={evidence}")
+        else:
+            missing_reasons.append("currentEvidence=empty")
+        if review_detail:
+            missing_reasons.append(f"lastReview={review_detail}")
+        line += "\n  Missing detail: " + " | ".join(missing_reasons)
+        details.append(line)
+    if not details:
+        return "- No unfinished checklist details were available; inspect the task checklist and complete every item."
+    return "\n".join(details[:20])
+
+def _project_execution_incomplete_checklist_rework_feedback(project, task, attempt_id, done_result):
+    feedback = _project_execution_incomplete_checklist_feedback(done_result)
+    attempt = _project_execution_attempt(task, attempt_id) if attempt_id else None
+    evidence = {}
+    if isinstance(attempt, dict) and isinstance(attempt.get("evidence"), dict):
+        evidence = attempt.get("evidence") or {}
+    elif isinstance(task.get("evidence"), dict):
+        evidence = task.get("evidence") or {}
+    changed_files = evidence.get("changedFiles") if isinstance(evidence.get("changedFiles"), list) else []
+    checklist = _project_execution_acceptance_checklist(task)
+    checklist_ids = [str(item.get("id") or "").strip() for item in checklist if isinstance(item, dict) and item.get("done") is not True and str(item.get("id") or "").strip()]
+    artifact_dir = ""
+    try:
+        from services.project_artifact_paths import artifact_prompt_run_directory
+
+        artifact_dir = artifact_prompt_run_directory(project, task)
+    except Exception:
+        artifact_dir = ""
+    diagnostics = [
+        "",
+        "Previous attempt did not satisfy the VO completion gate:",
+        f"- Provider status: {evidence.get('providerStatus') or 'unknown'}",
+        f"- Files changed according to VO: {', '.join(map(str, changed_files[:12])) if changed_files else 'none detected'}",
+        f"- Checklist updates applied: {'yes' if evidence.get('checklistUpdated') else 'no'}",
+        "Unfinished checklist details:",
+        _project_execution_unfinished_checklist_details(task, done_result),
+        "Required rework output:",
+        "- Create or update the concrete deliverable files needed by the unfinished checklist items.",
+        f"- Write the mandatory final artifact at `{artifact_dir}/TASK_FINAL_RESULT.md`." if artifact_dir else "- Write the mandatory `TASK_FINAL_RESULT.md` artifact.",
+        "- In the final fenced json block, include checklistUpdates for every unfinished item and set done=true only after verifying it.",
+    ]
+    if checklist_ids:
+        diagnostics.append(f"- Preserve these checklist id(s): {', '.join(checklist_ids[:12])}.")
+    return _project_execution_redact(feedback + "\n" + "\n".join(diagnostics))
 
 def _project_execution_transient_failure_reason(result):
     text = " ".join(str(result.get(key) or "") for key in ("error", "reply", "status")).lower() if isinstance(result, dict) else ""
@@ -2206,8 +2345,28 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
         _save_projects(data)
         return {**roles, "continued": False}
-    feedback = _project_execution_incomplete_checklist_feedback(done_result)
-    task["reworkCount"] = int(task.get("reworkCount") or 0) + 1
+    feedback = _project_execution_incomplete_checklist_rework_feedback(project, task, attempt_id, done_result)
+    prior_reworks = int(task.get("reworkCount") or 0)
+    if prior_reworks >= 3:
+        task["reworkCount"] = prior_reworks
+        task["blockedReason"] = "Acceptance checklist is still incomplete after three automatic rework cycles."
+        task["lastError"] = "checklist_incomplete_rework_limit"
+        task["reworkFeedback"] = feedback
+        _project_execution_transition(project, task, "blocked", actor or "system", task["blockedReason"], attempt_id)
+        project.update({
+            "workspaceStatus": workspace,
+            "workflowActive": False,
+            "workflowPhase": "blocked",
+            "activeTaskId": None,
+            "activeAgent": None,
+            "projectExecutionFlowActive": False,
+            "projectExecutionFlowStopReason": "checklist_incomplete_rework_limit",
+            "updatedAt": _proj_now(),
+        })
+        _save_projects(data)
+        _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
+        return {"ok": False, "continued": False, "status": "blocked", "error": task["blockedReason"]}
+    task["reworkCount"] = prior_reworks + 1
     task["blockedReason"] = None
     task["lastError"] = None
     task["reworkFeedback"] = feedback
@@ -2461,6 +2620,7 @@ def _project_execution_seed_acceptance_checklist(task, actor="system"):
             "text": text,
             "done": False,
             "source": "project_execution_acceptance",
+            "generatedBy": "project_execution_seed",
             "createdAt": now,
             "createdBy": actor or "system",
         })
@@ -2607,10 +2767,60 @@ def _project_execution_checklist_update_key(update):
     text_key = _project_execution_checklist_compact_key(update.get("text"))
     return "checklist-" + hashlib.sha256(text_key.encode("utf-8")).hexdigest()[:12] if text_key else _proj_uuid()
 
+def _project_execution_result_text_for_checklist_inference(result):
+    chunks = []
+    for key in ("reply", "summary", "executorSummary", "finalResult", "rationale"):
+        value = result.get(key)
+        if isinstance(value, str) and value.strip():
+            chunks.append(value)
+    for key in ("changedFiles", "modifiedFiles", "artifacts", "deliverables"):
+        value = result.get(key)
+        if isinstance(value, list):
+            chunks.extend(str(item) for item in value if item)
+    return "\n".join(chunks)
+
+def _project_execution_can_infer_checklist_done(item, result):
+    if result.get("ok") is not True:
+        return False
+    item_text = str(item.get("text") or "").strip()
+    if not item_text:
+        return False
+    evidence = _project_execution_result_text_for_checklist_inference(result)
+    compact_item = _project_execution_checklist_compact_key(item_text)
+    compact_evidence = _project_execution_checklist_compact_key(evidence)
+    if not compact_evidence:
+        return False
+    if "风险" in compact_item and "裁决" in compact_item:
+        has_verdict = any(term in compact_evidence for term in ("风险裁决", "裁决", "通过", "调整", "否决", "阻止"))
+        has_limits = any(term in compact_evidence for term in ("风险限制", "限制", "风控", "风险偏好", "止损", "仓位"))
+        return has_verdict and has_limits
+    if len(compact_item) >= 8 and compact_item in compact_evidence:
+        return True
+    return False
+
+def _project_execution_apply_inferred_checklist_updates(checklist, result, now):
+    changed = False
+    for item in checklist:
+        if item.get("done") is True:
+            continue
+        if not _project_execution_can_infer_checklist_done(item, result):
+            continue
+        item["done"] = True
+        item["completedAt"] = now
+        item["completedBy"] = "executor"
+        item["completionEvidence"] = "Inferred from executor output because the deliverable matched the checklist but checklistUpdates were missing."
+        changed = True
+    return changed
+
 def _project_execution_apply_checklist_updates(task, result):
     checklist = _project_execution_acceptance_checklist(task)
-    allow_create = not checklist
+    generated_seed_items = [
+        item for item in checklist
+        if item.get("generatedBy") == "project_execution_seed" and item.get("done") is not True
+    ]
+    allow_create = not checklist or bool(generated_seed_items)
     changed = False
+    created_from_updates = False
     now = _proj_now()
     for update in _project_execution_result_checklist_updates(result):
         item = _project_execution_find_checklist_update_target(checklist, update)
@@ -2620,11 +2830,13 @@ def _project_execution_apply_checklist_updates(task, result):
                 "text": update.get("text"),
                 "done": False,
                 "source": "project_execution_acceptance",
+                "generatedBy": "project_execution_checklist_planner" if update.get("done") is False else "executor_checklist_update",
                 "createdAt": now,
             }
             task.setdefault("checklist", []).append(item)
             checklist.append(item)
             changed = True
+            created_from_updates = True
         if not item:
             continue
         if update.get("done") is True and item.get("done") is not True:
@@ -2634,6 +2846,18 @@ def _project_execution_apply_checklist_updates(task, result):
             if update.get("evidence"):
                 item["completionEvidence"] = update["evidence"]
             changed = True
+    if created_from_updates and generated_seed_items:
+        generated_ids = {str(item.get("id") or "") for item in generated_seed_items}
+        task["checklist"] = [
+            item for item in task.get("checklist", [])
+            if not (
+                item.get("generatedBy") == "project_execution_seed"
+                and str(item.get("id") or "") in generated_ids
+            )
+        ]
+        changed = True
+    if not changed:
+        changed = _project_execution_apply_inferred_checklist_updates(checklist, result, now)
     return changed
 
 def _project_execution_result_meeting_discussion_points(result):
@@ -3092,7 +3316,7 @@ def _artifact_context_list(context, allowed_extensions=None, associated_only=Fal
     artifacts.sort(key=lambda item: (item.get("modifiedAt") or "", item.get("path") or ""), reverse=True)
     return {"ok": True, "artifacts": artifacts, "truncated": truncated}
 
-def _artifact_context_read(context, rel_path, allow_text=False):
+def _artifact_context_read(context, rel_path, allow_text=False, associated_only=False):
     root = os.path.realpath(context.get("root") or "")
     if not root or not os.path.isdir(root):
         return {"error": "Artifact root is not accessible", "_status": 409}
@@ -3107,6 +3331,9 @@ def _artifact_context_read(context, rel_path, allow_text=False):
         return {"error": "Only text artifacts can be read inline" if allow_text else "Only Markdown artifacts can be read inline", "_status": 415}
     if not os.path.isfile(full_path):
         return {"error": "Artifact not found", "_status": 404}
+    sources_by_path = context.get("sourcesByPath") or {}
+    if associated_only and not sources_by_path.get(rel):
+        return {"error": "Artifact is not associated with this project", "_status": 403}
     try:
         size = os.path.getsize(full_path)
         with open(full_path, "rb") as f:
@@ -3252,14 +3479,81 @@ def _project_artifact_source_records(project):
             if not any((item.get("taskId"), item.get("attemptId"), item.get("agentId"), item.get("providerKind"), item.get("capturedAt")) == identity for item in records):
                 records.append(record)
 
+    def final_result_source_paths(task):
+        paths = []
+        final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
+        markdown_path = str(final_result.get("markdownPath") or "").strip()
+        if markdown_path:
+            paths.append(markdown_path)
+        try:
+            from services.project_artifact_paths import task_final_result_workspace_relative_path, task_final_result_workspace_task_directory
+
+            computed_path = task_final_result_workspace_relative_path(project, task)
+            if computed_path:
+                paths.append(computed_path)
+            task_dir = task_final_result_workspace_task_directory(project, task)
+        except Exception:
+            task_dir = ""
+        if task_dir and workspace_root:
+            full_dir, safe_dir = _artifact_safe_path(workspace_root, task_dir)
+            if full_dir and os.path.isdir(full_dir):
+                try:
+                    for run_name in os.listdir(full_dir):
+                        candidate = os.path.join(full_dir, run_name, "TASK_FINAL_RESULT.md")
+                        if os.path.isfile(candidate):
+                            paths.append(f"{safe_dir}/{run_name}/TASK_FINAL_RESULT.md")
+                except OSError:
+                    pass
+        seen = set()
+        result = []
+        for path in paths:
+            key = str(path or "").strip()
+            if key and key not in seen:
+                seen.add(key)
+                result.append(key)
+        return result
+
+    def add_final_result_sources(task, evidence):
+        final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
+        for markdown_path in final_result_source_paths(task):
+            source_evidence = dict(evidence) if isinstance(evidence, dict) else {}
+            source_evidence["changedFiles"] = [markdown_path]
+            if final_result.get("sourceAttemptId") and markdown_path == str(final_result.get("markdownPath") or "").strip():
+                source_evidence["attemptId"] = final_result.get("sourceAttemptId")
+            if final_result.get("generatedAt") and markdown_path == str(final_result.get("markdownPath") or "").strip():
+                source_evidence["capturedAt"] = final_result.get("generatedAt")
+            add_sources(task, source_evidence)
+
+    def add_project_final_report_source():
+        orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), dict) else {}
+        final_report = orchestration.get("finalReport") if isinstance(orchestration.get("finalReport"), dict) else {}
+        markdown_path = str(final_report.get("markdownPath") or "").strip()
+        if not markdown_path:
+            return
+        rel = _artifact_source_relpath(workspace_root, markdown_path)
+        if os.path.splitext(rel)[1].lower() not in _ARTIFACT_ALLOWED_EXTENSIONS:
+            return
+        full_path, safe_rel = _artifact_safe_path(workspace_root, rel)
+        if not full_path or not os.path.isfile(full_path):
+            return
+        sources_by_path.setdefault(safe_rel, []).append({
+            "sourceType": "project_final_report",
+            "contextType": "project",
+            "projectId": project.get("id"),
+            "projectTitle": project.get("title", ""),
+            "capturedAt": final_report.get("generatedAt") or orchestration.get("completedAt") or "",
+        })
+
     for task in project.get("tasks", []):
         evidence = task.get("evidence") or {}
         if isinstance(evidence, dict):
             add_sources(task, evidence)
+        add_final_result_sources(task, evidence)
         for attempt in task.get("attempts") or []:
             attempt_evidence = attempt.get("evidence") or {}
             if isinstance(attempt_evidence, dict):
                 add_sources(task, attempt_evidence, attempt)
+    add_project_final_report_source()
     for rel, records in sources_by_path.items():
         records.sort(key=lambda item: item.get("capturedAt") or "", reverse=True)
         sources_by_path[rel] = records[:20]
@@ -3314,7 +3608,9 @@ def _handle_project_artifact_read(project_id, query_string=""):
     params = urllib.parse.parse_qs(query_string or "")
     rel_path = (params.get("path") or [""])[0]
     allow_text = (params.get("archive") or [""])[0] in ("1", "true", "yes")
-    return _artifact_context_read(context, rel_path, allow_text=allow_text)
+    return _artifact_context_read(
+        context, rel_path, allow_text=allow_text, associated_only=True,
+    )
 
 def _handle_project_artifact_file(project_id, query_string=""):
     _, project, _ = _project_execution_find(project_id)
@@ -3347,6 +3643,20 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
     archive_context = _archive_context_prompt_block(project, task)
     try:
+        from services.project_artifact_paths import artifact_prompt_run_directory
+
+        artifact_run_dir = artifact_prompt_run_directory(project, {**task, "finalResult": {"sourceAttemptId": attempt.get("id")}, "attempts": [attempt]})
+    except Exception:
+        artifact_run_dir = ""
+    artifact_run_instruction = (
+        "<artifact_run_instruction>\n"
+        f"  <run_directory>{artifact_run_dir}/</run_directory>\n"
+        "  <rule>This is a reusable/re-entrant project run. Write new Markdown artifacts under the run directory; do not overwrite artifacts from earlier runs.</rule>\n"
+        "</artifact_run_instruction>\n"
+        if artifact_run_dir
+        else ""
+    )
+    try:
         from services.project_task_final_result import prior_stage_result_prompt_block, task_final_result_prompt_instructions
 
         prior_stage_context = prior_stage_result_prompt_block(project, task)
@@ -3354,8 +3664,9 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
     except Exception:
         prior_stage_context = ""
         final_result_instructions = (
-            "TASK FINAL RESULT REQUIREMENT:\n"
-            "- Include a concise final conclusion, changed files/artifacts, tests, risks, and notes for later stages.\n"
+            "<task_final_result_requirement>\n"
+            "  <rule>Include a concise final conclusion, changed files/artifacts, tests, risks, and notes for later stages.</rule>\n"
+            "</task_final_result_requirement>\n"
         )
     meeting_action_block = ""
     if attempt.get("meetingActionPhase"):
@@ -3373,36 +3684,47 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
             if isinstance(decision, dict) and decision.get("decision"):
                 decision_lines.append(f"- {decision.get('decision')}")
         meeting_action_block = (
-            "\nMEETING ACTION ITEM PHASE:\n"
-            "Complete ONLY the meeting-created action items listed below. Do not continue the original task yet.\n"
-            "After completing them, return a concise summary of what was done and any remaining risk.\n"
-            "Pending meeting action items:\n"
+            "\n<meeting_action_item_phase>\n"
+            "  <rule>Complete ONLY the meeting-created action items listed below. Do not continue the original task yet.</rule>\n"
+            "  <rule>After completing them, return a concise summary of what was done and any remaining risk.</rule>\n"
+            "  <pending_items>\n"
             + ("\n".join(action_lines) if action_lines else "- No pending meeting action items")
-            + "\nMeeting decision context:\n"
+            + "\n  </pending_items>\n"
+            + "  <meeting_decision_context>\n"
             + ("\n".join(decision_lines) if decision_lines else "- No meeting decision context")
-            + "\n"
+            + "\n  </meeting_decision_context>\n"
+            + "</meeting_action_item_phase>\n"
         )
     return (
-        "You are the execution agent for a Virtual Office project task.\n"
-        f"WORKSPACE: {workspace}\nWork only inside this workspace. Do not review or mark the task complete.\n"
-        "EXPECTED WORKFLOW:\n"
-        "1. First read the task and determine what content or deliverable must be produced. Write the task/deliverable acceptance criteria into the task checklist. The checklist is only for deliverable acceptance criteria, not a meeting action-item queue. If the task checklist is empty, include the created acceptance criteria in checklistUpdates and, when possible, persist them with PUT /api/projects/{projectId}/tasks/{taskId}.\n"
-        "2. Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.\n"
-        "3. Before finishing, inspect whether every checklist item is complete. Mark completed checklist items done; if any item is unfinished, continue working until it is complete.\n"
+        "<project_execution_prompt>\n"
+        "  <role>You are the execution agent for a Virtual Office project task.</role>\n"
+        f"  <workspace>{workspace}</workspace>\n"
+        "  <boundary>Work only inside this workspace. Do not review or mark the task complete.</boundary>\n"
+        "<workflow>\n"
+        "  <step id=\"read-checklist\">Read the task and follow the acceptance checklist shown below. Write the task/deliverable acceptance criteria into the task checklist via checklistUpdates. Treat the checklist as the task's deliverable acceptance criteria, not a meeting action-item queue. Do not redefine the checklist unless the checklist is explicitly empty; if it is empty, include concrete acceptance criteria in checklistUpdates. The orchestration service will persist checklistUpdates from your final response; do not call the project API to persist checklist changes yourself.</step>\n"
+        f"  <step id=\"execute-task\">Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{project.get('id', '')}/tasks/{task.get('id', '')}/meeting-requests. Include urgency and resolutionPolicy in the request: P0 uses urgency 5 with resolutionPolicy \"user_decision\"; every non-P0 meeting uses urgency 1-4 with resolutionPolicy \"moderator_decision\" so the AI moderator decides disagreements. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.</step>\n"
+        "  <step id=\"fill-back-checklist\">After executing the task, fill back the checklist in your final checklistUpdates. Inspect every checklist item, preserve its id/text, set done=true only after concrete verification, and provide non-empty evidence. If any item is unfinished, continue working until it is complete before finalizing.</step>\n"
+        "</workflow>\n"
+        f"{artifact_run_instruction}"
         f"{final_result_instructions}"
-        "FINAL RESPONSE FORMAT (strict):\n"
-        "- First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.\n"
-        "- Then output exactly one fenced ```json block containing a single object with these optional fields: checklistUpdates, meetingDiscussionPoints, tests.\n"
-        "- Do not print raw JSON outside the fenced json block. Do not put escaped JSON inside the Markdown summary.\n"
-        "- tests must be an array of short strings only, each under 180 characters. Do not put full logs, full API responses, raw tool output, source material, or nested objects in tests.\n"
-        "- checklistUpdates is an array of {id, text, done, evidence}; set done=true only for checklist items you actually verified as complete.\n"
-        "- meetingDiscussionPoints is an array of {kind, title, text, meetingId, requestId} for meeting conclusions, risks, and discussion notes that belong in the task details.\n\n"
-        f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
-        f"PROJECT_ID: {project.get('id', '')}\nTASK_ID: {task.get('id', '')}\nTASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\nATTEMPT: {attempt.get('id')}\n"
-        f"REWORK FEEDBACK: {rework_feedback}\nCHECKLIST:\n{checklist_text}\n"
+        "<final_response>\n"
+        "  <summary>First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.</summary>\n"
+        "  <json_block>Then output exactly one fenced ```json block containing a single object. For a regular task, checklistUpdates is REQUIRED and must be a non-empty array; it must include every acceptance checklist item with its final status. meetingDiscussionPoints and tests are optional.</json_block>\n"
+        "  <json_rules>Do not print raw JSON outside the fenced json block. Do not put escaped JSON inside the Markdown summary. tests must be an array of short strings only, each under 180 characters. Do not put full logs, full API responses, raw tool output, source material, or nested objects in tests.</json_rules>\n"
+        "  <checklist_updates>checklistUpdates is an array of {id, text, done, evidence}; preserve the checklist IDs shown below. If no checklist was supplied, create concrete acceptance criteria with stable short IDs. Set done=true only for items you actually verified as complete, and write concrete evidence that names the delivered content, file, result, or verification.</checklist_updates>\n"
+        "  <example>{\"checklistUpdates\":[{\"id\":\"deliverable\",\"text\":\"Produce the requested deliverable\",\"done\":true,\"evidence\":\"Verified output\"}],\"tests\":[\"verification passed\"]}</example>\n"
+        "  <meeting_discussion_points>meetingDiscussionPoints is an array of {kind, title, text, meetingId, requestId} for meeting conclusions, risks, and discussion notes that belong in the task details.</meeting_discussion_points>\n"
+        "</final_response>\n\n"
+        "<task_context>\n"
+        f"  <project id=\"{project.get('id', '')}\" title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
+        f"  <task id=\"{task.get('id', '')}\" title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
+        f"  <rework_feedback>{rework_feedback}</rework_feedback>\n"
+        f"  <checklist>\n{checklist_text}\n  </checklist>\n"
+        "</task_context>\n"
         f"{prior_stage_context}"
         f"{meeting_action_block}"
         f"{archive_context}\n"
+        "</project_execution_prompt>\n"
     )
 
 def _project_execution_test_evidence(result):
@@ -3458,7 +3780,7 @@ def _project_execution_call_executor(executor, prompt, workspace, attempt_id, pr
         return _handle_hermes_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "fromType": "agent"})
     if provider_kind == "claude-code":
         return _handle_claude_code_chat({"agentId": agent_id, "message": prompt, "conversationId": attempt_id, "timeoutSec": timeout, "workspace": workspace, "fromType": "agent"})
-    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=attempt_id or task_id)
+    reply = _wf_call_agent(agent_id, prompt, timeout=timeout, project_id=project_id, task_id=task_id or attempt_id)
     reply_text = str(reply or "")
     delivered_only = reply_text.startswith("[DELIVERED]")
     ok = bool(reply) and not reply_text.startswith("[ERROR]") and not delivered_only
@@ -3488,17 +3810,20 @@ def _project_execution_build_review_prompt(project, task, attempt):
     tests = "\n".join(f"- {line}" for line in (evidence.get("testResults") or [])[:50]) or "- No test evidence reported"
     feedback = task.get("reworkFeedback") or ""
     return (
-        "You are the independent read-only reviewer for a Virtual Office Project Execution task.\n"
-        "Review only the evidence below. Do not modify files, run tools that write files, or mark the task done.\n"
-        "The checklist contains deliverable acceptance criteria only; meeting action items and risks are context, not acceptance checklist items.\n"
-        "Return one JSON object with fields: status, summary, rationale, items.\n"
-        "status must be one of: pass, needs_more_work, blocked.\n\n"
-        f"PROJECT: {project.get('title', '')}\nPROJECT DESCRIPTION: {project.get('description', '')}\n"
-        f"TASK: {task.get('title', '')}\nTASK DESCRIPTION: {task.get('description', '')}\n"
-        f"ATTEMPT: {attempt.get('id')}\nPRIOR USER FEEDBACK: {feedback}\nCHECKLIST:\n{checklist_text}\n\n"
-        f"EXECUTOR SUMMARY:\n{_project_execution_redact(evidence.get('executorSummary') or '')}\n\n"
-        f"CHANGED FILES:\n{changed}\n\nTEST EVIDENCE:\n{tests}\n\n"
-        f"PROVIDER STATUS: {evidence.get('providerStatus') or ''}\nERROR: {_project_execution_redact(evidence.get('error') or '')}\n"
+        "<project_execution_review_prompt>\n"
+        "  <role>You are the independent read-only reviewer for a Virtual Office Project Execution task.</role>\n"
+        "  <review_rules>Review only the evidence below. Do not modify files, run tools that write files, or mark the task done. The checklist contains deliverable acceptance criteria only; meeting action items and risks are context, not acceptance checklist items.</review_rules>\n"
+        "  <output_contract>Return one JSON object with fields: status, summary, rationale, items. status must be one of: pass, needs_more_work, blocked.</output_contract>\n"
+        f"  <project title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
+        f"  <task title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
+        f"  <prior_user_feedback>{feedback}</prior_user_feedback>\n"
+        f"  <checklist>\n{checklist_text}\n  </checklist>\n"
+        f"  <executor_summary>{_project_execution_redact(evidence.get('executorSummary') or '')}</executor_summary>\n"
+        f"  <changed_files>\n{changed}\n  </changed_files>\n"
+        f"  <test_evidence>\n{tests}\n  </test_evidence>\n"
+        f"  <provider_status>{evidence.get('providerStatus') or ''}</provider_status>\n"
+        f"  <error>{_project_execution_redact(evidence.get('error') or '')}</error>\n"
+        "</project_execution_review_prompt>\n"
     )
 
 def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600):
@@ -3817,7 +4142,7 @@ def _handle_project_execution_start(project_id, task_id, body):
     roles = _project_execution_resolve_start_roles(
         project,
         task,
-        allow_skip_reviewer=bool(body.get("skipReviewConfirmed")) or task.get("allowReviewerlessExecution") is True,
+        allow_skip_reviewer=task.get("allowReviewerlessExecution") is True,
     )
     if not roles.get("ok"):
         payload = {**roles, "_status": 409}
@@ -3985,6 +4310,28 @@ def _handle_project_execution_status(project_id, task_id=None):
     data, project, task = _project_execution_find(project_id, task_id)
     if not project or (task_id and not task):
         return {"error": "Project or task not found", "_status": 404}
+    if is_marked_project(project):
+        state = orchestration_state(project)
+        phase = str(state.get("state") or "draft")
+        active_ids = list(active_task_ids(project))
+        active = bool(active_ids)
+        visible_phase = phase if active else "idle"
+        return {
+            "ok": True,
+            "active": active,
+            "phase": visible_phase,
+            "currentTaskId": active_ids[0] if len(active_ids) == 1 else None,
+            "activeTaskIds": active_ids,
+            "startMode": None,
+            "flowActive": active,
+            "flowStopReason": state.get("pauseReason"),
+            "task": task,
+            "executionModel": project.get("executionModel"),
+            "orchestration": state,
+            "orchestrationState": phase,
+            "currentStage": state.get("currentStage"),
+            "runId": state.get("currentRunId"),
+        }
     targets = [task] if task else project.get("tasks", [])
     changed = False
     for item in targets:

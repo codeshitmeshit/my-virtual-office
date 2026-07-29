@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import importlib.util
+import inspect
 import os
 import sys
 import tempfile
@@ -107,6 +108,51 @@ def test_project_task_session_behavior_is_unchanged(monkeypatch, server_module):
     expected = server._wf_task_session_key("adam", "project-1", "task-1")
     assert server._wf_call_agent("adam", "work", project_id="project-1", task_id="task-1") == "ok"
     assert calls == [expected]
+
+
+def test_openclaw_gateway_http_uses_agent_owned_session_key(monkeypatch, server_module):
+    server = server_module
+    captured = {}
+
+    class Response:
+        headers = {"Content-Type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"choices":[{"message":{"content":"ok"}}]}'
+
+    def fake_urlopen(request, timeout=0):
+        captured["headers"] = dict(request.header_items())
+        captured["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(server, "_get_gateway_token", lambda: "token")
+    monkeypatch.setattr(server.urllib.request, "urlopen", fake_urlopen)
+
+    reply = server._wf_call_agent_http(
+        "adam",
+        "hello",
+        5,
+        session_key="agent-adam-openai-wf-project-task",
+    )
+
+    header = next(
+        value
+        for key, value in captured["headers"].items()
+        if key.lower() == "x-openclaw-session-key"
+    )
+    assert reply == "ok"
+    assert header == "agent:adam:agent-adam-openai-wf-project-task"
+
+
+def test_openclaw_gateway_ws_normalizes_session_key_before_send(server_module):
+    source = inspect.getsource(server_module._wf_call_agent_ws)
+    assert 'session_key = _openclaw_gateway_session_key(agent_id, session_key or "main")' in source
 
 
 def test_conversation_service_has_no_gateway_auth_or_sse_dependency():

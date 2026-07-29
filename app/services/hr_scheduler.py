@@ -13,10 +13,8 @@ from services.hr_config import HRConfig
 from services.hr_assessments import AssessmentProcessingResult, HRAssessmentOrchestrator
 from services.hr_reporting import (
     HRDailyReportCollector,
-    HRDailyReportNormalizer,
     HRReportingService,
     ReportCollectionResult,
-    ReportNormalizationResult,
     ReportingCycleResult,
 )
 from services.hr_repository import DailyCycleRecord, HRRepository
@@ -54,7 +52,7 @@ class WorkflowProcessingSummary:
     deferred: int
     exhausted: int
     results: tuple[
-        ReportCollectionResult | ReportNormalizationResult | AssessmentProcessingResult,
+        ReportCollectionResult | AssessmentProcessingResult,
         ...,
     ]
 
@@ -63,7 +61,6 @@ class WorkflowProcessingSummary:
 class ReconciliationTickResult:
     schedule: SchedulerReconciliation | None
     reports: WorkflowProcessingSummary | None
-    normalizations: WorkflowProcessingSummary | None
     assessments: WorkflowProcessingSummary | None
 
 
@@ -174,7 +171,7 @@ class HRScheduler:
             raise HRSchedulerValidationError("schedule settings are invalid")
         return replace(
             self._config,
-            scheduler_enabled=self._config.scheduler_enabled and settings.enabled,
+            scheduler_enabled=settings.enabled,
             daily_time=settings.daily_time,
         )
 
@@ -224,7 +221,6 @@ class HRWorkflowProcessor:
         config: HRConfig,
         repository: HRRepository,
         reports: HRDailyReportCollector,
-        normalizer: HRDailyReportNormalizer,
         assessments: HRAssessmentOrchestrator,
         *,
         clock: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
@@ -237,8 +233,6 @@ class HRWorkflowProcessor:
             raise HRSchedulerValidationError("repository must be an HRRepository")
         if not isinstance(reports, HRDailyReportCollector):
             raise HRSchedulerValidationError("report collector is invalid")
-        if not isinstance(normalizer, HRDailyReportNormalizer):
-            raise HRSchedulerValidationError("report normalizer is invalid")
         if not isinstance(assessments, HRAssessmentOrchestrator):
             raise HRSchedulerValidationError("assessment orchestrator is invalid")
         capacity = config.max_workers * 4 if queue_capacity is None else queue_capacity
@@ -253,7 +247,6 @@ class HRWorkflowProcessor:
         self._config = config
         self._repository = repository
         self._reports = reports
-        self._normalizer = normalizer
         self._assessments = assessments
         self._clock = clock
         # The loop runtime enforces the automatic scheduler switch. Manual cycle
@@ -342,55 +335,6 @@ class HRWorkflowProcessor:
             tuple(results),
         )
 
-    def process_normalizations(
-        self,
-        cycle_id: str,
-    ) -> WorkflowProcessingSummary:
-        """Normalize every raw, not-yet-normalized report with bounded concurrency."""
-        if not self._active():
-            return WorkflowProcessingSummary("disabled", 0, 0, 0, ())
-        cycle = self._repository.get_daily_cycle(cycle_id)
-        if cycle is None:
-            raise HRSchedulerValidationError("daily cycle does not exist")
-        ranked = []
-        for ai_id in cycle.roster_snapshot:
-            report = self._repository.get_daily_report(ai_id, cycle.local_date)
-            if (
-                report is not None
-                and report.raw_response is not None
-                and report.normalized is None
-            ):
-                priority = 1 if report.submission_state == "normalization_failed" else 0
-                ranked.append((priority, report.updated_at, ai_id))
-        candidates = [item[2] for item in sorted(ranked)]
-        accepted = candidates[: self._queue_capacity]
-        deferred = len(candidates) - len(accepted)
-        if not accepted:
-            return WorkflowProcessingSummary("idle", 0, deferred, 0, ())
-        results = []
-        with ThreadPoolExecutor(
-            max_workers=min(self._config.max_workers, len(accepted)),
-            thread_name_prefix="hr-normalize",
-        ) as executor:
-            futures = {
-                executor.submit(
-                    self._normalizer.normalize,
-                    (ai_id,),
-                    local_date=cycle.local_date,
-                ): ai_id
-                for ai_id in accepted
-            }
-            for future in as_completed(futures):
-                results.extend(future.result())
-        results.sort(key=lambda item: item.ai_id)
-        return WorkflowProcessingSummary(
-            "processed",
-            len(accepted),
-            deferred,
-            0,
-            tuple(results),
-        )
-
     def process_assessments(
         self,
         cycle_id: str,
@@ -405,12 +349,6 @@ class HRWorkflowProcessor:
         ranked = []
         for ai_id in cycle.roster_snapshot:
             report = self._repository.get_daily_report(ai_id, cycle.local_date)
-            if (
-                report is not None
-                and report.raw_response is not None
-                and report.normalized is None
-            ):
-                continue
             job = self._repository.get_assessment_job(ai_id, cycle.local_date)
             priority = 1 if job is not None and job.status == "complete" else 0
             ranked.append((priority, job.updated_at if job is not None else "", ai_id))
@@ -508,31 +446,23 @@ class HRReconciliationLoop:
         )
         cycle = schedule.cycle
         if cycle is None or schedule.window is None:
-            return ReconciliationTickResult(schedule, None, None, None)
+            return ReconciliationTickResult(schedule, None, None)
         if cycle.status == "closed":
-            normalizations = self._processor.process_normalizations(cycle.id)
             assessments = self._processor.process_assessments(cycle.id)
-            return ReconciliationTickResult(
-                schedule, None, normalizations, assessments
-            )
+            return ReconciliationTickResult(schedule, None, assessments)
         if self._now() >= schedule.window.window_closes_at:
             self._reporting.close_cycle(cycle.id, closed_at=self._now())
-            normalizations = self._processor.process_normalizations(cycle.id)
             assessments = self._processor.process_assessments(cycle.id)
-            return ReconciliationTickResult(
-                schedule, None, normalizations, assessments
-            )
+            return ReconciliationTickResult(schedule, None, assessments)
         reports = self._processor.process_reports(cycle.id, message=self._report_message)
-        normalizations = self._processor.process_normalizations(cycle.id)
-        return ReconciliationTickResult(schedule, reports, normalizations, None)
+        return ReconciliationTickResult(schedule, reports, None)
 
     def close_and_assess(self, cycle_id: str) -> ReconciliationTickResult:
         if not self._scheduler.mutations_enabled:
             raise HRSchedulerValidationError("Human Resources is disabled")
         self._reporting.close_cycle(cycle_id, closed_at=self._now())
-        normalizations = self._processor.process_normalizations(cycle_id)
         assessments = self._processor.process_assessments(cycle_id)
-        return ReconciliationTickResult(None, None, normalizations, assessments)
+        return ReconciliationTickResult(None, None, assessments)
 
     def retry(self, cycle_id: str) -> ReconciliationTickResult:
         if not self._scheduler.mutations_enabled:
@@ -541,12 +471,10 @@ class HRReconciliationLoop:
         if cycle is None:
             raise HRSchedulerValidationError("daily cycle does not exist")
         if cycle.status == "closed":
-            normalizations = self._processor.process_normalizations(cycle_id)
             assessments = self._processor.process_assessments(cycle_id)
-            return ReconciliationTickResult(None, None, normalizations, assessments)
+            return ReconciliationTickResult(None, None, assessments)
         reports = self._processor.process_reports(cycle_id, message=self._report_message)
-        normalizations = self._processor.process_normalizations(cycle_id)
-        return ReconciliationTickResult(None, reports, normalizations, None)
+        return ReconciliationTickResult(None, reports, None)
 
     def _handle_timer_error(self, exc: Exception) -> None:
         self._on_error(str(getattr(exc, "code", "hr_reconciliation_failed")))

@@ -2103,7 +2103,10 @@ class ProjectAuthoringService:
         if operation in {"update_task", "reassign_roles"}:
             task = self._maintenance_task(project, mutation["taskId"])
             allowed = (
-                {"title", "description", "priority", "dueDate", "checklist", "evidence", "executionState"}
+                {
+                    "title", "description", "priority", "dueDate", "checklist", "evidence",
+                    "executionState", "allowReviewerlessExecution",
+                }
                 if operation == "update_task"
                 else {"responsibleActor", "executorActor", "reviewerActor", "reviewerRecommendation"}
             )

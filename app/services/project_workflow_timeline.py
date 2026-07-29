@@ -73,21 +73,40 @@ class ProjectWorkflowTimelineRouter:
             )
             return source.read_messages(scope, max_messages=max_messages)
         session_key = self._ports.task_session_key(agent_id, project_id, task_id)
-        source = OpenClawWorkflowTimelineSource(
-            self._timeline,
-            self._ports.openclaw_sessions_dir(agent_id),
-            self._ports.resolve_openclaw_session,
-        )
-        return source.read_messages(scope, session_key, max_messages=max_messages)
+        for sessions_dir, source_agent_id in self._openclaw_sources(agent_id, profile):
+            source = OpenClawWorkflowTimelineSource(
+                self._timeline,
+                sessions_dir,
+                self._ports.resolve_openclaw_session,
+            )
+            messages = source.read_messages(scope, session_key, source_agent_id=source_agent_id, max_messages=max_messages)
+            if messages:
+                return messages
+        return []
 
     def is_active(self, agent_id: str, project_id: str, task_id: str) -> bool:
         provider, _profile = self._provider(agent_id)
         if provider != "openclaw":
             return False
         session_key = self._ports.task_session_key(agent_id, project_id, task_id)
-        source = OpenClawWorkflowTimelineSource(
-            self._timeline,
-            self._ports.openclaw_sessions_dir(agent_id),
-            self._ports.resolve_openclaw_session,
-        )
-        return source.is_active(agent_id, session_key)
+        for sessions_dir, source_agent_id in self._openclaw_sources(agent_id, _profile):
+            source = OpenClawWorkflowTimelineSource(
+                self._timeline,
+                sessions_dir,
+                self._ports.resolve_openclaw_session,
+            )
+            if source.is_active(source_agent_id, session_key):
+                return True
+        return False
+
+    def _openclaw_sources(self, agent_id: str, profile: str) -> list[tuple[str, str]]:
+        candidates: list[tuple[str, str]] = []
+        for source_agent_id in (profile, agent_id):
+            source = str(source_agent_id or "").strip()
+            if not source:
+                continue
+            sessions_dir = self._ports.openclaw_sessions_dir(source)
+            item = (sessions_dir, source)
+            if item not in candidates:
+                candidates.append(item)
+        return candidates

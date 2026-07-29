@@ -85,6 +85,15 @@ def fake_marked_project():
     return project
 
 
+def fake_marked_project_with_stale_running_orchestration():
+    project = fake_marked_project()
+    for task in project["tasks"]:
+        task["executionState"] = "backlog"
+        task["activeAttemptId"] = None
+        task["attempts"] = []
+    return project
+
+
 def install_project_fixture(project):
     old_load = server._load_projects
     old_roster = server.get_roster
@@ -222,6 +231,30 @@ def test_marked_project_detail_response_uses_orchestration_projection_without_si
         assert "activeTaskId" not in project
         assert "activeAgent" not in project
         assert "projectExecutionFlowActive" not in project
+    finally:
+        restore_project_fixture(old)
+
+
+def test_marked_project_stale_running_orchestration_is_not_exposed_as_active_execution():
+    old = install_project_fixture(fake_marked_project_with_stale_running_orchestration())
+    try:
+        list_result = server._handle_projects_list("status=active")
+        summary = list_result["projects"][0]
+
+        assert summary["projectExecutionActive"] is False
+        assert summary["projectExecutionPhase"] == "idle"
+        assert summary["activeTaskIds"] == []
+        assert summary["activeTaskCount"] == 0
+        assert summary["orchestrationState"] == "running"
+
+        detail_result = server._handle_project_get("p-1")
+        project = detail_result["project"]
+
+        assert project["projectExecutionActive"] is False
+        assert project["projectExecutionPhase"] == "idle"
+        assert project["activeTaskIds"] == []
+        assert project["activeTaskCount"] == 0
+        assert project["orchestrationState"] == "running"
     finally:
         restore_project_fixture(old)
 

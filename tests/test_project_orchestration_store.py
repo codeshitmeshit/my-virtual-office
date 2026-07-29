@@ -153,6 +153,96 @@ def test_task_final_result_metadata_and_markdown_sidecar_round_trip(tmp_path):
     assert "docs/result.md" in sidecar_text
 
 
+def test_reusable_project_final_result_sidecar_uses_dated_run_directory(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = _project(tasks=[
+        {
+            **_task("task-1", 1, stage_run_id="run-1"),
+            "executionState": "done",
+            "completedAt": "2026-07-28T07:32:13+00:00",
+            "attempts": [{"id": "attempt-abc-123", "startedAt": "2026-07-28T07:31:00+00:00"}],
+            "evidence": {"attemptId": "attempt-abc-123", "executorSummary": "Run output."},
+            "finalResult": {
+                "schemaVersion": 1,
+                "status": "available",
+                "summary": "Run output.",
+                "sourceAttemptId": "attempt-abc-123",
+                "executionStage": 1,
+                "generatedAt": "2026-07-28T07:32:13+00:00",
+                "artifactRefs": [],
+            },
+        }
+    ])
+    project.update({
+        "projectType": "reusable",
+        "workspacePath": str(workspace),
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {"schemaVersion": 1, "revision": 1, "state": "completed"},
+    })
+    store = MarkdownProjectStore(str(tmp_path))
+
+    store.save_all({"projects": [project], "templates": []})
+    loaded = MarkdownProjectStore(str(tmp_path)).load_all()["projects"][0]
+
+    path = loaded["tasks"][0]["finalResult"]["markdownPath"]
+    assert path == ".vo/task-1/20260728073213/TASK_FINAL_RESULT.md"
+    assert (workspace / path).exists()
+
+
+def test_completed_reusable_project_writes_project_final_report_sidecar(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    project = _project(tasks=[
+        {
+            **_task("task-1", 1, stage_run_id="run-1"),
+            "title": "Collect facts",
+            "executionState": "done",
+            "completedAt": "2026-07-28T07:32:13+00:00",
+            "finalResult": {
+                "schemaVersion": 1,
+                "status": "available",
+                "summary": "Collected facts.",
+                "markdownPath": ".vo/task-1/20260728073213/TASK_FINAL_RESULT.md",
+                "sourceAttemptId": "attempt-1",
+                "executionStage": 1,
+                "generatedAt": "2026-07-28T07:32:13+00:00",
+                "artifactRefs": [],
+            },
+        }
+    ])
+    project.update({
+        "projectType": "reusable",
+        "workspacePath": str(workspace),
+        "status": "completed",
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {
+            "schemaVersion": 1,
+            "revision": 2,
+            "state": "completed",
+            "completedAt": "2026-07-28T07:40:00+00:00",
+            "finalReport": {
+                "schemaVersion": 1,
+                "status": "available",
+                "markdownPath": ".vo/project-final-reports/20260728074000/PROJECT_FINAL_REPORT.md",
+                "generatedAt": "2026-07-28T07:40:00+00:00",
+                "taskCount": 1,
+                "completedTaskCount": 1,
+            },
+        },
+    })
+    store = MarkdownProjectStore(str(tmp_path))
+
+    store.save_all({"projects": [project], "templates": []})
+
+    report_path = workspace / ".vo" / "project-final-reports" / "20260728074000" / "PROJECT_FINAL_REPORT.md"
+    assert report_path.exists()
+    text = report_path.read_text(encoding="utf-8")
+    assert text.startswith("# PROJECT_FINAL_REPORT")
+    assert "Collected facts." in text
+    assert ".vo/task-1/20260728073213/TASK_FINAL_RESULT.md" in text
+
+
 def test_stage_handoff_markdown_path_is_backfilled_from_task_final_result(tmp_path):
     task = {
         **_task("task-1", 1, stage_run_id="run-1"),

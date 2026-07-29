@@ -49,6 +49,5 @@ for (const required of [
   assert.ok(shell.includes(required), `missing HR modal accessibility marker: ${required}`);
 }
 
-assert.equal(hr.helpers.semanticLabel('normalization_failed'), 'Normalization Failed');
 
 console.log(`Human Resources i18n/accessibility checks passed (${keys.size} locale keys)`);

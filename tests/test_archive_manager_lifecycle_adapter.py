@@ -197,7 +197,7 @@ def test_profile_port_renders_exact_legacy_version_and_six_files(tmp_path):
     assert tuple(profile.files) == ARCHIVE_MANAGER_ROLE.required_files
     assert "档案管理员" in profile.files["IDENTITY.md"]
     assert "🗄️" in profile.files["IDENTITY.md"]
-    assert "vo-archive-manager" in profile.files["AGENTS.md"]
+    assert "<archive_manager_output" in profile.files["AGENTS.md"]
     assert "不承担普通执行任务" in profile.files["agent.md"]
 
 
@@ -222,7 +222,7 @@ def test_profile_port_sync_is_idempotent_and_repairs_stale_file(tmp_path):
     (workspace / "AGENTS.md").write_text("stale", encoding="utf-8")
     repaired = port.synchronize(ARCHIVE_MANAGER_ROLE, agent, workspace)
     assert repaired.written_files == ("AGENTS.md",)
-    assert "vo-archive-manager" in (workspace / "AGENTS.md").read_text(encoding="utf-8")
+    assert "<archive_manager_output" in (workspace / "AGENTS.md").read_text(encoding="utf-8")
 
 
 def test_provider_port_preserves_openclaw_create_parameters_and_forced_discovery(tmp_path):

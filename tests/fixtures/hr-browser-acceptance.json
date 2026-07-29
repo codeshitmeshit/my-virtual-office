@@ -52,9 +52,8 @@
       {
         "id": "report-1",
         "localDate": "2026-07-19",
-        "submissionState": "normalized",
+        "submissionState": "submitted",
         "rawResponse": "RAW FIXTURE REPORT ONE",
-        "normalized": { "completedWork": ["Completed fixture research"], "blockers": [] },
         "revision": 1,
         "submittedAt": "2026-07-19T09:30:00Z"
       }
@@ -85,7 +84,7 @@
       { "id": "access-1", "viewerAiId": "agent-2", "viewerName": "Builder Agent", "targetAiId": "agent-1", "scope": "public_work_summary", "viewedAt": "2026-07-19T10:00:00Z" }
     ],
     "accessNextCursor": "access-next",
-    "workflowState": "normalized",
+    "workflowState": "submitted",
     "createdAt": "2026-07-19T00:00:00+00:00"
   },
   "reportPage": {
@@ -95,7 +94,6 @@
         "localDate": "2026-07-18",
         "submissionState": "late_submitted",
         "rawResponse": "RAW FIXTURE REPORT TWO",
-        "normalized": { "completedWork": ["Late fixture follow-up"] },
         "revision": 1,
         "submittedAt": "2026-07-19T01:00:00Z"
       }

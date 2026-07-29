@@ -768,7 +768,7 @@ Start project-level execution:
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/project-execution/start \
   -H 'Content-Type: application/json' \
-  -d '{"mode":"continuous","skipReviewConfirmed":false}'
+  -d '{"mode":"continuous"}'
 ```
 
 Start one task:
@@ -776,7 +776,7 @@ Start one task:
 ```bash
 curl -sS -X POST http://127.0.0.1:8090/api/projects/PROJECT_ID/tasks/TASK_ID/project-execution/start \
   -H 'Content-Type: application/json' \
-  -d '{"skipReviewConfirmed":false}'
+  -d '{}'
 ```
 
 Read status:
@@ -818,8 +818,9 @@ Other acceptance actions:
 Important start fields:
 
 - `mode`: `single` or `continuous` for project start.
-- `skipReviewConfirmed`: true only after explicit user confirmation.
 - `dirtyFingerprint`: required when retrying after dirty-workspace confirmation.
+
+Tasks without an independent reviewer must have `allowReviewerlessExecution=true` before start.
 
 Important states:
 

@@ -1,7 +1,20 @@
-from . import agent_bridges, agents, archive_room, browser, config, meetings, notifications, projects, providers, skills, workflow
+from . import agent_bridges, agents, archive_room, browser, config, mcp_registry, meetings, notifications, projects, providers, skills, workflow
 
 
-ROUTE_MODULES = (config, browser, notifications, providers, skills, agents, agent_bridges, meetings, archive_room, workflow, projects)
+ROUTE_MODULES = (
+    config,
+    browser,
+    notifications,
+    providers,
+    skills,
+    mcp_registry,
+    agents,
+    agent_bridges,
+    meetings,
+    archive_room,
+    workflow,
+    projects,
+)
 
 
 def dispatch(handler, method, parsed_url):

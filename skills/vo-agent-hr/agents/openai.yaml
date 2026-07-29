@@ -1,4 +1,4 @@
 interface:
   display_name: "VO Agent HR"
   short_description: "Query safe VO HR Agent records and public work views"
-  default_prompt: "Use $vo-agent-hr to find an available Virtual Office Agent and inspect only permitted HR public information."
+  default_prompt: "<skill_default_prompt><use_skill>$vo-agent-hr</use_skill><goal>Find an available Virtual Office Agent and inspect only permitted HR public information.</goal></skill_default_prompt>"

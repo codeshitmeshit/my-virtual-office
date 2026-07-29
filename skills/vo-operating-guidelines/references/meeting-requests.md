@@ -66,6 +66,13 @@ Phase 4 当前只支持项目任务来源的 AI 会议申请：
 POST /api/projects/{projectId}/tasks/{taskId}/meeting-requests
 ```
 
+申请时必须明确裁决策略，不能省略：
+
+- P0：`urgency: 5`，`resolutionPolicy: "user_decision"`，允许把无共识交给用户裁决。
+- 非 P0：`urgency: 1-4`，`resolutionPolicy: "moderator_decision"`，默认由 AI/主持人自己裁决；不得申请成用户裁决。
+
+前端展示的优先级为 `P = 5 - urgency`，所以 P0 对应 `urgency: 5`。
+
 示例：
 
 ```bash
@@ -81,6 +88,8 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/meeting-req
     "suggestedParticipants": ["main", "hermes-default"],
     "suggestedModerator": "main",
     "meetingType": "discussion",
+    "urgency": 3,
+    "resolutionPolicy": "moderator_decision",
     "maxRounds": 2,
     "idempotencyKey": "PROJECT_ID:TASK_ID:architecture-blocker-v1"
   }'
@@ -93,6 +102,8 @@ curl -sS -X POST "$VO_BASE_URL/api/projects/PROJECT_ID/tasks/TASK_ID/meeting-req
 - `expectedOutcome`：会议结束应产出什么。
 - `reason` 或 `cannotCompleteAloneReason`：为什么自己不能单独完成。
 - `suggestedParticipants`：建议参会 AI，优先使用 `/agents-list` 的 `key`。
+- `urgency`：1-5；P0 填 5，非 P0 填 1-4。
+- `resolutionPolicy`：P0 填 `user_decision`；非 P0 必须填 `moderator_decision`。
 - `idempotencyKey`：强烈建议填写，避免重复提交。
 
 `meetingType` 可选：
@@ -162,5 +173,6 @@ POST /api/meetings/requests/{requestId}/reject
 - 项目任务来源已确认，且有有效 `projectId` 和 `taskId`。
 - 已检查目标项目会议自动批准风险；不确定是否自动批准时，已先输出拟申请内容和风险说明并等待用户确认。
 - `suggestedParticipants` 优先来自 `/agents-list` 的 `key`。
-- 申请包含 `goal`、`expectedOutcome`、`reason` 和 `idempotencyKey`。
+- 申请包含 `goal`、`expectedOutcome`、`reason`、`urgency`、`resolutionPolicy` 和 `idempotencyKey`。
+- 非 P0 申请已明确设置 `resolutionPolicy: "moderator_decision"`；只有 P0 才设置 `resolutionPolicy: "user_decision"`。
 - 没有自行 confirm/reject 会议，也没有替用户选择最终会议上下文。

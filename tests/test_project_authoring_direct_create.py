@@ -190,6 +190,7 @@ def test_direct_creation_commits_complete_unstarted_project_and_one_time_grant(t
     assert project["tasks"][0]["checklist"][0]["id"].startswith("checklist-")
     assert project["tasks"][0]["responsibleActor"] == {"type": "agent", "id": "owner"}
     assert project["tasks"][0]["executorActor"] == {"type": "agent", "id": "builder"}
+    assert project["tasks"][0]["allowReviewerlessExecution"] is True
     grant = root[GRANTS_KEY][project["id"]]
     assert grant["secretHash"] == hash_request_secret("one-time-project-secret")
     assert "one-time-project-secret" not in str(root)

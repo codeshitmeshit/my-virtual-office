@@ -69,8 +69,6 @@ def test_close_marks_only_missing_reports_not_submitted_without_inference(setup)
     missing = reports["agent-2"]
     assert missing.submission_state == "not_submitted"
     assert missing.raw_response is None
-    assert missing.normalized is None
-    assert missing.normalizer_id == ""
     assert missing.submitted_at is None
     assert missing.window_closed_at == CLOSED.isoformat()
     assert repository.get_report_request(opened.requests[1].id).status == "no_response"

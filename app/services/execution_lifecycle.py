@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
 from services.project_execution_ordering import prior_incomplete_task
+from services.project_orchestration import active_task_ids, is_marked_project, orchestration_state
 from services.project_repository import ProjectNotFoundError
 
 
@@ -27,6 +28,7 @@ STALE_RECONCILE_STATES = frozenset({
     "reviewing",
     "reworking",
 })
+STAGE_PIPELINE_ACTIVE_STATES = frozenset({"starting", "running", "pausing"})
 
 
 class Repository(Protocol):
@@ -170,6 +172,140 @@ def invoke_provider(
     return ProviderInvocation(project, task, attempt, executor, workspace, result, started_at)
 
 
+def _checklist_needs_planning(task: Task, attempt: dict[str, Any], ports: RunnerPorts) -> bool:
+    if attempt.get("meetingActionPhase") or attempt.get("rework") or attempt.get("reworkCycle"):
+        return False
+    acceptance_checklist = getattr(ports, "acceptance_checklist", lambda value: value.get("checklist") or [])
+    return not bool(acceptance_checklist(task))
+
+
+def _build_checklist_planning_prompt(project: Project, task: Task, attempt: dict[str, Any], workspace: str) -> str:
+    return (
+        "<checklist_planning_prompt>\n"
+        "  <role>You are preparing the acceptance checklist for a Virtual Office project task.</role>\n"
+        f"  <workspace>{workspace}</workspace>\n"
+        "  <scope>Do not execute the task yet. Do not create deliverable files. Only analyze the task and define concrete acceptance criteria.</scope>\n"
+        "  <output_contract>Return a short Markdown note followed by exactly one fenced ```json block containing a single object. The object must contain checklistUpdates: an array of {id, text, done, evidence}.</output_contract>\n"
+        "  <checklist_rules>Use stable short IDs. Set done=false for every item. Keep checklist items focused on deliverable acceptance only; do not include meeting action items, process notes, or generic reminders. Create enough items to verify the requested deliverable, normally 2-5.</checklist_rules>\n"
+        f"  <project id=\"{project.get('id', '')}\" title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
+        f"  <task id=\"{task.get('id', '')}\" title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
+        "</checklist_planning_prompt>\n"
+    )
+
+
+def _planning_failure_result(planning_result: dict[str, Any], message: str) -> dict[str, Any]:
+    reply = str(planning_result.get("reply") or "")
+    error = str(planning_result.get("error") or "").strip() or message
+    return {
+        "ok": False,
+        "reply": reply,
+        "error": error,
+        "status": "checklist_planning_failed",
+        "planningResult": copy.deepcopy(planning_result),
+    }
+
+
+def _persist_checklist_planning(
+    project_id: str,
+    task_id: str,
+    attempt_id: str,
+    planning_result: dict[str, Any],
+    *,
+    repository: Repository,
+    ports: RunnerPorts,
+) -> bool:
+    outcome = {"persisted": False}
+
+    def apply(project: Project) -> None:
+        task = _find_task(project, task_id)
+        if task is None or task.get("activeAttemptId") != attempt_id:
+            return
+        attempt = next((item for item in task.get("attempts", []) if item.get("id") == attempt_id), None)
+        if attempt is None:
+            return
+        changed = ports.apply_checklist_updates(task, planning_result)
+        checklist = ports.acceptance_checklist(task)
+        attempt["checklistPlanning"] = {
+            "status": planning_result.get("status") or ("completed" if planning_result.get("ok") else "failed"),
+            "checklistUpdated": changed,
+            "plannedAt": ports.now(),
+            "reply": ports.redact(planning_result.get("reply") or "")[:4000],
+            "error": ports.redact(planning_result.get("error") or ""),
+        }
+        if changed and checklist:
+            task["updatedAt"] = ports.now()
+            project["updatedAt"] = ports.now()
+            outcome["persisted"] = True
+
+    repository.update(project_id, apply)
+    return bool(outcome.get("persisted"))
+
+
+def invoke_provider_with_checklist_planning(
+    project_id: str,
+    task_id: str,
+    attempt_id: str,
+    *,
+    repository: Repository,
+    monotonic: Callable[[], float],
+    ports: RunnerPorts,
+) -> ProviderInvocation | None:
+    """Run an optional checklist-planning round, then execute the task."""
+    project = repository.get(project_id)
+    if project is None:
+        return None
+    task = _find_task(project, task_id)
+    if task is None or task.get("activeAttemptId") != attempt_id:
+        return None
+    attempt = next((item for item in task.get("attempts", []) if item.get("id") == attempt_id), None)
+    if attempt is None:
+        return None
+    workspace = str(attempt.get("workspacePath") or "")
+    executor = copy.deepcopy(attempt.get("executor") or {})
+
+    if _checklist_needs_planning(task, attempt, ports):
+        planning_result = ports.provider(
+            executor,
+            _build_checklist_planning_prompt(project, task, attempt, workspace),
+            workspace,
+            attempt_id,
+            project_id=project_id,
+            task_id=task_id,
+        )
+        if not planning_result.get("ok"):
+            return ProviderInvocation(project, task, attempt, executor, workspace, _planning_failure_result(
+                planning_result,
+                "Checklist planning failed before task execution.",
+            ), monotonic())
+        if not _persist_checklist_planning(project_id, task_id, attempt_id, planning_result, repository=repository, ports=ports):
+            return ProviderInvocation(project, task, attempt, executor, workspace, _planning_failure_result(
+                planning_result,
+                "Checklist planning did not produce persisted acceptance criteria.",
+            ), monotonic())
+        project = repository.get(project_id)
+        if project is None:
+            return None
+        task = _find_task(project, task_id)
+        if task is None or task.get("activeAttemptId") != attempt_id:
+            return None
+        attempt = next((item for item in task.get("attempts", []) if item.get("id") == attempt_id), None)
+        if attempt is None:
+            return None
+        workspace = str(attempt.get("workspacePath") or "")
+        executor = copy.deepcopy(attempt.get("executor") or {})
+
+    started_at = monotonic()
+    result = ports.provider(
+        executor,
+        ports.build_prompt(project, task, attempt, workspace),
+        workspace,
+        attempt_id,
+        project_id=project_id,
+        task_id=task_id,
+    )
+    return ProviderInvocation(project, task, attempt, executor, workspace, result, started_at)
+
+
 def attempt_is_committable(task: Task | None, attempt_id: str) -> bool:
     """Reject stale Provider results after cancel/restart replaced the attempt."""
     if task is None:
@@ -180,6 +316,30 @@ def attempt_is_committable(task: Task | None, attempt_id: str) -> bool:
 
 def _find_task(project: Project, task_id: str) -> Task | None:
     return next((task for task in project.get("tasks", []) if task.get("id") == task_id), None)
+
+
+def _stage_pipeline_status(project: Project, task: Task | None = None) -> dict[str, Any]:
+    state = orchestration_state(project)
+    phase = str(state.get("state") or "draft")
+    active_ids = list(active_task_ids(project))
+    active = bool(active_ids)
+    visible_phase = phase if active else "idle"
+    return {
+        "ok": True,
+        "active": active,
+        "phase": visible_phase,
+        "currentTaskId": active_ids[0] if len(active_ids) == 1 else None,
+        "activeTaskIds": active_ids,
+        "startMode": None,
+        "flowActive": active,
+        "flowStopReason": state.get("pauseReason"),
+        "task": task,
+        "executionModel": project.get("executionModel"),
+        "orchestration": state,
+        "orchestrationState": phase,
+        "currentStage": state.get("currentStage"),
+        "runId": state.get("currentRunId"),
+    }
 
 
 def _status(payload: dict[str, Any], status: int) -> dict[str, Any]:
@@ -259,12 +419,11 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
     notification_key: str | None = None
     reconcile_reason: str | None = None
     try:
-        invocation = invoke_provider(
+        invocation = invoke_provider_with_checklist_planning(
             project_id, task_id, attempt_id,
             repository=ports.repository,
             monotonic=time.time,
-            build_prompt=ports.build_prompt,
-            provider=ports.provider,
+            ports=ports,
         )
         if invocation is None:
             return
@@ -463,7 +622,7 @@ def start_task(
     roles = ports.resolve_roles(
         snapshot_project,
         snapshot_task,
-        bool(body.get("skipReviewConfirmed")) or snapshot_task.get("allowReviewerlessExecution") is True,
+        snapshot_task.get("allowReviewerlessExecution") is True,
     )
     if not roles.get("ok"):
         payload = dict(roles)
@@ -554,7 +713,8 @@ def start_task(
             reopened = ports.reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
         if body.get("resetExecutionContext") is True:
             ports.clear_restart_bindings(task, ports.now(), str(body.get("by") or "user"), "manual task restart")
-        ports.seed_checklist(task, str(body.get("by") or "system"))
+        if str(task.get("executionState") or "").lower() == "blocked":
+            task["reworkCount"] = 0
         if git_state.get("dirty"):
             project.setdefault("executionDirtyConfirmations", []).append(git_state.get("fingerprint"))
             project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]
@@ -751,6 +911,8 @@ def status(
     task = _find_task(project, task_id) if task_id else None
     if task_id and task is None:
         return _status({"error": "Project or task not found"}, 404)
+    if is_marked_project(project):
+        return _stage_pipeline_status(project, task)
     targets = [task] if task else project.get("tasks", [])
     stale = [item.get("id") for item in targets if item and item.get("executionState") in STALE_RECONCILE_STATES and not is_live(str(item.get("activeAttemptId") or ""))]
     if stale:

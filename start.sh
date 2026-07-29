@@ -76,6 +76,121 @@ warn_if_browser_unavailable() {
     echo -e "  ${YELLOW}  可运行 ./start.sh --browser，或确认已配置的 Chrome 调试端口可达${NC}"
 }
 
+pc_metrics_endpoint_ok() {
+    local metrics_url="${1:-}"
+    local python_bin="${2:-python3}"
+    [ -n "$metrics_url" ] || return 1
+    "$python_bin" - "$metrics_url" <<'PY' >/dev/null 2>&1
+import json
+import sys
+import urllib.request
+
+base = sys.argv[1].rstrip("/")
+url = base if base.endswith("/metrics") else base + "/metrics"
+with urllib.request.urlopen(url, timeout=1.5) as response:
+    data = json.loads(response.read().decode("utf-8"))
+if not isinstance(data, dict) or "cpu" not in data or "memory" not in data:
+    raise SystemExit(1)
+PY
+}
+
+local_http_url_port() {
+    local metrics_url="${1:-}"
+    local python_bin="${2:-python3}"
+    [ -n "$metrics_url" ] || return 1
+    "$python_bin" - "$metrics_url" <<'PY' 2>/dev/null
+import sys
+import urllib.parse
+
+parsed = urllib.parse.urlsplit(sys.argv[1])
+host = (parsed.hostname or "").lower()
+if parsed.scheme not in {"http", ""} or host not in {"127.0.0.1", "localhost", "::1", "0.0.0.0"}:
+    raise SystemExit(1)
+port = parsed.port or (80 if parsed.scheme == "http" else 8099)
+print(port)
+PY
+}
+
+port_is_listening() {
+    local port="${1:-}"
+    local python_bin="${2:-python3}"
+    [ -n "$port" ] || return 1
+    "$python_bin" - "$port" <<'PY' >/dev/null 2>&1
+import socket
+import sys
+
+try:
+    with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=0.5):
+        pass
+except OSError:
+    raise SystemExit(1)
+PY
+}
+
+start_pc_metrics_service() {
+    local python_bin="${1:-python3}"
+    local metrics_url="${VO_PC_METRICS_URL:-}"
+    PC_METRICS_PID=""
+
+    if ! is_truthy "${VO_PC_METRICS_ENABLED:-}"; then
+        echo -e "  ${YELLOW}○${NC} PC 性能数据源未启用"
+        return 0
+    fi
+
+    local metrics_port
+    if ! metrics_port="$(local_http_url_port "$metrics_url" "$python_bin")"; then
+        echo -e "  ${YELLOW}⚠ PC 性能数据源配置为远程或非 HTTP 地址，跳过本地启动: ${metrics_url}${NC}"
+        return 0
+    fi
+
+    if pc_metrics_endpoint_ok "$metrics_url" "$python_bin"; then
+        echo -e "  ${GREEN}✓${NC} PC 性能数据源已运行: ${metrics_url}"
+        return 0
+    fi
+
+    if port_is_listening "$metrics_port" "$python_bin"; then
+        echo -e "  ${YELLOW}⚠ PC 性能端口 ${metrics_port} 已被占用，但未返回有效 metrics${NC}"
+        echo -e "  ${YELLOW}  请检查 ${metrics_url}/metrics，主服务将继续启动${NC}"
+        return 0
+    fi
+
+    if ! "$python_bin" -c "import psutil" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ psutil 未安装，正在安装 PC 性能数据源依赖...${NC}"
+        if [ ! -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+            python3 -m venv "$SCRIPT_DIR/.venv" || {
+                echo -e "${YELLOW}⚠ 创建 Python 虚拟环境失败；PC 性能数据源不会启动${NC}"
+                return 0
+            }
+            python_bin="$SCRIPT_DIR/.venv/bin/python"
+        fi
+        "$python_bin" -m pip install psutil 2>&1 | tail -1
+        if ! "$python_bin" -c "import psutil" 2>/dev/null; then
+            echo -e "${YELLOW}⚠ psutil 安装失败；PC 性能数据源不会启动${NC}"
+            return 0
+        fi
+    fi
+
+    echo -e "  ${CYAN}→${NC} 启动 PC 性能数据源: ${metrics_url}"
+    "$python_bin" "$SCRIPT_DIR/app/pc-metrics-server.py" "$metrics_port" >/tmp/vo-pc-metrics.log 2>&1 &
+    PC_METRICS_PID=$!
+
+    for _ in $(seq 1 20); do
+        if ! kill -0 "$PC_METRICS_PID" 2>/dev/null; then
+            echo -e "  ${YELLOW}⚠ PC 性能数据源进程提前退出，日志: /tmp/vo-pc-metrics.log${NC}"
+            PC_METRICS_PID=""
+            return 0
+        fi
+        if pc_metrics_endpoint_ok "$metrics_url" "$python_bin"; then
+            echo -e "  ${GREEN}✓${NC} PC 性能数据源已启动: ${metrics_url}"
+            return 0
+        fi
+        sleep 0.5
+    done
+
+    echo -e "  ${YELLOW}⚠ PC 性能数据源启动后未就绪，日志: /tmp/vo-pc-metrics.log${NC}"
+    return 0
+}
+
 # ── 环境配置 ──────────────────────────────────────────────────────────────
 setup_env() {
     echo -e "${CYAN}[配置] 检查环境文件...${NC}"
@@ -375,6 +490,10 @@ PY
     export NO_PROXY="127.0.0.1,localhost,${NO_PROXY:-}"
     export no_proxy="127.0.0.1,localhost,${no_proxy:-}"
 
+    local pc_metrics_pid=""
+    start_pc_metrics_service "$python_bin"
+    pc_metrics_pid="${PC_METRICS_PID:-}"
+
     for port_name in VO_PORT VO_WS_PORT; do
         local port="${!port_name}"
         if "$python_bin" - "$port" <<'PY'
@@ -406,7 +525,7 @@ PY
     cd "$SCRIPT_DIR/app"
     "$python_bin" server.py &
     local server_pid=$!
-    trap 'kill "${server_pid:-}" 2>/dev/null || true' INT TERM EXIT
+    trap 'kill "${server_pid:-}" "${pc_metrics_pid:-}" 2>/dev/null || true' INT TERM EXIT
 
     local ready=false
     for _ in $(seq 1 60); do
@@ -522,6 +641,9 @@ PY
     echo ""
     echo -e "${GREEN}✓ HTTP 已就绪: http://localhost:${VO_PORT}${NC}"
     echo -e "${GREEN}✓ WebSocket 已监听: 127.0.0.1:${VO_WS_PORT}${NC}"
+    if [ -n "$pc_metrics_pid" ]; then
+        echo -e "${GREEN}✓ PC 性能数据源已监听: ${VO_PC_METRICS_URL}${NC}"
+    fi
     echo -e "  启动报告: $VO_STATUS_DIR/startup-health.json"
     echo -e "  按 Ctrl+C 停止服务"
     echo ""

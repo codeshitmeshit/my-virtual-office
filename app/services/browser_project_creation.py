@@ -98,7 +98,7 @@ def create_from_browser_template(
             "reviewerAgentId": blueprint.get("reviewerAgentId"),
             "requiresUserAcceptance": blueprint.get("requiresUserAcceptance", False),
             "allowReviewerlessExecution": blueprint.get(
-                "allowReviewerlessExecution", False
+                "allowReviewerlessExecution", True
             ),
             "scheduledRepeatEnabled": blueprint.get("scheduledRepeatEnabled", False),
             "dueDate": None,

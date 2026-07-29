@@ -477,7 +477,7 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
         if result is None:
             if ports.execution_enabled(project):
                 result = ports.start_task(project_id, task_id, {
-                    "by": "project-cron", "source": source, "skipReviewConfirmed": True,
+                    "by": "project-cron", "source": source,
                 })
             else:
                 result = ports.start_legacy(project_id, {"autoMode": False})
@@ -544,7 +544,7 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
                 "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id,
             }
         if ports.execution_enabled(project):
-            body = {"by": "project-cron", "source": source, "skipReviewConfirmed": True}
+            body = {"by": "project-cron", "source": source}
             if not is_marked_project(project):
                 body["mode"] = project.get("projectExecutionStartMode") or "continuous"
             result = ports.start_project(project_id, body)

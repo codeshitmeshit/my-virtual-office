@@ -210,6 +210,15 @@ def test_skills_route_uses_skills_service_compatibility(monkeypatch):
     assert payload == {"skills": [{"name": "s1"}]}
 
 
+def test_mcp_registry_route_uses_mcp_service(monkeypatch):
+    from server_services import mcp_registry
+
+    monkeypatch.setattr(mcp_registry, "_handle_mcp_registry_list", lambda: {"ok": True, "servers": [{"name": "vibe-trading"}]})
+    status, payload = dispatch("GET", "/api/mcp-registry")
+    assert status == 200
+    assert payload == {"ok": True, "servers": [{"name": "vibe-trading"}]}
+
+
 def test_config_route_uses_config_runtime_service_compatibility(monkeypatch):
     monkeypatch.setattr(server, "_handle_health", lambda: {"ok": True, "status": "patched"})
     status, payload = dispatch("GET", "/health")

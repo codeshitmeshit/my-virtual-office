@@ -52,21 +52,118 @@ def test_tracked_codex_attempt_preserves_task_session_and_envelope():
     assert calls[0] == ("messages", "codex-agent", "project", "task", "attempt")
 
 
-def test_claude_and_openclaw_attempts_use_attempt_scoped_session_id():
-    for provider in ("claude-code", "openclaw"):
-        calls = []
-        project = {
-            "id": "project", "projectExecutionEnabled": True, "workflowActive": False, "workflowPhase": "idle",
-            "tasks": [{
-                "id": "task", "activeAttemptId": "attempt", "executionState": "reviewing",
-                "executorAgentId": "agent", "activeReviewId": "review", "updatedAt": "2",
-            }],
-            "columns": [],
-        }
-        resolved = service([project], descriptors={"agent": {"providerKind": provider}}, calls=calls).resolve_scope("project").scope
-        assert resolved and resolved.session_task_id == "attempt"
-        assert resolved.attempt_id == "attempt" and resolved.review_id == "review"
-        assert resolved.phase == "reviewing"
+def test_claude_attempts_use_attempt_scoped_session_id():
+    calls = []
+    project = {
+        "id": "project", "projectExecutionEnabled": True, "workflowActive": False, "workflowPhase": "idle",
+        "tasks": [{
+            "id": "task", "activeAttemptId": "attempt", "executionState": "reviewing",
+            "executorAgentId": "agent", "activeReviewId": "review", "updatedAt": "2",
+        }],
+        "columns": [],
+    }
+    resolved = service([project], descriptors={"agent": {"providerKind": "claude-code"}}, calls=calls).resolve_scope("project").scope
+    assert resolved and resolved.session_task_id == "attempt"
+    assert resolved.session_fallback_ids == ()
+    assert resolved.attempt_id == "attempt" and resolved.review_id == "review"
+    assert resolved.phase == "reviewing"
+
+
+def test_openclaw_attempt_keeps_task_session_with_attempt_fallback():
+    calls = []
+    project = {
+        "id": "project", "projectExecutionEnabled": True, "workflowActive": False, "workflowPhase": "idle",
+        "tasks": [{
+            "id": "task", "activeAttemptId": "attempt", "executionState": "reviewing",
+            "executorAgentId": "agent", "activeReviewId": "review", "updatedAt": "2",
+        }],
+        "columns": [],
+    }
+    resolved = service([project], descriptors={"agent": {"providerKind": "openclaw"}}, calls=calls).resolve_scope("project").scope
+    assert resolved and resolved.session_task_id == "task"
+    assert resolved.session_fallback_ids == ("attempt",)
+    assert resolved.attempt_id == "attempt" and resolved.review_id == "review"
+    assert resolved.phase == "reviewing"
+
+
+def test_openclaw_read_falls_back_to_attempt_session_when_task_session_is_empty():
+    calls = []
+    project = {
+        "id": "project", "projectExecutionEnabled": True,
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {"state": "running"},
+        "tasks": [active_stage_task("task", "agent", updated_at="2")],
+        "columns": [],
+    }
+
+    def read_messages(agent, project_id, task_id, conversation):
+        calls.append(("messages", agent, project_id, task_id, conversation))
+        return [{"text": "attempt message"}] if task_id == "attempt-task" else []
+
+    svc = ProjectWorkflowChatService(
+        ProjectWorkflowChatPorts(
+            workflow_state=lambda project_id: {},
+            persisted_state=lambda project_id: {},
+            load_projects=lambda: {"projects": [project]},
+            project_execution_enabled=lambda project: True,
+            task_agent_id=lambda project, task: task.get("executorAgentId") or "",
+            agent_descriptor=lambda agent_id: {"providerKind": "openclaw"},
+            read_messages=read_messages,
+            session_active=lambda agent, project_id, task_id: False,
+        )
+    )
+
+    result = svc.read("project")
+
+    assert result["messages"] == [{"text": "attempt message"}]
+    assert calls == [
+        ("messages", "agent", "project", "task", "attempt-task"),
+        ("messages", "agent", "project", "attempt-task", "attempt-task"),
+    ]
+
+
+def test_active_attempt_filters_old_task_session_messages():
+    project = {
+        "id": "project", "projectExecutionEnabled": True,
+        "executionModel": EXECUTION_MODEL_STAGE_PIPELINE_V1,
+        "orchestration": {"state": "running"},
+        "tasks": [{
+            "id": "task",
+            "executionStage": 1,
+            "executionState": "executing",
+            "activeAttemptId": "attempt-new",
+            "executorAgentId": "agent",
+            "updatedAt": "2",
+            "attempts": [
+                {"id": "attempt-old", "startedAt": "2026-07-29T05:00:00+00:00"},
+                {"id": "attempt-new", "startedAt": "2026-07-29T07:34:07+00:00"},
+            ],
+        }],
+        "columns": [],
+    }
+
+    def read_messages(agent, project_id, task_id, conversation):
+        return [
+            {"text": "old attempt", "epochMs": 1785303000000},
+            {"text": "new attempt", "epochMs": 1785310450000},
+        ]
+
+    svc = ProjectWorkflowChatService(
+        ProjectWorkflowChatPorts(
+            workflow_state=lambda project_id: {},
+            persisted_state=lambda project_id: {},
+            load_projects=lambda: {"projects": [project]},
+            project_execution_enabled=lambda project: True,
+            task_agent_id=lambda project, task: task.get("executorAgentId") or "",
+            agent_descriptor=lambda agent_id: {"providerKind": "openclaw"},
+            read_messages=read_messages,
+            session_active=lambda agent, project_id, task_id: True,
+        )
+    )
+
+    result = svc.read("project")
+
+    assert result["messages"] == [{"text": "new attempt", "epochMs": 1785310450000}]
 
 
 def test_most_recent_legacy_task_selection_is_unchanged():
@@ -144,8 +241,8 @@ def test_marked_multi_active_explicit_task_scope_is_execution_authority():
     assert result["agent"] == "old-agent"
     assert result["phase"] == "executing"
     assert result["messages"] == [{"text": "message"}]
-    assert calls[0] == ("messages", "old-agent", "project", "attempt-old", "attempt-old")
-    assert calls[1] == ("active", "old-agent", "project", "attempt-old")
+    assert calls[0] == ("messages", "old-agent", "project", "old", "attempt-old")
+    assert calls[1] == ("active", "old-agent", "project", "old")
 
 
 def test_marked_multi_active_rejects_scope_outside_active_tasks_without_reading_messages():
@@ -180,7 +277,7 @@ def test_marked_single_active_task_can_resolve_without_explicit_scope():
     assert result["ok"] is True
     assert result["taskId"] == "only"
     assert result["agent"] == "agent"
-    assert calls[0] == ("messages", "agent", "project", "attempt-only", "attempt-only")
+    assert calls[0] == ("messages", "agent", "project", "only", "attempt-only")
 
 
 def test_marked_explicit_scope_reads_non_working_active_attempt_states():
@@ -194,7 +291,7 @@ def test_marked_explicit_scope_reads_non_working_active_attempt_states():
     assert result["ok"] is True
     assert result["taskId"] == "awaiting"
     assert result["phase"] == "awaiting_user_acceptance"
-    assert calls[0] == ("messages", "agent", "project", "attempt-awaiting", "attempt-awaiting")
+    assert calls[0] == ("messages", "agent", "project", "awaiting", "attempt-awaiting")
 
 
 def test_service_has_no_server_dependency():

@@ -23,7 +23,9 @@ def handle_get(handler, parsed_url):
     if path in ("/api/meetings", "/api/meetings/active"):
         return send_json(handler, {"ok": True, "meetings": meetings_service._meeting_active_projection()}, status=200)
     if path == "/api/meetings/history":
-        return send_json(handler, {"ok": True, "history": meetings_service._meeting_history_projection()}, status=200)
+        qs = urllib.parse.parse_qs(query or "")
+        summary = (qs.get("summary") or qs.get("compact") or [""])[0] in {"1", "true", "yes"}
+        return send_json(handler, {"ok": True, "history": meetings_service._meeting_history_projection(summary=summary)}, status=200)
     if path == "/api/meetings/requests":
         return send_json(handler, meetings_service._meeting_request_list_filtered(query))
     if path.startswith("/api/meetings/requests/"):

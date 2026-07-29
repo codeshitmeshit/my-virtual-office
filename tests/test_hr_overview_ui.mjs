@@ -8,7 +8,6 @@ const helpers = hr.helpers;
 
 
 assert.equal(helpers.escHtml('<img src=x onerror="boom">'), '&lt;img src=x onerror=&quot;boom&quot;&gt;');
-assert.equal(helpers.statusTone('normalization_failed'), 'danger');
 assert.equal(helpers.statusTone('not_submitted'), 'warning');
 assert.equal(helpers.statusTone('ready'), 'success');
 assert.equal(helpers.statusTone('something-new'), 'neutral');

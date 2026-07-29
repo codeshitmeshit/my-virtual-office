@@ -909,7 +909,9 @@
               }
               if (!event.text) continue;
               const rawText = String(event.text || '');
-              const isA2AEnvelope = rawText.startsWith('[A2A ') && rawText.includes('Message from ') && rawText.includes('Reply directly to the sender');
+              const prefix = rawText.slice(0, 4000);
+              const isA2AEnvelope = rawText.trimStart().startsWith('<agent_platform_message_prompt>')
+                || (prefix.includes('<agent_platform_message_prompt>') && prefix.includes('<reply_instruction>'));
               if (isA2AEnvelope) continue;
               const fromId = event.from?.id || '';
               const role = fromId === agentId ? 'assistant' : (fromId === 'user' ? 'user' : (event.direction === 'reply' ? 'assistant' : 'user'));
@@ -4704,25 +4706,32 @@
   }
 
   function parseA2AEnvelope(text) {
-    const m = String(text || '').match(/^\s*\[A2A\s+([^\]]+)\]\s*\n?/);
-    if (!m) return null;
-    const attrs = {};
-    const raw = m[1];
-    raw.replace(/([A-Za-z][\w-]*)=("[^"]*"|'[^']*'|\S+)/g, (_, k, v) => {
-      v = String(v || '').trim();
-      if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) v = v.slice(1, -1);
-      attrs[k] = v;
-      return '';
-    });
-    const fromId = attrs.from || '';
-    const toId = attrs.to || '';
-    return {
-      fromId,
-      toId,
-      label: attrs.name || agentLabelFromId(fromId) || fromId || 'Agent',
-      toLabel: agentLabelFromId(toId) || toId || '',
-      text: String(text || '').slice(m[0].length).trimStart()
-    };
+    const rawText = String(text || '');
+    const xmlStart = rawText.indexOf('<agent_platform_message_prompt>');
+    const xmlText = xmlStart >= 0 ? rawText.slice(xmlStart) : rawText;
+    const xml = xmlText.match(/^\s*<agent_platform_message_prompt>\s*<metadata[^>]*>\s*<from\s+([^>]*)>([\s\S]*?)<\/from>\s*<to\s+([^>]*)\/>\s*<source\s+([^>]*)>([\s\S]*?)<\/source>\s*<\/metadata>\s*<message>([\s\S]*?)<\/message>\s*<reply_instruction>[\s\S]*?<\/reply_instruction>\s*<\/agent_platform_message_prompt>\s*/);
+    if (xml) {
+      const readAttrs = (value) => {
+        const attrs = {};
+        String(value || '').replace(/([A-Za-z][\w-]*)=("[^"]*"|'[^']*')/g, (_, k, v) => {
+          attrs[k] = String(v || '').slice(1, -1);
+          return '';
+        });
+        return attrs;
+      };
+      const fromAttrs = readAttrs(xml[1]);
+      const toAttrs = readAttrs(xml[3]);
+      const fromId = fromAttrs.id || '';
+      const toId = toAttrs.id || '';
+      return {
+        fromId,
+        toId,
+        label: xml[2] || agentLabelFromId(fromId) || fromId || 'Agent',
+        toLabel: agentLabelFromId(toId) || toId || '',
+        text: String(xml[6] || '').trimStart()
+      };
+    }
+    return null;
   }
 
   function normalizeSenderMeta(meta, role, win) {

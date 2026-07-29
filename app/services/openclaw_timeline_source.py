@@ -98,9 +98,10 @@ class OpenClawWorkflowTimelineSource:
         scope: TimelineScope,
         session_key: str,
         *,
+        source_agent_id: str | None = None,
         max_messages: int = 50,
     ) -> list[dict[str, Any]]:
-        info = self._session_info(scope.agent_id, session_key)
+        info = self._session_info(source_agent_id or scope.agent_id, session_key)
         path = self._session_file(info or {}) if info else None
         if path is None:
             return []

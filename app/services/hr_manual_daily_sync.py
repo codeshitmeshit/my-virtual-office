@@ -14,7 +14,6 @@ from services.hr_assessments import HRAssessmentOrchestrator
 from services.hr_directory import INELIGIBLE_AVAILABILITY
 from services.hr_reporting import (
     DailyReportConversationRequest,
-    HRDailyReportNormalizer,
     HRReportingService,
     daily_report_request_message,
 )
@@ -102,7 +101,6 @@ class HRManualDailySyncService:
         self,
         repository: HRRepository,
         reporting: HRReportingService,
-        normalizer: HRDailyReportNormalizer,
         assessments: HRAssessmentOrchestrator,
         conversation: CallableHRManualDailyConversation,
         *,
@@ -117,8 +115,6 @@ class HRManualDailySyncService:
             raise HRManualDailySyncValidationError("repository must be an HRRepository")
         if not isinstance(reporting, HRReportingService):
             raise HRManualDailySyncValidationError("reporting service is invalid")
-        if not isinstance(normalizer, HRDailyReportNormalizer):
-            raise HRManualDailySyncValidationError("normalizer is invalid")
         if not isinstance(assessments, HRAssessmentOrchestrator):
             raise HRManualDailySyncValidationError("assessment service is invalid")
         if not isinstance(conversation, CallableHRManualDailyConversation):
@@ -131,7 +127,6 @@ class HRManualDailySyncService:
             raise HRManualDailySyncValidationError("manual daily sync limits are invalid")
         self._repository = repository
         self._reporting = reporting
-        self._normalizer = normalizer
         self._assessments = assessments
         self._conversation = conversation
         self._timezone_name = timezone_name
@@ -197,7 +192,6 @@ class HRManualDailySyncService:
                     local_date=local_date,
                     submission_state="waiting",
                     raw_response=None,
-                    normalized=None,
                     expected_revision=0,
                 )
 
@@ -225,9 +219,6 @@ class HRManualDailySyncService:
                 raw_response=str(response),
                 submitted_at=self._now().isoformat(),
             )
-            normalized = self._normalizer.normalize((ai_id,), local_date=local_date)[0]
-            if normalized.status != "normalized":
-                return HRManualDailySyncItem(ai_id, "normalization_failed", normalized.error_code)
             assessed = self._assessments.assess(
                 (ai_id,),
                 local_date=local_date,
@@ -255,7 +246,7 @@ class HRManualDailySyncService:
         return HRManualDailySyncResult(
             local_date,
             len(selected),
-            sum(item.status in {"complete", "assessment_failed", "normalization_failed"} for item in items),
+            sum(item.status in {"complete", "assessment_failed"} for item in items),
             sum(item.status == "complete" for item in items),
             sum(item.status == "no_response" for item in items),
             sum(item.status not in {"complete", "no_response"} for item in items),

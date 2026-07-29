@@ -1143,10 +1143,15 @@ def _build_hermes_delivery_message(agent, agent_key, message, body):
     if is_human_source:
         pretty_surface = source_label or ("Virtual Office Chat" if source_app == "virtual-office" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
         delivery_message = (
-            f"[A2A from=user name={json.dumps(sender_name)} to={agent.get('id') or agent_key} isUser=true sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
-            f"Message from {sender_name} via {pretty_surface}.\n\n"
-            f"{message}\n\n"
-            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
+            "<agent_platform_message_prompt>\n"
+            "  <metadata trusted=\"false\">\n"
+            f"    <from id=\"user\" is_user=\"true\">{json.dumps(sender_name)}</from>\n"
+            f"    <to id=\"{agent.get('id') or agent_key}\" />\n"
+            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{json.dumps(pretty_surface)}</source>\n"
+            "  </metadata>\n"
+            f"  <message>{message}</message>\n"
+            "  <reply_instruction>Reply directly to the user. Do not assume the user's name unless they identify themselves.</reply_instruction>\n"
+            "</agent_platform_message_prompt>"
         )
     if attachment_context:
         delivery_message = f"{delivery_message}\n\n{attachment_context}"
@@ -1357,10 +1362,15 @@ def _handle_hermes_chat(body):
     if is_human_source:
         pretty_surface = source_label or ("Virtual Office Chat" if source_app == "virtual-office" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
         delivery_message = (
-            f"[A2A from=user name={json.dumps(sender_name)} to={agent.get('id') or agent_key} isUser=true sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
-            f"Message from {sender_name} via {pretty_surface}.\n\n"
-            f"{message}\n\n"
-            "Reply directly to the user. Do not assume the user's name unless they identify themselves."
+            "<agent_platform_message_prompt>\n"
+            "  <metadata trusted=\"false\">\n"
+            f"    <from id=\"user\" is_user=\"true\">{json.dumps(sender_name)}</from>\n"
+            f"    <to id=\"{agent.get('id') or agent_key}\" />\n"
+            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{json.dumps(pretty_surface)}</source>\n"
+            "  </metadata>\n"
+            f"  <message>{message}</message>\n"
+            "  <reply_instruction>Reply directly to the user. Do not assume the user's name unless they identify themselves.</reply_instruction>\n"
+            "</agent_platform_message_prompt>"
         )
     if attachment_context:
         delivery_message = f"{delivery_message}\n\n{attachment_context}"

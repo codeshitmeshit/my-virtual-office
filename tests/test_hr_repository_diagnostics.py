@@ -55,7 +55,7 @@ def test_ready_health_reports_schema_integrity_and_is_read_only(repository):
     health = repository.management_health()
     assert health.status == "ready"
     assert health.code == "ok"
-    assert health.schema_version == health.target_schema_version == 7
+    assert health.schema_version == health.target_schema_version == 8
     assert health.database_bytes == len(before_bytes)
     assert health.page_count > 0
     assert health.page_size > 0
@@ -114,20 +114,28 @@ def test_export_is_json_safe_paged_and_read_only(repository):
 
 
 def test_export_decodes_typed_json_fields(repository):
-    repository.save_daily_report(
-        report_id="report-1",
-        cycle_id=None,
+    repository.save_assessment(
+        assessment_id="assessment-1",
         ai_id="agent-0",
         local_date="2026-07-19",
-        submission_state="normalized",
-        raw_response="original",
-        normalized={"completed": ["diagnostics"]},
-        normalizer_id="hr",
-        expected_revision=0,
+        status="complete",
+        workload="appropriate",
+        workload_score=5,
+        principal_contributions=["diagnostics"],
+        rationale="diagnostics",
+        blockers=[],
+        strengths=[],
+        improvements=[],
+        runtime_diagnosis="healthy",
+        information_sufficiency="sufficient",
+        evidence_version="sha256:diagnostics",
+        hr_id="hr",
+        evidence=[],
+        expected_version=0,
     )
-    row = repository.management_export("daily_reports").rows[0]
-    assert row["normalized"] == {"completed": ["diagnostics"]}
-    assert "normalized_json" not in row
+    row = repository.management_export("assessments").rows[0]
+    assert row["principal_contributions"] == ["diagnostics"]
+    assert "principal_contributions_json" not in row
 
 
 @pytest.mark.parametrize(
@@ -177,19 +185,28 @@ def test_export_rejects_single_row_larger_than_response_budget(repository):
 
 
 def test_export_reports_invalid_stored_json_and_does_not_repair_authority(repository):
-    repository.save_daily_report(
-        report_id="report-1",
-        cycle_id=None,
+    repository.save_assessment(
+        assessment_id="assessment-1",
         ai_id="agent-0",
         local_date="2026-07-19",
-        submission_state="normalized",
-        raw_response="original",
-        normalized={"completed": []},
-        expected_revision=0,
+        status="complete",
+        workload="appropriate",
+        workload_score=5,
+        principal_contributions=["diagnostics"],
+        rationale="diagnostics",
+        blockers=[],
+        strengths=[],
+        improvements=[],
+        runtime_diagnosis="healthy",
+        information_sufficiency="sufficient",
+        evidence_version="sha256:diagnostics-invalid",
+        hr_id="hr",
+        evidence=[],
+        expected_version=0,
     )
     with sqlite3.connect(repository.path) as connection:
-        connection.execute("UPDATE daily_reports SET normalized_json = '{broken'")
+        connection.execute("UPDATE assessments SET principal_contributions_json = '{broken'")
     before = repository.path.read_bytes()
     with pytest.raises(HRRepositoryCorruptionError, match="invalid JSON"):
-        repository.management_export("daily_reports")
+        repository.management_export("assessments")
     assert repository.path.read_bytes() == before

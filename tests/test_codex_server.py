@@ -50,7 +50,7 @@ def test_vo_provider_guidance_prefix_is_idempotent():
 
     repeated = server._with_vo_provider_guidance(message)
     assert repeated == message
-    assert repeated.count("[Virtual Office routing guidance]") == 1
+    assert repeated.count("<virtual_office_routing_guidance>") == 1
 
 
 def test_codex_approval_identifies_host_side_vo_skill_read_only_curl():

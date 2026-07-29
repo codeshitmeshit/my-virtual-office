@@ -428,15 +428,19 @@ class HRAssessmentOrchestrator:
         report_payload = {
             "submissionState": report.submission_state,
             "rawResponse": report.raw_response,
-            "normalized": report.normalized,
             "requestedAt": report.requested_at,
             "windowClosedAt": report.window_closed_at,
             "submittedAt": report.submitted_at,
         }
         return (
-            f"{schema}\n{policy}\nAgent AI ID: {report.ai_id}\nDate: {report.local_date}\n"
-            f"Agent report: {json.dumps(report_payload, ensure_ascii=False)}\n"
-            f"Allowed evidence: {json.dumps(cls._evidence_payload(bundle), ensure_ascii=False)}"
+            "<hr_assessment_prompt>\n"
+            f"  <output_contract>{schema}</output_contract>\n"
+            f"  <evidence_policy>{policy}</evidence_policy>\n"
+            f"  <agent ai_id=\"{report.ai_id}\" />\n"
+            f"  <local_date>{report.local_date}</local_date>\n"
+            f"  <agent_report>{json.dumps(report_payload, ensure_ascii=False)}</agent_report>\n"
+            f"  <allowed_evidence>{json.dumps(cls._evidence_payload(bundle), ensure_ascii=False)}</allowed_evidence>\n"
+            "</hr_assessment_prompt>"
         )
 
     @staticmethod
@@ -562,14 +566,10 @@ class HRAssessmentOrchestrator:
                 evidence_rows = self._referenced_evidence(parsed, bundle)
                 effective_revision_reason = revision_reason
                 if current is not None:
-                    normalized_submission = (
-                        report.normalized.get("submission", {}).get("state")
-                        if isinstance(report.normalized, dict)
-                        else None
-                    )
                     effective_revision_reason = effective_revision_reason or (
-                        "late_report" if report.submission_state == "late_submitted"
-                        or normalized_submission == "late_submitted" else "evidence_changed"
+                        "late_report"
+                        if report.submission_state == "late_submitted"
+                        else "evidence_changed"
                     )
                 assessment = self._repository.save_assessment(
                     assessment_id=(

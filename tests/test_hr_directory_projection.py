@@ -68,10 +68,8 @@ def add_sensitive_records(repository):
         cycle_id=None,
         ai_id="agent-1",
         local_date="2026-07-19",
-        submission_state="normalized",
+        submission_state="submitted",
         raw_response="RAW_PRIVATE_REPORT",
-        normalized={"blockers": ["PRIVATE_BLOCKER"]},
-        normalizer_id="hr",
         expected_revision=0,
     )
     repository.save_assessment(

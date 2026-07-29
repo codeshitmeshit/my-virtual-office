@@ -1,4 +1,3 @@
-import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -20,7 +19,7 @@ from services.hr_manual_daily_sync import (
     HRManualDailySyncService,
     HRManualDailySyncValidationError,
 )
-from services.hr_reporting import HRDailyReportNormalizer, HRReportingService
+from services.hr_reporting import HRReportingService
 from services.hr_repository import HRRepository
 from services.hr_command_status import HRCommandStatusTracker
 
@@ -38,19 +37,12 @@ class FakeConversation:
         return self.responses[ai_id]
 
     def ask_hr(self, prompt, _key, _timeout):
-        if "Normalize the Agent's daily report" in prompt:
-            ai_id = prompt.split("Agent AI ID: ", 1)[1].splitlines()[0]
-            submission = json.loads(prompt.split("submission: ", 1)[1].splitlines()[0])
-            return json.dumps({
-                "schemaVersion": 1, "localDate": "2026-07-20", "agentAiId": ai_id,
-                "completedWork": ["corrected work"], "relatedProjectsOrTasks": [],
-                "artifacts": [], "blockers": [], "requestedHelp": [],
-                "submission": submission,
-            })
-        ai_id = prompt.split("Agent AI ID: ", 1)[1].splitlines()[0]
+        ai_id = prompt.split('<agent ai_id="', 1)[1].split('"', 1)[0]
+        import json
         return json.dumps({
             "schemaVersion": 1, "agentAiId": ai_id, "localDate": "2026-07-20",
             "principalContributions": [], "workload": "insufficient_information",
+            "workloadScore": 1,
             "rationale": "Only the refreshed self-report is available.",
             "evidenceReferences": [], "blockers": [], "strengths": [],
             "improvements": ["Add independently verifiable delivery evidence."],
@@ -73,7 +65,6 @@ def build(tmp_path):
     reporting = HRReportingService(
         repository, clock=lambda: NOW, claim_token_factory=lambda request_id: f"claim:{request_id}"
     )
-    normalizer = HRDailyReportNormalizer(repository, conversation, clock=lambda: NOW)
     empty = EmptyHREvidencePort()
     evidence = HREvidenceCollector(HREvidencePorts(empty, empty, empty, empty, empty, empty))
     assessments = HRAssessmentOrchestrator(
@@ -81,7 +72,7 @@ def build(tmp_path):
         claim_token_factory=lambda job_id: f"claim:{job_id}", claim_lease_seconds=90,
     )
     service = HRManualDailySyncService(
-        repository, reporting, normalizer, assessments, conversation,
+        repository, reporting, assessments, conversation,
         timezone_name="UTC", submission_window_minutes=120, max_workers=2,
         timeout_seconds=30, clock=lambda: NOW,
     )
@@ -98,7 +89,6 @@ def test_manual_sync_replaces_report_and_versions_assessment(tmp_path):
     report = repository.get_daily_report("agent-1", "2026-07-20")
     assessment = repository.get_current_assessment("agent-1", "2026-07-20")
     assert report.raw_response == "first corrected report"
-    assert report.normalized["completedWork"] == ["corrected work"]
     assert assessment.version == 1
 
     fake.responses["agent-1"] = "second corrected report"

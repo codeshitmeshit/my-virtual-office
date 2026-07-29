@@ -102,8 +102,6 @@ def test_visible_request_preserves_context_idempotency_and_raw_response(setup):
     stored = repository.get_daily_report("agent-1", "2026-07-19")
     assert stored.raw_response == raw
     assert stored.submission_state == "submitted"
-    assert stored.normalized is None
-    assert stored.normalizer_id == ""
 
 
 def test_timeout_and_failure_are_sanitized_and_isolated(setup):
@@ -141,7 +139,6 @@ def test_no_response_does_not_invent_report_content(setup, response):
     assert request.status == "no_response"
     assert report.submission_state == "waiting"
     assert report.raw_response is None
-    assert report.normalized is None
 
 
 def test_completed_request_is_restart_idempotent_and_not_resent(setup):
@@ -184,7 +181,7 @@ def test_daily_report_contract_escapes_identity_and_keeps_text_fallback():
     assert "自然语言回答" in message
 
 
-def test_structured_agent_json_is_preserved_as_raw_before_hr_normalization(setup):
+def test_structured_agent_json_is_preserved_as_raw_for_hr_assessment(setup):
     repository, reporting, opened = setup
     raw = '{"schemaVersion":1,"agentAiId":"agent-1","localDate":"2026-07-19","completedWork":["done"],"relatedProjectsOrTasks":[],"artifacts":[],"blockers":[],"requestedHelp":[]}'
     result = collector(

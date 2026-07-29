@@ -194,10 +194,15 @@ class VOAgentCommunicationService:
             sender_label = f"{provider_label}: {base_name}" if provider_label else base_name
             envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
         target_prompt = (
-            f"[A2A from={from_ref['id']} name={json.dumps(sender_label)} to={to_ref['id']} isUser={'true' if is_human_source else 'false'} sourceApp={json.dumps(source_app)} sourceSurface={json.dumps(source_surface)}]\n"
-            f"Message from {sender_label} via {envelope_source}.\n\n"
-            f"{message}\n\n"
-            "Reply directly to the sender. Keep the reply concise unless detail is needed."
+            "<agent_platform_message_prompt>\n"
+            "  <metadata trusted=\"false\">\n"
+            f"    <from id=\"{from_ref['id']}\" is_user=\"{'true' if is_human_source else 'false'}\">{json.dumps(sender_label)}</from>\n"
+            f"    <to id=\"{to_ref['id']}\" />\n"
+            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{envelope_source}</source>\n"
+            "  </metadata>\n"
+            f"  <message>{message}</message>\n"
+            "  <reply_instruction>Reply directly to the sender. Keep the reply concise unless detail is needed.</reply_instruction>\n"
+            "</agent_platform_message_prompt>"
         )
         target_prompt = self._ports.add_provider_guidance(target_prompt)
 

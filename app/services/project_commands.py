@@ -178,7 +178,7 @@ def create_task(project_id: str, body: Mapping[str, Any], *, repository: Project
                 "executorAgentId": task_config.get("executorAgentId"),
                 "reviewerAgentId": task_config.get("reviewerAgentId"),
                 "requiresUserAcceptance": task_config.get("requiresUserAcceptance", False),
-                "allowReviewerlessExecution": task_config.get("allowReviewerlessExecution", False),
+                "allowReviewerlessExecution": task_config.get("allowReviewerlessExecution", True),
                 "scheduledRepeatEnabled": task_config.get("scheduledRepeatEnabled", False),
                 "dueDate": task_config.get("dueDate"),
                 "tags": task_config.get("tags", []),

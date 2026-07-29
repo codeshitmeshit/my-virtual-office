@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Callable, Mapping
 
 from .project_orchestration import active_task_ids, is_marked_project, orchestration_state, task_is_active
@@ -21,8 +22,10 @@ class ProjectWorkflowScope:
     profile: str
     conversation_id: str
     attempt_id: str
+    attempt_started_epoch_ms: int
     review_id: str
     phase: str
+    session_fallback_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -58,6 +61,54 @@ def _most_recent_task(tasks: list[Mapping[str, Any]]) -> Mapping[str, Any] | Non
     if not tasks:
         return None
     return sorted(tasks, key=lambda item: str(item.get("updatedAt") or ""), reverse=True)[0]
+
+
+def _epoch_ms(value: Any) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, (int, float)):
+        raw = int(value)
+        return raw if raw > 10_000_000_000 else raw * 1000
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    try:
+        raw = int(float(text))
+        return raw if raw > 10_000_000_000 else raw * 1000
+    except (TypeError, ValueError):
+        pass
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return int(parsed.timestamp() * 1000)
+    except ValueError:
+        return 0
+
+
+def _attempt_started_epoch_ms(task: Mapping[str, Any] | None, attempt_id: str) -> int:
+    if not task or not attempt_id:
+        return 0
+    attempts = task.get("attempts") if isinstance(task.get("attempts"), list) else []
+    attempt = next(
+        (
+            item for item in attempts
+            if isinstance(item, Mapping) and str(item.get("id") or "") == attempt_id
+        ),
+        None,
+    )
+    if not attempt:
+        return 0
+    return _epoch_ms(attempt.get("startedAt") or attempt.get("createdAt"))
+
+
+def _message_epoch_ms(message: Mapping[str, Any]) -> int:
+    return _epoch_ms(
+        message.get("epochMs")
+        or message.get("ts")
+        or message.get("timestamp")
+        or message.get("createdAt")
+    )
 
 
 def _marked_scope_payload(project: Mapping[str, Any], phase: str, *, code: str = "task_scope_required") -> dict[str, Any]:
@@ -163,7 +214,9 @@ class ProjectWorkflowChatService:
         provider_kind = str(descriptor.get("providerKind") or "openclaw").strip().lower()
         profile = str(descriptor.get("profile") or descriptor.get("providerAgentId") or "")
         project_execution_session = execution_enabled and bool(conversation_id)
-        session_task_id = conversation_id if project_execution_session and provider_kind not in {"hermes", "codex"} else str(task_id)
+        use_attempt_scoped_session = project_execution_session and provider_kind in {"claude-code"}
+        session_task_id = conversation_id if use_attempt_scoped_session else str(task_id)
+        session_fallback_ids = (conversation_id,) if project_execution_session and conversation_id != session_task_id else ()
         return ScopeResolution(
             ProjectWorkflowScope(
                 project_id=project_id,
@@ -174,8 +227,10 @@ class ProjectWorkflowChatService:
                 profile=profile,
                 conversation_id=conversation_id,
                 attempt_id=conversation_id,
+                attempt_started_epoch_ms=_attempt_started_epoch_ms(task, conversation_id),
                 review_id=str((task or {}).get("activeReviewId") or ""),
                 phase=str(phase or ""),
+                session_fallback_ids=session_fallback_ids,
             )
         )
 
@@ -184,13 +239,27 @@ class ProjectWorkflowChatService:
         if resolution.scope is None:
             return dict(resolution.empty_payload or {"ok": True, "messages": [], "agent": None})
         scope = resolution.scope
-        messages = self._ports.read_messages(
-            scope.agent_id,
-            scope.project_id,
-            scope.session_task_id,
-            scope.conversation_id or None,
-        )
-        active = self._ports.session_active(scope.agent_id, scope.project_id, scope.session_task_id)
+        messages = []
+        active = False
+        session_candidates = (scope.session_task_id, *scope.session_fallback_ids)
+        for session_task_id in session_candidates:
+            messages = self._ports.read_messages(
+                scope.agent_id,
+                scope.project_id,
+                session_task_id,
+                scope.conversation_id or None,
+            )
+            active = self._ports.session_active(scope.agent_id, scope.project_id, session_task_id)
+            if messages or active:
+                break
+        if scope.attempt_started_epoch_ms:
+            threshold = max(0, scope.attempt_started_epoch_ms - 2_000)
+            messages = [
+                message for message in messages
+                if not isinstance(message, Mapping)
+                or not _message_epoch_ms(message)
+                or _message_epoch_ms(message) >= threshold
+            ]
         return {
             "ok": True,
             "messages": messages,

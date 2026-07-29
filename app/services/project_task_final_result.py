@@ -175,11 +175,11 @@ def prior_stage_result_prompt_block(project: Mapping[str, Any], task: Mapping[st
     if not selected:
         return ""
     lines = [
-        "PRIOR STAGE RESULT INDEX:",
-        "Use these prior task outputs as dependency context. Inspect the listed Markdown path or artifact refs when the current task depends on the earlier conclusion. Do not assume parallel tasks were merged into one output.",
+        "<prior_stage_result_index>",
+        "  <usage>Use these prior task outputs as dependency context. Inspect the listed Markdown path or artifact refs when the current task depends on the earlier conclusion. Do not assume parallel tasks were merged into one output.</usage>",
     ]
     for handoff in selected:
-        lines.append(f"- Stage {handoff.get('stage')}:")
+        lines.append(f"  <stage index=\"{handoff.get('stage')}\">")
         tasks = handoff.get("tasks") if isinstance(handoff.get("tasks"), list) else []
         for item in tasks:
             if not isinstance(item, Mapping):
@@ -187,21 +187,25 @@ def prior_stage_result_prompt_block(project: Mapping[str, Any], task: Mapping[st
             path = str(item.get("markdownPath") or "")
             summary = _compact(item.get("summary"), 360)
             lines.append(
-                "  - "
-                f"{item.get('title') or item.get('taskId')} "
-                f"[taskId={item.get('taskId')}, status={item.get('status')}, result={path or 'missing'}]: "
+                "    "
+                f"<task_result task_id=\"{item.get('taskId')}\" status=\"{item.get('status')}\" result=\"{path or 'missing'}\" title=\"{item.get('title') or item.get('taskId')}\">"
                 f"{summary or 'No summary recorded.'}"
+                "</task_result>"
             )
+        lines.append("  </stage>")
+    lines.append("</prior_stage_result_index>")
     return "\n".join(lines) + "\n"
 
 
 def task_final_result_prompt_instructions() -> str:
     return (
-        "TASK FINAL RESULT REQUIREMENT:\n"
-        f"- Treat `{FINAL_RESULT_FILENAME}` as the mandatory default artifact for this task.\n"
-        "- Your final Markdown summary is the source for that artifact when no explicit deliverable file is requested.\n"
-        "- Include the final conclusion, completed work, changed files/artifacts, verification, remaining risks, and notes useful for later stages.\n"
-        "- Later-stage tasks will receive only compact indexes and paths by default, so keep this summary self-contained and searchable.\n"
+        "<task_final_result_requirement>\n"
+        f"  <artifact>{FINAL_RESULT_FILENAME}</artifact>\n"
+        "  <rule>Treat the artifact above as the mandatory default artifact for this task.</rule>\n"
+        "  <rule>Your final Markdown summary is the source for that artifact when no explicit deliverable file is requested.</rule>\n"
+        "  <rule>Include the final conclusion, completed work, changed files/artifacts, verification, remaining risks, and notes useful for later stages.</rule>\n"
+        "  <rule>Later-stage tasks will receive only compact indexes and paths by default, so keep this summary self-contained and searchable.</rule>\n"
+        "</task_final_result_requirement>\n"
     )
 
 

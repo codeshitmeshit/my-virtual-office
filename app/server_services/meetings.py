@@ -6,6 +6,11 @@ configuration while removing domain business bodies from server.py.
 """
 
 import sys
+from services.meeting_priority_policy import (
+    coerce_moderator_outcome_for_priority,
+    default_ai_request_resolution_policy,
+    urgency_score,
+)
 
 __all__ = ['_exec_meeting_now', '_exec_meeting_parse_ts', '_meeting_preparing_timeout_sec', '_exec_meeting_empty_store', '_load_exec_meeting_store', '_save_exec_meeting_store', '_meeting_requests_file', '_meeting_request_empty_store', '_meeting_request_clean_type', '_meeting_request_find_project_task', '_meeting_request_summary', '_meeting_request_context_candidates', '_meeting_request_public', '_meeting_request_processed', '_meeting_request_sort_key', '_meeting_request_sort_time', '_sort_meeting_requests', '_meeting_request_error', '_meeting_request_urgency', '_project_high_priority_ai_meeting_requires_confirmation', '_meeting_request_auto_confirm_reason', '_meeting_request_auto_confirm_label', '_meeting_request_log_auto_confirm_activity', '_meeting_request_notification_related', '_meeting_request_notification_details', '_send_meeting_request_notification', '_meeting_request_approved_notification_details', '_meeting_open_url', '_handle_meeting_request_create', '_meeting_request_list_filtered', '_handle_meeting_request_detail', '_meeting_request_selected_context', '_meeting_project_ref', '_handle_meeting_request_confirm', '_handle_meeting_request_reject', '_exec_meeting_clean_participants', '_exec_meeting_archive_manager_participants', '_exec_meeting_archive_manager_error', '_meeting_context_mode', '_meeting_resolution_policy', '_meeting_context_budget', '_meeting_decision_window_sec', '_meeting_clamped_decision_window_sec', '_meeting_truncate_text', '_exec_meeting_next_seq', '_append_exec_meeting_event', '_meeting_mark_preparing_started', '_release_timed_out_preparing_meetings', '_meeting_formal_turn_exists', '_meeting_pending_formal_turn_exists', '_meeting_provider_completion_should_be_ignored', '_meeting_project_work_map', '_meeting_pending_provider_agents', '_meeting_busy_context_for_agent', '_meeting_conflict_advisory', '_meeting_advisory_timeout', '_meeting_live_advisory_prompt', '_meeting_call_advisory_provider', '_meeting_normalize_advisory_reply', '_meeting_complete_live_advisories', '_meeting_build_conflicts', '_meeting_has_open_conflicts', '_meeting_original_work_snapshot', '_meeting_resume_original_work', '_meeting_find_pending_call', '_meeting_skip_timed_out_provider_call', '_meeting_formal_round_complete', '_meeting_has_substantive_disagreement', '_meeting_arbitration_snapshot', '_meeting_open_decision_window', '_meeting_continue_from_decision_window', '_rebuild_exec_meeting_occupancy', '_exec_meeting_pending_calls_projection', '_meeting_normalize_action_item', '_meeting_ensure_action_item_drafts', '_exec_meeting_project_active', '_exec_meeting_transcript_projection', '_exec_meeting_project_history', '_meeting_active_projection', '_meeting_history_projection', '_meeting_find_action_draft', '_meeting_audit_action_item', '_meeting_action_item_snapshot', '_meeting_confirm_action_item_on_source_task', '_handle_executable_meeting_action_item', '_handle_executable_meeting_create', '_handle_executable_meeting_detail', '_handle_executable_meeting_events', '_handle_executable_meeting_conflict_action', '_handle_executable_meeting_transition', '_handle_executable_meeting_intervention', '_handle_executable_meeting_agenda_change', '_handle_executable_meeting_arbitration', '_handle_executable_meeting_moderator_takeover', '_meeting_build_targeted_prompt', '_handle_executable_meeting_targeted_question', '_meeting_events_text', '_meeting_update_rolling_summary', '_meeting_strip_json_fence', '_meeting_parse_json_object', '_meeting_coerce_list', '_meeting_structured_display_text', '_meeting_parse_structured_turn', '_meeting_extract_payload_text', '_meeting_provider_raw_summary', '_meeting_normalize_provider_reply', '_meeting_build_result_prompt', '_meeting_result_outcome', '_meeting_coerce_action_items', '_meeting_parse_result', '_meeting_fallback_result', '_handle_executable_meeting_end_with_moderator', '_meeting_build_prompt', '_meeting_provider_ref', '_meeting_provider_timeout', '_meeting_call_provider', '_handle_executable_meeting_run', '_handle_executable_meeting_reconcile', '_handle_meeting_create', '_handle_meeting_end', '_handle_meeting_end_all', '_handle_meeting_history_delete', '_meeting_request_unresolved_for_task', '_meeting_request_resolve_task_blocker']
 
@@ -201,6 +206,20 @@ def _meeting_request_public(req):
     result["contextCandidates"] = [dict(c, selected=False) for c in result.get("contextCandidates", [])]
     return result
 
+def _meeting_request_default_context_ids(context_candidates):
+    return [
+        str(candidate.get("id") or "")
+        for candidate in (context_candidates or [])
+        if isinstance(candidate, dict) and str(candidate.get("id") or "").strip()
+    ]
+
+def _meeting_request_requested_context_ids(body, context_candidates):
+    if "selectedContextIds" in body:
+        return list(body.get("selectedContextIds") or [])
+    if "contextIds" in body:
+        return list(body.get("contextIds") or [])
+    return _meeting_request_default_context_ids(context_candidates)
+
 def _meeting_request_processed(req):
     status = str((req or {}).get("status") or "").strip()
     if status in {"confirmed", "rejected"}:
@@ -225,11 +244,7 @@ def _meeting_request_error(message, status=400, code="bad_request"):
     return {"ok": False, "error": message, "code": code, "_status": status}
 
 def _meeting_request_urgency(raw):
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = 3
-    return max(1, min(5, value))
+    return urgency_score(raw)
 
 def _project_high_priority_ai_meeting_requires_confirmation(project):
     return bool((project or {}).get("highPriorityAiMeetingAutoApprove"))
@@ -387,7 +402,8 @@ def _handle_meeting_request_create(project_id, task_id, body):
     now = _exec_meeting_now()
     request_id = str(body.get("id") or uuid.uuid4())
     idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    requested_context_ids = body.get("selectedContextIds") or body.get("contextIds") or []
+    context_candidates = _meeting_request_context_candidates(project, task)
+    requested_context_ids = _meeting_request_requested_context_ids(body, context_candidates)
     requested_supplemental_context = str(body.get("supplementalContext") or "").strip()
     with _MEETING_REQUEST_LOCK:
         store = _load_meeting_request_store()
@@ -419,7 +435,7 @@ def _handle_meeting_request_create(project_id, task_id, body):
             "urgency": urgency,
             "blockingTask": True,
             "taskBlocker": {"status": "pending", "createdAt": now, "updatedAt": now, "resolvedAt": ""},
-            "contextCandidates": _meeting_request_context_candidates(project, task),
+            "contextCandidates": context_candidates,
             "requestedContext": {
                 "selectedContextIds": list(requested_context_ids),
                 "supplementalContext": requested_supplemental_context,
@@ -439,12 +455,13 @@ def _handle_meeting_request_create(project_id, task_id, body):
         return blocked
     auto_confirm_reason = _meeting_request_auto_confirm_reason(project, urgency)
     if auto_confirm_reason:
+        requested_context = request.get("requestedContext") if isinstance(request.get("requestedContext"), dict) else {}
         auto = _handle_meeting_request_confirm(request_id, {
             "confirmedBy": f"agent:{requester}",
             "autoConfirmed": True,
             "autoConfirmReason": auto_confirm_reason,
-            "selectedContextIds": requested_context_ids,
-            "supplementalContext": requested_supplemental_context,
+            "selectedContextIds": requested_context.get("selectedContextIds") or requested_context_ids,
+            "supplementalContext": requested_context.get("supplementalContext") if "supplementalContext" in requested_context else requested_supplemental_context,
             "idempotencyKey": f"meeting-request-auto:{request_id}",
         })
         if auto.get("ok"):
@@ -533,8 +550,10 @@ def _handle_meeting_request_confirm(request_id, body):
                 return {"ok": True, "request": _meeting_request_public(req), "meetingId": req["conversion"]["meetingId"], "idempotent": False, "humanOverride": True}
             return {"ok": True, "request": _meeting_request_public(req), "meetingId": req["conversion"]["meetingId"], "idempotent": True}
         proposal = req.get("originalProposal") or {}
-        selected_ids = body.get("selectedContextIds") or body.get("contextIds") or []
-        context, selected_candidates = _meeting_request_selected_context(req, selected_ids, body.get("supplementalContext"))
+        stored_context = req.get("requestedContext") if isinstance(req.get("requestedContext"), dict) else {}
+        selected_ids = _meeting_request_requested_context_ids(body, req.get("contextCandidates") or []) if ("selectedContextIds" in body or "contextIds" in body) else list(stored_context.get("selectedContextIds") or [])
+        supplemental_context = body.get("supplementalContext") if "supplementalContext" in body else stored_context.get("supplementalContext")
+        context, selected_candidates = _meeting_request_selected_context(req, selected_ids, supplemental_context)
         final_config = {
             "topic": str(body.get("topic") or proposal.get("topic") or "").strip(),
             "purpose": str(body.get("purpose") or proposal.get("purpose") or proposal.get("goal") or "").strip(),
@@ -543,11 +562,11 @@ def _handle_meeting_request_confirm(request_id, body):
             "moderator": str(body.get("moderator") or proposal.get("suggestedModerator") or "").strip(),
             "maxRounds": body.get("maxRounds") or proposal.get("maxRounds") or 2,
             "contextMode": body.get("contextMode") or "incremental",
-            "resolutionPolicy": body.get("resolutionPolicy") or "moderator_decision",
+            "resolutionPolicy": body.get("resolutionPolicy") or default_ai_request_resolution_policy(req.get("urgency")),
             "context": context,
             "selectedContextIds": list(selected_ids),
             "selectedContextSnapshot": selected_candidates,
-            "supplementalContext": str(body.get("supplementalContext") or "").strip(),
+            "supplementalContext": str(supplemental_context or "").strip(),
             "projectId": str(body.get("projectId") or (req.get("source") or {}).get("projectId") or "").strip(),
         }
         project_ref = _meeting_project_ref(final_config["projectId"])
@@ -1045,24 +1064,23 @@ def _meeting_live_advisory_prompt(meeting, conflict):
     if source.get("meetingId"):
         occupied_meeting = str(source.get("meetingId") or "")
     return (
-        "你是 Virtual Office 的 busy-agent subagent advisory turn。"
-        "现在有人想邀请你参加另一场 AI 会议，但系统检测到你正在忙。"
-        "请只评估你自己的可用性和打断风险，不要替用户执行等待、更换或强制加入。\n\n"
-        f"待加入会议: {meeting.get('topic') or meeting.get('agenda') or meeting.get('id')}\n"
-        f"当前冲突原因: {conflict.get('reason') or conflict.get('busyKind')}\n"
-        f"当前忙碌摘要: {conflict.get('summary') or ''}\n"
-        f"已占用会议ID: {occupied_meeting}\n"
-        f"暂停能力: {conflict.get('pauseCapability') or 'unknown'}\n"
-        f"风险级别: {conflict.get('riskLevel') or 'medium'}\n\n"
-        "返回且只返回一个 JSON 对象，不要 Markdown，不要额外说明。"
-        "Schema: {"
-        "\"recommendation\":\"wait|reserve|replace|force_join\","
-        "\"estimatedAvailability\":\"例如 2-5 分钟、当前会议结束后、unknown\","
-        "\"busyReason\":\"用中文简述你为什么忙\","
-        "\"interruptionRisk\":\"用中文说明打断风险\","
-        "\"resumeNotes\":\"用中文说明如果被打断如何恢复或为什么不能恢复\","
-        "\"confidence\":\"high|medium|low\""
-        "}。"
+        "<meeting_live_advisory_prompt>\n"
+        "  <role>你是 Virtual Office 的 busy-agent subagent advisory turn。</role>\n"
+        "  <situation>现在有人想邀请你参加另一场 AI 会议，但系统检测到你正在忙。</situation>\n"
+        "  <boundary>请只评估你自己的可用性和打断风险，不要替用户执行等待、更换或强制加入。</boundary>\n"
+        "  <candidate_meeting>\n"
+        f"    <topic>{meeting.get('topic') or meeting.get('agenda') or meeting.get('id')}</topic>\n"
+        "  </candidate_meeting>\n"
+        "  <conflict>\n"
+        f"    <reason>{conflict.get('reason') or conflict.get('busyKind')}</reason>\n"
+        f"    <summary>{conflict.get('summary') or ''}</summary>\n"
+        f"    <occupied_meeting_id>{occupied_meeting}</occupied_meeting_id>\n"
+        f"    <pause_capability>{conflict.get('pauseCapability') or 'unknown'}</pause_capability>\n"
+        f"    <risk_level>{conflict.get('riskLevel') or 'medium'}</risk_level>\n"
+        "  </conflict>\n"
+        "  <output_contract>返回且只返回一个 JSON 对象，不要 Markdown，不要额外说明。</output_contract>\n"
+        "  <json_schema>{\"recommendation\":\"wait|reserve|replace|force_join\",\"estimatedAvailability\":\"例如 2-5 分钟、当前会议结束后、unknown\",\"busyReason\":\"用中文简述你为什么忙\",\"interruptionRisk\":\"用中文说明打断风险\",\"resumeNotes\":\"用中文说明如果被打断如何恢复或为什么不能恢复\",\"confidence\":\"high|medium|low\"}</json_schema>\n"
+        "</meeting_live_advisory_prompt>"
     )
 
 def _meeting_call_advisory_provider(meeting, conflict):
@@ -1500,6 +1518,7 @@ def _exec_meeting_project_active(meeting, events=None):
         "currentRound": meeting.get("round", 0),
         "maxRounds": meeting.get("maxRounds", 0),
         "moderator": meeting.get("moderator"),
+        "context": meeting.get("context") or "",
         "contextMode": meeting.get("contextMode", "incremental"),
         "resolutionPolicy": _meeting_resolution_policy(meeting.get("resolutionPolicy")),
         "currentSpeaker": meeting.get("currentSpeaker", ""),
@@ -1611,7 +1630,44 @@ def _exec_meeting_transcript_projection(events):
             })
     return transcript
 
-def _exec_meeting_project_history(meeting, events=None):
+def _exec_meeting_project_history(meeting, events=None, summary=False):
+    if summary:
+        participants = meeting.get("participants", [])
+        result = meeting.get("result") or {}
+        return {
+            "id": meeting.get("id"),
+            "topic": meeting.get("topic", "Untitled Meeting"),
+            "agenda": meeting.get("agenda") or meeting.get("topic", "Untitled Meeting"),
+            "purpose": meeting.get("purpose", ""),
+            "kind": meeting.get("meetingType", meeting.get("kind", "discussion")),
+            "type": "group" if len(participants) > 2 else "1on1",
+            "organizer": meeting.get("organizer", ""),
+            "projectId": meeting.get("projectId", ""),
+            "projectTitle": meeting.get("projectTitle", ""),
+            "source": meeting.get("source") or {},
+            "urgency": (meeting.get("source") or {}).get("urgency") or meeting.get("urgency"),
+            "status": "completed" if meeting.get("stage") == "completed" else meeting.get("stage"),
+            "participants": participants,
+            "agents": participants,
+            "executableMeeting": True,
+            "executionStage": meeting.get("stage"),
+            "executionPreviousStage": meeting.get("previousStage", ""),
+            "executionVersion": meeting.get("version", 0),
+            "currentRound": meeting.get("round", 0),
+            "maxRounds": meeting.get("maxRounds", 0),
+            "moderator": meeting.get("moderator"),
+            "contextMode": meeting.get("contextMode", "incremental"),
+            "summary": result.get("summary", ""),
+            "resolution": result.get("decision", ""),
+            "result": {"summary": result.get("summary", ""), "decision": result.get("decision", "")},
+            "actionItems": [],
+            "actionItemDrafts": [],
+            "transcript": [],
+            "pendingCalls": [],
+            "originalWork": {},
+            "detailLoaded": False,
+            "endedAt": int(datetime.fromisoformat(meeting.get("updatedAt").replace("Z", "+00:00")).timestamp()) if meeting.get("updatedAt") else int(time.time()),
+        }
     projected = _exec_meeting_project_active(meeting, events or [])
     projected["status"] = "completed" if meeting.get("stage") == "completed" else meeting.get("stage")
     projected["summary"] = (meeting.get("result") or {}).get("summary", "")
@@ -1620,6 +1676,20 @@ def _exec_meeting_project_history(meeting, events=None):
     projected["actionItemDrafts"] = meeting.get("actionItemDrafts") or []
     projected["transcript"] = _exec_meeting_transcript_projection(events or [])
     projected["endedAt"] = int(datetime.fromisoformat(meeting.get("updatedAt").replace("Z", "+00:00")).timestamp()) if meeting.get("updatedAt") else int(time.time())
+    return projected
+
+def _meeting_history_summary_record(record):
+    if not isinstance(record, dict):
+        return record
+    projected = dict(record)
+    projected.pop("context", None)
+    projected.pop("initialContext", None)
+    projected.pop("originalContext", None)
+    projected.pop("confirmedContext", None)
+    projected.pop("originalWork", None)
+    projected["transcript"] = []
+    projected["pendingCalls"] = []
+    projected["detailLoaded"] = False
     return projected
 
 def _meeting_active_projection():
@@ -1639,18 +1709,20 @@ def _meeting_active_projection():
         ]
     return active + exec_active
 
-def _meeting_history_projection():
+def _meeting_history_projection(summary=False):
     data = _load_meetings_file()
     history = data.get("_meetingHistory", [])
     if not isinstance(history, list):
         history = []
+    if summary:
+        history = [_meeting_history_summary_record(item) for item in history]
     with _EXEC_MEETING_LOCK:
         store = _load_exec_meeting_store()
         released = _release_timed_out_preparing_meetings(store)
         if released:
             _save_exec_meeting_store(store)
         exec_history = [
-            _exec_meeting_project_history(m, store.get("events", {}).get(m.get("id"), []))
+            _exec_meeting_project_history(m, store.get("events", {}).get(m.get("id"), []), summary=summary)
             for m in store.get("meetings", {}).values()
             if m.get("stage") in _EXEC_MEETING_TERMINAL
         ]
@@ -1919,14 +1991,17 @@ def _handle_executable_meeting_detail(meeting_id):
         meeting = store.get("meetings", {}).get(meeting_id)
         if not meeting:
             return {"error": "Executable meeting not found", "_status": 404}
+        events = store.get("events", {}).get(meeting_id, [])
         if meeting.get("stage") == "completed":
             _meeting_ensure_action_item_drafts(store, meeting)
             _save_exec_meeting_store(store)
+            projected = _exec_meeting_project_history(meeting, events)
         else:
             released = _release_timed_out_preparing_meetings(store)
             if released:
                 _save_exec_meeting_store(store)
-        return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
+            projected = _exec_meeting_project_active(meeting, events)
+        return {"ok": True, "meeting": {**meeting, **projected}, "events": events}
 
 def _handle_executable_meeting_events(meeting_id, query_string=""):
     qs = urllib.parse.parse_qs(query_string or "")
@@ -2421,10 +2496,12 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
 def _meeting_build_targeted_prompt(meeting, speaker, question, events):
     base = _meeting_build_prompt(meeting, speaker, meeting.get("decisionForStage") or meeting.get("stage"), events)
     instruction = (
-        "\nTargeted question from the user:\n"
-        f"{_meeting_truncate_text(question, 2000)}\n\n"
-        "Answer this targeted question once. Keep the same JSON schema. "
-        "Do not treat this as a formal round turn.\n"
+        "\n<targeted_question>\n"
+        f"  <from>user</from>\n"
+        f"  <question>{_meeting_truncate_text(question, 2000)}</question>\n"
+        "  <rule>Answer this targeted question once. Keep the same JSON schema.</rule>\n"
+        "  <rule>Do not treat this as a formal round turn.</rule>\n"
+        "</targeted_question>\n"
     )
     budget = _meeting_context_budget(meeting.get("contextBudget"))
     return _meeting_truncate_text(base + instruction, budget["maxPromptChars"])
@@ -2682,26 +2759,28 @@ def _meeting_build_result_prompt(meeting, events):
     transcript = _meeting_events_text(events)
     policy = _meeting_resolution_policy(meeting.get("resolutionPolicy"))
     outcome_instruction = (
-        "Outcome must be one of: approved, rejected, no_consensus, needs_user_decision. "
-        "Use approved when the proposal or answer can be accepted, rejected when it should not pass, "
-        "no_consensus when unresolved disagreements remain, and needs_user_decision only when a human decision is required. "
+        "<outcome_rule>Outcome must be one of: approved, rejected, no_consensus, needs_user_decision. Use approved when the proposal or answer can be accepted, rejected when it should not pass, no_consensus when unresolved disagreements remain, and needs_user_decision only when a human decision is required.</outcome_rule>\n"
     )
     if policy == "moderator_decision":
-        outcome_instruction += "This meeting uses moderator_decision policy, so choose approved, rejected, or no_consensus; do not use needs_user_decision unless essential.\n"
+        outcome_instruction += "<policy_rule>This meeting uses moderator_decision policy, so choose approved, rejected, or no_consensus; do not use needs_user_decision unless essential.</policy_rule>\n"
     else:
-        outcome_instruction += "This meeting uses user_decision policy, so use needs_user_decision if the transcript still requires human arbitration.\n"
+        outcome_instruction += "<policy_rule>This meeting uses user_decision policy, so use needs_user_decision if the transcript still requires human arbitration.</policy_rule>\n"
     return _meeting_truncate_text(
-        "You are the meeting moderator. Summarize and close this meeting based only on the transcript below.\n"
-        f"Meeting topic: {meeting.get('topic') or 'Untitled Meeting'}\n"
-        f"Purpose: {meeting.get('purpose') or ''}\n"
-        f"Type: {meeting.get('meetingType') or 'discussion'}\n"
-        f"Resolution policy: {policy}\n"
-        f"Participants: {', '.join(meeting.get('participants') or [])}\n\n"
-        f"Transcript:\n{transcript or '(no participant turns yet)'}\n\n"
-        "Return exactly one JSON object and no surrounding prose or Markdown fences. "
-        + outcome_instruction +
-        "Use this schema: {\"outcome\":\"approved|rejected|no_consensus|needs_user_decision\",\"summary\":\"...\",\"decision\":\"...\",\"rationale\":\"...\",\"unresolvedQuestions\":[\"...\"],"
-        "\"disagreements\":[\"...\"],\"actionItems\":[{\"owner\":\"...\",\"item\":\"...\"}]}.\n",
+        "<meeting_result_prompt>\n"
+        "  <role>You are the meeting moderator.</role>\n"
+        "  <goal>Summarize and close this meeting based only on the transcript below.</goal>\n"
+        "  <meeting>\n"
+        f"    <topic>{meeting.get('topic') or 'Untitled Meeting'}</topic>\n"
+        f"    <purpose>{meeting.get('purpose') or ''}</purpose>\n"
+        f"    <type>{meeting.get('meetingType') or 'discussion'}</type>\n"
+        f"    <resolution_policy>{policy}</resolution_policy>\n"
+        f"    <participants>{', '.join(meeting.get('participants') or [])}</participants>\n"
+        "  </meeting>\n"
+        f"  <transcript>{transcript or '(no participant turns yet)'}</transcript>\n"
+        "  <output_contract>Return exactly one JSON object and no surrounding prose or Markdown fences.</output_contract>\n"
+        f"  <outcome_rules>\n{outcome_instruction}  </outcome_rules>\n"
+        "  <json_schema>{\"outcome\":\"approved|rejected|no_consensus|needs_user_decision\",\"summary\":\"...\",\"decision\":\"...\",\"rationale\":\"...\",\"unresolvedQuestions\":[\"...\"],\"disagreements\":[\"...\"],\"actionItems\":[{\"owner\":\"...\",\"item\":\"...\"}]}</json_schema>\n"
+        "</meeting_result_prompt>\n",
         (meeting.get("contextBudget") or {}).get("maxPromptChars", 12000),
     )
 
@@ -2886,6 +2965,7 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
             "moderator": moderator,
             "moderatorProviderRef": moderator_payload.get("providerRef") or {},
         }
+        final_result = coerce_moderator_outcome_for_priority(meeting, final_result)
         meeting["result"] = final_result
         meeting["currentSpeaker"] = ""
         _append_exec_meeting_event(store, meeting, "meeting_result", actor={"type": "agent", "id": moderator}, payload=final_result)
@@ -2910,14 +2990,16 @@ def _meeting_build_prompt(meeting, speaker, stage, events):
     topic = meeting.get("topic") or "Untitled Meeting"
     agenda = meeting.get("agenda") or topic
     fixed = (
-        f"Meeting topic: {topic}\n"
-        f"Current agenda: {agenda}\n"
-        f"Purpose: {meeting.get('purpose') or ''}\n"
-        f"Type: {meeting.get('meetingType') or 'discussion'}\n"
-        f"Stage: {stage}\n"
-        f"Round: {meeting.get('round') or 0} of {meeting.get('maxRounds') or 0}\n"
-        f"You are: {speaker}\n"
-        f"Moderator: {meeting.get('moderator') or ''}\n"
+        "<meeting>\n"
+        f"  <topic>{topic}</topic>\n"
+        f"  <agenda>{agenda}</agenda>\n"
+        f"  <purpose>{meeting.get('purpose') or ''}</purpose>\n"
+        f"  <type>{meeting.get('meetingType') or 'discussion'}</type>\n"
+        f"  <stage>{stage}</stage>\n"
+        f"  <round current=\"{meeting.get('round') or 0}\" max=\"{meeting.get('maxRounds') or 0}\" />\n"
+        f"  <speaker>{speaker}</speaker>\n"
+        f"  <moderator>{meeting.get('moderator') or ''}</moderator>\n"
+        "</meeting>\n"
     )
     initial = _meeting_truncate_text(meeting.get("context") or "", budget["maxInitialContextChars"])
     all_events = _meeting_events_text(events)
@@ -2925,22 +3007,20 @@ def _meeting_build_prompt(meeting, speaker, stage, events):
     recent_events = _meeting_events_text(events[-budget["maxRecentEvents"]:])
     summary = _meeting_truncate_text(meeting.get("rollingSummary") or "", budget["maxSummaryChars"])
     if mode == "full":
-        body = f"{fixed}\nConfirmed context:\n{initial}\n\nFull transcript:\n{all_events}\n"
+        context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <full_transcript>{all_events}</full_transcript>\n"
     elif mode == "summary":
-        body = f"{fixed}\nConfirmed context:\n{initial}\n\nRolling summary:\n{summary}\n\nRelevant recent statements:\n{recent_events}\n"
+        context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <rolling_summary>{summary}</rolling_summary>\n  <recent_statements>{recent_events}</recent_statements>\n"
     else:
         if speaker_seen <= 0:
-            body = f"{fixed}\nConfirmed context:\n{initial}\n\nPrior meeting events:\n{recent_events}\n"
+            context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <prior_meeting_events>{recent_events}</prior_meeting_events>\n"
         else:
-            body = f"{fixed}\nNew events since your last turn:\n{unseen_events or '(none)'}\n"
+            context_body = f"  <new_events_since_last_turn>{unseen_events or '(none)'}</new_events_since_last_turn>\n"
     instruction = (
-        "\nInstruction:\n"
-        "Contribute to the meeting. Avoid repeating previous points. "
-        "Return exactly one JSON object and no surrounding prose or Markdown fences. "
-        "Use this schema: {\"position\":\"...\",\"reasoning\":\"...\",\"disagreements\":[\"...\"],"
-        "\"questions\":[\"...\"],\"suggestedNextStep\":\"...\",\"confidence\":\"high|medium|low\"}.\n"
+        "  <instruction>Contribute to the meeting. Avoid repeating previous points.</instruction>\n"
+        "  <output_contract>Return exactly one JSON object and no surrounding prose or Markdown fences.</output_contract>\n"
+        "  <json_schema>{\"position\":\"...\",\"reasoning\":\"...\",\"disagreements\":[\"...\"],\"questions\":[\"...\"],\"suggestedNextStep\":\"...\",\"confidence\":\"high|medium|low\"}</json_schema>\n"
     )
-    prompt = body + instruction
+    prompt = "<meeting_turn_prompt>\n" + fixed + context_body + instruction + "</meeting_turn_prompt>\n"
     return _meeting_truncate_text(prompt, budget["maxPromptChars"])
 
 def _meeting_provider_ref(agent_id):

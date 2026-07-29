@@ -51,7 +51,7 @@ def setup_projection(tmp_path):
         eligible_ai_ids=agent_ids,
     )
 
-    def update(ai_id, state, *, raw=None, normalized=None, submitted=None, closed=None):
+    def update(ai_id, state, *, raw=None, submitted=None, closed=None):
         current = repository.get_daily_report(ai_id, "2026-07-19")
         repository.save_daily_report(
             report_id=current.id,
@@ -60,12 +60,9 @@ def setup_projection(tmp_path):
             local_date="2026-07-19",
             submission_state=state,
             raw_response=raw,
-            normalized=normalized,
-            normalizer_id="hr" if normalized else "",
             requested_at=NOW.isoformat(),
             window_closed_at=closed,
             submitted_at=submitted,
-            normalized_at=NOW.isoformat() if normalized else None,
             expected_revision=current.revision,
         )
 
@@ -78,21 +75,31 @@ def setup_projection(tmp_path):
         closed=CLOSED,
     )
     update("agent-4", "not_submitted", closed=CLOSED)
-    update(
-        "agent-5",
-        "normalization_failed",
-        raw="needs retry",
-        submitted=NOW.isoformat(),
-    )
+    update("agent-5", "submitted", raw="needs retry", submitted=NOW.isoformat())
     update("agent-6", "skipped")
-    update(
-        "agent-7",
-        "normalized",
-        raw="complete",
-        submitted=NOW.isoformat(),
-        normalized={"schemaVersion": 1, "completedWork": ["done"]},
-    )
+    update("agent-7", "submitted", raw="complete", submitted=NOW.isoformat())
     return repository, reporting, opened, HRReportingProjection(repository)
+
+
+def save_assessment(repository, ai_id):
+    return repository.save_assessment(
+        assessment_id=f"assessment:{ai_id}",
+        ai_id=ai_id,
+        local_date="2026-07-19",
+        status="complete",
+        workload="appropriate",
+        workload_score=5,
+        principal_contributions=["Reviewed raw daily report."],
+        rationale="Raw daily report evidence was assessed.",
+        blockers=[],
+        strengths=[],
+        improvements=[],
+        runtime_diagnosis="healthy",
+        information_sufficiency="sufficient",
+        evidence_version=f"sha256:{ai_id}",
+        hr_id="hr",
+        evidence=[],
+    )
 
 
 def test_public_projection_exposes_all_required_states_without_report_content(tmp_path):
@@ -103,9 +110,9 @@ def test_public_projection_exposes_all_required_states_without_report_content(tm
         "submitted",
         "late",
         "not_submitted",
-        "normalization_failed",
+        "submitted",
         "skipped",
-        "complete",
+        "submitted",
     ]
     assert all(isinstance(item, AgentReportPublicStatus) for item in result.items)
     serialized = asdict(result)
@@ -113,30 +120,26 @@ def test_public_projection_exposes_all_required_states_without_report_content(tm
     assert "normalized" not in str(serialized)
     assert result.counts == {
         "waiting": 1,
-        "submitted": 1,
+        "submitted": 3,
         "late": 1,
         "not_submitted": 1,
-        "normalization_failed": 1,
         "skipped": 1,
-        "complete": 1,
+        "complete": 0,
         "failed": 0,
     }
     assert result.total == 7
     assert result.status == "open"
 
 
-def test_management_projection_contains_claims_and_hr_normalization(tmp_path):
+def test_management_projection_contains_claims_and_raw_reports(tmp_path):
     _repository, _reporting, opened, projection = setup_projection(tmp_path)
     result = projection.project_cycle(opened.cycle.id, management=True)
     assert all(isinstance(item, AgentReportManagementStatus) for item in result.items)
     submitted = result.items[1]
-    complete = result.items[-1]
     assert submitted.public.status == "submitted"
     assert submitted.raw_response == "submitted"
-    assert submitted.normalized is None
-    assert complete.raw_response == "complete"
-    assert complete.normalized["completedWork"] == ["done"]
-    assert complete.normalizer_id == "hr"
+    assert not hasattr(submitted, "normalized")
+    assert result.items[-1].raw_response == "complete"
 
 
 def test_paginated_pages_keep_full_cycle_aggregate_counts(tmp_path):
@@ -160,14 +163,13 @@ def test_paginated_pages_keep_full_cycle_aggregate_counts(tmp_path):
     assert third.next_cursor is None
 
 
-def test_closed_cycle_is_not_complete_while_submissions_need_normalization(tmp_path):
+def test_closed_cycle_is_not_complete_while_submissions_need_assessment(tmp_path):
     _repository, reporting, opened, projection = setup_projection(tmp_path)
     reporting.close_cycle(opened.cycle.id, closed_at=datetime.fromisoformat(CLOSED))
     result = projection.project_cycle(opened.cycle.id)
     assert result.status == "processing"
-    assert result.counts["submitted"] == 1
+    assert result.counts["submitted"] == 3
     assert result.counts["late"] == 1
-    assert result.counts["normalization_failed"] == 1
 
 
 def test_closed_cycle_with_only_terminal_outcomes_is_complete(tmp_path):
@@ -179,16 +181,16 @@ def test_closed_cycle_with_only_terminal_outcomes_is_complete(tmp_path):
             cycle_id=current.cycle_id,
             ai_id=ai_id,
             local_date=current.local_date,
-            submission_state="normalized" if current.raw_response else "not_submitted",
+            submission_state=current.submission_state if current.raw_response else "not_submitted",
             raw_response=current.raw_response,
-            normalized={"schemaVersion": 1} if current.raw_response else None,
-            normalizer_id="hr" if current.raw_response else "",
             requested_at=current.requested_at,
             window_closed_at=current.window_closed_at,
             submitted_at=current.submitted_at,
-            normalized_at=NOW.isoformat() if current.raw_response else None,
             expected_revision=current.revision,
         )
+        if current.raw_response:
+            save_assessment(repository, ai_id)
+    save_assessment(repository, "agent-7")
     reporting.close_cycle(opened.cycle.id, closed_at=datetime.fromisoformat(CLOSED))
     result = projection.project_cycle(opened.cycle.id)
     assert result.status == "complete"

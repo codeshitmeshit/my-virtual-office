@@ -10,6 +10,7 @@ from typing import Any, Callable, Mapping, Protocol
 
 from .project_execution import ServiceResult
 from .project_orchestration import (
+    ACTIVE_TASK_STATES,
     STATE_BLOCKED,
     STATE_COMPLETED,
     STATE_DRAFT,
@@ -36,6 +37,7 @@ from .project_orchestration_observability import (
     monotonic_ms,
 )
 from .project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
+from .project_final_report import ensure_project_final_report
 from .project_task_final_result import record_stage_handoff
 
 
@@ -44,6 +46,13 @@ DEFAULT_STAGE_DISPATCH_QUEUE_CAPACITY = 100
 QUEUE_FULL_CODE = "dispatch_queue_full"
 
 TaskRunner = Callable[["StageDispatchWorkItem"], Any]
+
+
+def _allow_skip_reviewer(body: Mapping[str, Any], task: Mapping[str, Any]) -> bool:
+    return (
+        bool(body.get("allowSkipReviewer"))
+        or task.get("allowReviewerlessExecution") is True
+    )
 
 
 class StagePreflightPorts(Protocol):
@@ -460,6 +469,11 @@ def reserve_stage_run(
         project["orchestration"] = state
         project["updatedAt"] = now
         for task in stage_tasks:
+            _clear_recoverable_stage_residue(
+                task,
+                now=now,
+                reason="stale running orchestration was recovered before reserving a new stage run",
+            )
             task["stageRunId"] = run_id
             task["updatedAt"] = now
         diagnostics = reservation_diagnostics(
@@ -630,12 +644,13 @@ def prepare_reserved_task_attempt(
                 activeAttemptId=task.get("activeAttemptId"),
             )
 
-        ports.seed_checklist(task, str(body.get("by") or "system"))
         if git_state.get("dirty"):
             project.setdefault("executionDirtyConfirmations", []).append(git_state.get("fingerprint"))
             project["executionDirtyConfirmations"] = project["executionDirtyConfirmations"][-100:]
         meeting_phase = ports.has_pending_meeting_actions(task)
         now = ports.now()
+        if str(task.get("executionState") or "").lower() == "blocked":
+            task["reworkCount"] = 0
         attempt = {
             "id": attempt_id,
             "status": "meeting_action_items" if meeting_phase else "executing",
@@ -755,7 +770,7 @@ def start_marked_project(
         **body,
         "revision": body.get("revision", state.get("revision")),
         "stage": body.get("stage", body.get("currentStage", state.get("currentStage") or 1)),
-        "allowSkipReviewer": body.get("allowSkipReviewer", bool(body.get("skipReviewConfirmed"))),
+        "allowSkipReviewer": bool(body.get("allowSkipReviewer")),
     }
     reservation_outcome = reserve_stage_run(
         project_id,
@@ -1022,7 +1037,7 @@ def submit_reserved_stage(
                 "runId": run_id,
                 "currentStage": stage,
             }))
-        roles = preflight_ports.resolve_roles(dict(snapshot), dict(task), bool(body.get("allowSkipReviewer") or body.get("skipReviewConfirmed")))
+        roles = preflight_ports.resolve_roles(dict(snapshot), dict(task), _allow_skip_reviewer(body, task))
         if not roles.get("ok"):
             return MarkedProjectStartOutcome(ServiceResult(409, {
                 "ok": False,
@@ -1317,6 +1332,8 @@ def reconcile_stage(
             project["orchestration"] = state
             project["status"] = "completed"
             project["updatedAt"] = timestamp
+            ensure_project_final_report(project, now=timestamp)
+            state = project["orchestration"]
             diagnostics = stage_advancement_diagnostics(
                 project_id=str(project.get("id") or project_id),
                 stage=current_stage,
@@ -1598,6 +1615,50 @@ def _stage_tasks(project: Mapping[str, Any], stage: int) -> list[dict[str, Any]]
     ]
 
 
+def _task_execution_state(task: Mapping[str, Any]) -> str:
+    return str(task.get("executionState") or "").strip().lower()
+
+
+def _task_is_running_now(task: Mapping[str, Any]) -> bool:
+    return _task_execution_state(task) in ACTIVE_TASK_STATES
+
+
+def _task_has_recoverable_stale_attempt(task: Mapping[str, Any]) -> bool:
+    return task_has_active_attempt(task) and not _task_is_running_now(task)
+
+
+def _clear_recoverable_stage_residue(task: dict[str, Any], *, now: str, reason: str) -> bool:
+    if not _task_has_recoverable_stale_attempt(task) and not str(task.get("stageRunId") or "").strip():
+        return False
+    changed = False
+    if task.get("activeAttemptId"):
+        task["activeAttemptId"] = None
+        changed = True
+    for attempt in task.get("attempts") or []:
+        if not isinstance(attempt, dict):
+            continue
+        if attempt.get("status") not in {
+            "validating",
+            "executing",
+            "retrying",
+            "reviewing",
+            "reworking",
+            "meeting_action_items",
+        }:
+            continue
+        attempt["status"] = "stale"
+        attempt["completedAt"] = attempt.get("completedAt") or now
+        attempt["staleReason"] = reason
+        changed = True
+    if str(task.get("stageRunId") or "").strip():
+        task["previousStageRunId"] = task.get("stageRunId")
+        task["stageRunId"] = None
+        changed = True
+    if changed:
+        task["updatedAt"] = now
+    return changed
+
+
 def _find_task(project: Mapping[str, Any], task_id: str) -> dict[str, Any] | None:
     for task in project.get("tasks") or []:
         if isinstance(task, dict) and str(task.get("id") or "") == str(task_id):
@@ -1690,10 +1751,12 @@ def _preflight(
             "Orchestration revision changed",
             details={"expectedRevision": expected_revision, "currentRevision": int(state.get("revision") or 0)},
         ))
-    if state.get("state") not in {STATE_DRAFT, STATE_PAUSED, STATE_BLOCKED}:
+    startable_states = {STATE_DRAFT, STATE_PAUSED, STATE_BLOCKED}
+    running_stage_recoverable = _running_stage_can_be_restarted(project, stage)
+    if state.get("state") not in startable_states and not running_stage_recoverable:
         blockers.append(StagePreflightBlocker(
             "orchestration_not_startable",
-            "Only draft, paused, or blocked orchestration can reserve a stage",
+            "Only draft, paused, blocked, or inactive running orchestration can reserve a stage",
             details={"orchestrationState": state.get("state")},
         ))
     if stage <= 0:
@@ -1754,12 +1817,15 @@ def _preflight(
     roles_by_task_id: dict[str, Mapping[str, Any]] = {}
     for task in stage_tasks:
         task_id = str(task.get("id") or "")
-        if _task_has_any_active_attempt(task):
+        recoverable_stale_attempt = running_stage_recoverable and _task_has_recoverable_stale_attempt(task)
+        if task_has_active_attempt(task) and not recoverable_stale_attempt:
             blockers.append(StagePreflightBlocker("active_attempt_exists", "Task already has an active attempt", task_id=task_id, stage=stage))
-        if str(task.get("stageRunId") or "").strip():
+        task_state = str(task.get("executionState") or "").lower()
+        recoverable_reservation = running_stage_recoverable and not _task_is_running_now(task)
+        if str(task.get("stageRunId") or "").strip() and task_state not in {"blocked", "done", "completed"} and not recoverable_reservation:
             blockers.append(StagePreflightBlocker("task_already_reserved", "Task is already reserved for a stage run", task_id=task_id, stage=stage))
         if include_external:
-            roles = ports.resolve_roles(dict(project), dict(task), bool(body.get("allowSkipReviewer")))
+            roles = ports.resolve_roles(dict(project), dict(task), _allow_skip_reviewer(body, task))
             if not roles.get("ok"):
                 blockers.append(StagePreflightBlocker(
                     str(roles.get("code") or "role_resolution_failed"),
@@ -1783,10 +1849,26 @@ def _preflight(
     return blockers, context
 
 
+def _running_stage_can_be_restarted(project: Mapping[str, Any], stage: int) -> bool:
+    state = orchestration_state(project)
+    if state.get("state") != STATE_RUNNING or int(state.get("currentStage") or 0) != int(stage or 0):
+        return False
+    stage_tasks = _stage_tasks(project, stage)
+    if not stage_tasks:
+        return False
+    for task in project.get("tasks") or []:
+        if isinstance(task, Mapping) and _task_is_running_now(task):
+            return False
+        if isinstance(task, Mapping) and task not in stage_tasks and task_has_active_attempt(task):
+            return False
+    return all(not _task_is_running_now(task) for task in stage_tasks)
+
+
 def _task_has_any_active_attempt(task: Mapping[str, Any]) -> bool:
     if task_has_active_attempt(task):
         return True
-    if str(task.get("stageRunId") or "").strip() and str(task.get("executionState") or "").lower() not in {"done", "completed"}:
+    state = str(task.get("executionState") or "").lower()
+    if str(task.get("stageRunId") or "").strip() and state not in {"blocked", "done", "completed"}:
         return True
     return False
 

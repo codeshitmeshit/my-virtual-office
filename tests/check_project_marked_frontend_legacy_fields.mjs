@@ -16,12 +16,19 @@ assert.ok(
   'projects frontend should centralize marked vs legacy workflow state hydration'
 );
 assert.ok(
+  projectsJs.includes('function stagePipelineWorkflowActive(project, activeIds)') &&
+  projectsJs.includes('return !!(activeIds && activeIds.length);') &&
+  projectsJs.includes('state.workflow.active = stagePipelineWorkflowActive(project, activeIds);'),
+  'marked project workflow active state should hydrate from active task ids instead of stale orchestration phases'
+);
+assert.ok(
   !projectsJs.includes('state.workflow.active = !!state.currentProject.workflowActive'),
   'opening a project should not hydrate workflow state directly from legacy active fields'
 );
 assert.ok(
-  projectsJs.includes("state.workflow.phase = project.projectExecutionPhase || project.orchestrationState || 'idle';"),
-  'marked project workflow phase should hydrate from orchestration projection'
+  projectsJs.includes("state.workflow.active") &&
+  projectsJs.includes(": 'idle';"),
+  'marked project workflow phase should fall back to idle when no active tasks exist'
 );
 assert.ok(
   projectsJs.includes("state.workflow.currentTaskId = activeIds.length === 1 ? activeIds[0] : null;"),
@@ -38,6 +45,10 @@ assert.ok(
 assert.ok(
   projectsJs.includes('const d = await api.workflowChat(p.id, workflowChatTaskScope(p));'),
   'workflow chat polling should pass explicit task scope when the selected marked task is active'
+);
+assert.ok(
+  projectsJs.includes("d.code === 'invalid_task_scope'") && projectsJs.includes('d.displayTaskId'),
+  'workflow chat polling should recover when the active marked task changes before local state catches up'
 );
 assert.ok(
   workspacePanelJs.includes("if (!markedPipeline && t.projectExecutionFlowActive) badges.push('flow active');"),

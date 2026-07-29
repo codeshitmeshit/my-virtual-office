@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Mapping, MutableMapping
 
 from . import meeting_lifecycle
+from .meeting_priority_policy import default_ai_request_resolution_policy, urgency_score
 
 
 def error(message: str, status: int = 400, code: str = "bad_request") -> dict[str, Any]:
@@ -19,11 +20,7 @@ def clean_type(raw: Any) -> str:
 
 
 def urgency(raw: Any) -> int:
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = 3
-    return max(1, min(5, value))
+    return urgency_score(raw)
 
 
 def public_request(request: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -91,6 +88,22 @@ def selected_context(request: Mapping[str, Any], selected_ids: list[Any], supple
     return "\n\n".join(piece for piece in pieces if piece), snapshots
 
 
+def default_context_ids(context_candidates: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(candidate.get("id") or "")
+        for candidate in context_candidates or []
+        if isinstance(candidate, Mapping) and str(candidate.get("id") or "").strip()
+    ]
+
+
+def requested_context_ids(body: Mapping[str, Any], context_candidates: list[dict[str, Any]]) -> list[Any]:
+    if "selectedContextIds" in body:
+        return list(body.get("selectedContextIds") or [])
+    if "contextIds" in body:
+        return list(body.get("contextIds") or [])
+    return default_context_ids(context_candidates)
+
+
 @dataclass(frozen=True)
 class RequestHooks:
     now: Callable[[], str]
@@ -155,7 +168,7 @@ def create_command(
         existing = data.get("requests", {}).get(record.get("requestId")) if isinstance(record, Mapping) else None
         if existing: return {"ok": True, "request": public_request(existing), "idempotent": True}
     now = hooks.now(); request_id = str(body.get("id") or hooks.new_id())
-    requested_ids = list(body.get("selectedContextIds") or body.get("contextIds") or [])
+    requested_ids = requested_context_ids(body, context_candidates)
     request = {
         "id": request_id, "status": "pending", "sourceType": "project_task",
         "source": {"projectId": project_id, "taskId": task_id, "projectTitle": project.get("title", ""), "taskTitle": task.get("title", "")},
@@ -189,8 +202,10 @@ def confirm_command(
         meeting_id = request["conversion"]["meetingId"]
         return {"ok": True, "request": public_request(request), "meeting": data.get("meetings", {}).get(meeting_id), "meetingId": meeting_id, "idempotent": True}
     proposal = request.get("originalProposal") if isinstance(request.get("originalProposal"), Mapping) else {}
-    selected_ids = list(body.get("selectedContextIds") or body.get("contextIds") or [])
-    context, snapshots = selected_context(request, selected_ids, body.get("supplementalContext"))
+    stored_context = request.get("requestedContext") if isinstance(request.get("requestedContext"), Mapping) else {}
+    selected_ids = requested_context_ids(body, request.get("contextCandidates") or []) if ("selectedContextIds" in body or "contextIds" in body) else list(stored_context.get("selectedContextIds") or [])
+    supplemental_context = body.get("supplementalContext") if "supplementalContext" in body else stored_context.get("supplementalContext")
+    context, snapshots = selected_context(request, selected_ids, supplemental_context)
     participants = hooks.clean_participants(body.get("participants") or proposal.get("suggestedParticipants") or [])
     moderator = str(body.get("moderator") or proposal.get("suggestedModerator") or "").strip()
     if moderator and moderator not in participants: participants.insert(0, moderator)
@@ -211,9 +226,9 @@ def confirm_command(
         "participants": participants, "moderator": moderator or (participants[0] if participants else ""),
         "maxRounds": body.get("maxRounds") or proposal.get("maxRounds") or 2,
         "contextMode": str(body.get("contextMode") or "incremental"),
-        "resolutionPolicy": str(body.get("resolutionPolicy") or "moderator_decision"),
+        "resolutionPolicy": str(body.get("resolutionPolicy") or default_ai_request_resolution_policy(request.get("urgency"))),
         "context": context, "selectedContextIds": selected_ids, "selectedContextSnapshot": snapshots,
-        "supplementalContext": str(body.get("supplementalContext") or "").strip(),
+        "supplementalContext": str(supplemental_context or "").strip(),
         "projectId": str(body.get("projectId") or source.get("projectId") or "").strip(), "projectTitle": project_title,
     }
     edit_summary = []

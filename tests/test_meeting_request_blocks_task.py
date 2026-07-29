@@ -672,8 +672,8 @@ def test_meeting_action_phase_checks_items_then_restarts_original_task():
             assert task["meetingActionItems"][0]["status"] == "completed"
             assert task["checklist"][0]["done"] is False
             assert len(calls) >= 2
-            assert "MEETING ACTION ITEM PHASE" in calls[0]["prompt"]
-            assert "MEETING ACTION ITEM PHASE" not in calls[1]["prompt"]
+            assert "<meeting_action_item_phase>" in calls[0]["prompt"]
+            assert "<meeting_action_item_phase>" not in calls[1]["prompt"]
         finally:
             server._project_execution_call_executor = old_executor
             server.threading.Thread = old_thread

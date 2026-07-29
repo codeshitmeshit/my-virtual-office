@@ -219,7 +219,7 @@ def test_dispatch_project_task_uses_selected_task():
             })
             dispatched = server._handle_project_scheduled_cron_dispatch(project["id"], created["id"])
             assert dispatched["status"] == "started"
-            assert calls == [(project["id"], task["id"], {"by": "project-cron", "source": "manual", "skipReviewConfirmed": True})]
+            assert calls == [(project["id"], task["id"], {"by": "project-cron", "source": "manual"})]
         finally:
             restore_store(old)
 
@@ -248,7 +248,7 @@ def test_marked_project_workflow_cron_starts_pipeline_without_legacy_mode():
             assert dispatched["status"] == "started"
             assert calls == [(
                 project["id"],
-                {"by": "project-cron", "source": "manual", "skipReviewConfirmed": True},
+                {"by": "project-cron", "source": "manual"},
             )]
         finally:
             restore_store(old)

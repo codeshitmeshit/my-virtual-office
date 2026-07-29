@@ -6,6 +6,8 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, MutableMapping
 
+from .meeting_priority_policy import coerce_moderator_outcome_for_priority
+
 
 TERMINAL = frozenset({"completed", "cancelled", "failed"})
 PHASES = frozenset({
@@ -19,7 +21,7 @@ TRANSITIONS = {
     "active_opening": frozenset({"active_discussion", "paused", "summarizing", "cancelled", "failed"}),
     "active_discussion": frozenset({"awaiting_user_decision", "summarizing", "paused", "cancelled", "failed"}),
     "paused": frozenset({"preparing", "active_opening", "active_discussion", "awaiting_user_decision", "cancelled", "failed"}),
-    "awaiting_user_decision": frozenset({"active_discussion", "summarizing", "cancelled", "failed"}),
+    "awaiting_user_decision": frozenset({"active_discussion", "summarizing", "paused", "cancelled", "failed"}),
     "summarizing": frozenset({"completed", "cancelled", "failed"}),
     "completed": frozenset(), "cancelled": frozenset(), "failed": frozenset(),
 }
@@ -498,6 +500,7 @@ def commit_moderator_summary(
         **fallback, **{key: value for key, value in parsed.items() if value not in ("", [], {})},
         "moderator": moderator, "moderatorProviderRef": moderator_payload.get("providerRef") or {},
     }
+    final_result = coerce_moderator_outcome_for_priority(meeting, final_result)
     meeting.pop("moderatorFailure", None)
     complete_meeting(
         data, meeting, final_result, actor=actor, reason="moderator_summary_complete",

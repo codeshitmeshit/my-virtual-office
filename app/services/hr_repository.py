@@ -198,12 +198,9 @@ class DailyReportRecord:
     local_date: str
     submission_state: str
     raw_response: str | None
-    normalized: dict[str, Any] | None
-    normalizer_id: str
     requested_at: str | None
     window_closed_at: str | None
     submitted_at: str | None
-    normalized_at: str | None
     revision: int
     created_at: str
     updated_at: str
@@ -358,7 +355,6 @@ _EXPORT_TABLES = {
 _EXPORT_JSON_FIELDS = frozenset(
     {
         "roster_snapshot_json",
-        "normalized_json",
         "principal_contributions_json",
         "blockers_json",
         "strengths_json",
@@ -467,12 +463,9 @@ _SCHEMA_V1 = (
         local_date TEXT NOT NULL,
         submission_state TEXT NOT NULL,
         raw_response TEXT,
-        normalized_json TEXT,
-        normalizer_id TEXT NOT NULL DEFAULT '',
         requested_at TEXT,
         window_closed_at TEXT,
         submitted_at TEXT,
-        normalized_at TEXT,
         revision INTEGER NOT NULL DEFAULT 1 CHECK(revision >= 1),
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
@@ -604,6 +597,15 @@ def _reserve_schema_migration(_connection: sqlite3.Connection) -> None:
     """Preserve repository compatibility with previously stamped HR schemas."""
 
 
+def _remove_daily_report_legacy_normalization_columns(connection: sqlite3.Connection) -> None:
+    report_columns = {
+        str(row[1]) for row in connection.execute("PRAGMA table_info(daily_reports)").fetchall()
+    }
+    for column in ("normalized_json", "normalizer_id", "normalized_at"):
+        if column in report_columns:
+            connection.execute(f"ALTER TABLE daily_reports DROP COLUMN {column}")
+
+
 DEFAULT_MIGRATIONS = (
     HRMigration(1, "initial_hr_schema", _apply_schema_v1),
     HRMigration(2, "reserved_legacy_schema_v2", _reserve_legacy_schema_v2),
@@ -616,6 +618,11 @@ DEFAULT_MIGRATIONS = (
     HRMigration(5, "add_assessment_workload_score", _add_assessment_workload_score),
     HRMigration(6, "reserved_access_activity_schema", _reserve_schema_migration),
     HRMigration(7, "reserved_hr_queue_schema", _reserve_schema_migration),
+    HRMigration(
+        8,
+        "remove_daily_report_legacy_normalization_columns",
+        _remove_daily_report_legacy_normalization_columns,
+    ),
 )
 
 
@@ -765,10 +772,7 @@ def _request_from_row(row: sqlite3.Row) -> ReportRequestRecord:
 
 
 def _report_from_row(row: sqlite3.Row) -> DailyReportRecord:
-    values = dict(row)
-    normalized_json = values.pop("normalized_json")
-    values["normalized"] = json.loads(normalized_json) if normalized_json is not None else None
-    return DailyReportRecord(**values)
+    return DailyReportRecord(**dict(row))
 
 
 def _assessment_from_row(
@@ -2005,8 +2009,7 @@ class HRRepository:
             )
             connection.execute(
                 """UPDATE daily_reports SET
-                       submission_state = ?, raw_response = ?, normalized_json = NULL,
-                       normalizer_id = '', submitted_at = ?, normalized_at = NULL,
+                       submission_state = ?, raw_response = ?, submitted_at = ?,
                        revision = revision + 1, updated_at = ?
                    WHERE id = ?""",
                 (state, raw_response, submitted_at, timestamp, current.id),
@@ -2080,12 +2083,9 @@ class HRRepository:
         local_date: str,
         submission_state: str,
         raw_response: str | None,
-        normalized: object | None,
-        normalizer_id: str = "",
         requested_at: str | None = None,
         window_closed_at: str | None = None,
         submitted_at: str | None = None,
-        normalized_at: str | None = None,
         expected_revision: int | None = None,
     ) -> DailyReportRecord:
         report_id = _opaque_id(report_id, "report_id")
@@ -2097,28 +2097,22 @@ class HRRepository:
             "not_due",
             "waiting",
             "submitted",
-            "normalized",
             "late_submitted",
             "not_submitted",
-            "normalization_failed",
             "skipped",
             "complete",
             "failed",
         }:
             raise HRRepositoryValidationError("unsupported daily report state")
         raw_response = _raw_text(raw_response, "raw_response")
-        normalized_json = (
-            _json_value(normalized, "normalized", dict) if normalized is not None else None
-        )
-        normalizer_id = _optional_text(normalizer_id, "normalizer_id", maximum=256)
-        timestamps = [requested_at, window_closed_at, submitted_at, normalized_at]
-        requested_at, window_closed_at, submitted_at, normalized_at = (
+        timestamps = [requested_at, window_closed_at, submitted_at]
+        requested_at, window_closed_at, submitted_at = (
             _timestamp_text(value, field)
             if value is not None
             else None
             for value, field in zip(
                 timestamps,
-                ("requested_at", "window_closed_at", "submitted_at", "normalized_at"),
+                ("requested_at", "window_closed_at", "submitted_at"),
             )
         )
         if expected_revision is not None and (
@@ -2148,42 +2142,24 @@ class HRRepository:
                 raw_response = (
                     current.raw_response if current.raw_response is not None else raw_response
                 )
-                normalized_value = (
-                    json.loads(normalized_json)
-                    if normalized_json is not None
-                    else current.normalized
-                )
-                normalized_json = (
-                    _json_value(normalized_value, "normalized", dict)
-                    if normalized_value is not None
-                    else None
-                )
-                normalizer_id = normalizer_id or current.normalizer_id
                 requested_at = requested_at or current.requested_at
                 window_closed_at = window_closed_at or current.window_closed_at
                 submitted_at = submitted_at or current.submitted_at
-                normalized_at = normalized_at or current.normalized_at
             payload = (
                 cycle_id,
                 submission_state,
                 raw_response,
-                json.loads(normalized_json) if normalized_json is not None else None,
-                normalizer_id,
                 requested_at,
                 window_closed_at,
                 submitted_at,
-                normalized_at,
             )
             if current is not None and payload == (
                 current.cycle_id,
                 current.submission_state,
                 current.raw_response,
-                current.normalized,
-                current.normalizer_id,
                 current.requested_at,
                 current.window_closed_at,
                 current.submitted_at,
-                current.normalized_at,
             ):
                 return current
             try:
@@ -2191,10 +2167,9 @@ class HRRepository:
                     connection.execute(
                         """INSERT INTO daily_reports(
                                id, cycle_id, ai_id, local_date, submission_state,
-                               raw_response, normalized_json, normalizer_id, requested_at,
-                               window_closed_at, submitted_at, normalized_at, revision,
+                               raw_response, requested_at, window_closed_at, submitted_at, revision,
                                created_at, updated_at
-                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
+                           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)""",
                         (
                             report_id,
                             cycle_id,
@@ -2202,12 +2177,9 @@ class HRRepository:
                             local_date,
                             submission_state,
                             raw_response,
-                            normalized_json,
-                            normalizer_id,
                             requested_at,
                             window_closed_at,
                             submitted_at,
-                            normalized_at,
                             timestamp,
                             timestamp,
                         ),
@@ -2218,11 +2190,19 @@ class HRRepository:
                     connection.execute(
                         """UPDATE daily_reports SET
                                cycle_id = ?, submission_state = ?, raw_response = ?,
-                               normalized_json = ?, normalizer_id = ?, requested_at = ?,
-                               window_closed_at = ?, submitted_at = ?, normalized_at = ?,
+                               requested_at = ?, window_closed_at = ?, submitted_at = ?,
                                revision = revision + 1, updated_at = ?
                            WHERE id = ?""",
-                        (*payload[:3], normalized_json, *payload[4:], timestamp, report_id),
+                        (
+                            cycle_id,
+                            submission_state,
+                            raw_response,
+                            requested_at,
+                            window_closed_at,
+                            submitted_at,
+                            timestamp,
+                            report_id,
+                        ),
                     )
             except sqlite3.IntegrityError as exc:
                 raise HRRepositoryConflictError("daily report dependency or identity is invalid") from exc

@@ -121,14 +121,15 @@ class HRAgentAPI:
         assessments = self._repository.list_assessments(ai_id=ai_id, limit=20)
         latest_report = reports.items[0] if reports.items else None
         latest_assessment = assessments.items[0] if assessments.items else None
-        normalized = latest_report.normalized if latest_report is not None else None
         record: dict[str, object] = {
             "aiId": agent.ai_id,
             "name": agent.name,
             "introduction": introduction.introduction if introduction else "",
             "availability": agent.availability if agent.status == "active" else "unavailable",
             "publicWorkSummary": (
-                normalized.get("completedWork", []) if isinstance(normalized, dict) else []
+                list(latest_assessment.principal_contributions)
+                if latest_assessment is not None
+                else []
             ),
             "workload": (
                 latest_assessment.workload

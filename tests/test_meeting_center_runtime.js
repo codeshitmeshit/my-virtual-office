@@ -65,8 +65,11 @@ vm.runInContext(
 );
 
 const history = [
-    { id: 'meeting-a', topic: '第一场会议', status: 'completed', participants: ['a'] },
+    { id: 'meeting-a', topic: '第一场会议', status: 'completed', participants: ['a'], context: '启动资料：先看项目背景。' },
     { id: 'meeting-b', topic: '第二场会议', status: 'cancelled', participants: ['b'] }
+];
+const active = [
+    { id: 'meeting-live', topic: '进行中会议', status: 'active', participants: ['a', 'b'], context: '实时会议原始上下文', currentRound: 1, maxRounds: 2 }
 ];
 const requests = [
     { id: 'request-a', status: 'pending', proposal: { topic: '第一条申请' } },
@@ -79,7 +82,7 @@ let renderCount = 0;
 function runtime() {
     return {
         currentTab,
-        data: { active: [], history, requests },
+        data: { active, history, requests },
         agentMap: {
             a: { emoji: '🅰️', name: 'Agent A' },
             b: { emoji: '🅱️', name: 'Agent B' }
@@ -107,6 +110,12 @@ assert.match(elements['meeting-center-list'].innerHTML, /meeting-a/);
 assert.match(elements['meeting-center-list'].innerHTML, /data-record-id="meeting-a"/);
 assert.doesNotMatch(elements['meeting-center-list'].innerHTML, /onclick=/);
 assert.match(elements['meeting-center-main'].innerHTML, /第一场会议/);
+assert.match(elements['meeting-center-main'].innerHTML, /原始上下文/);
+assert.match(elements['meeting-center-main'].innerHTML, /启动资料：先看项目背景。/);
+assert.ok(
+    elements['meeting-center-main'].innerHTML.indexOf('启动资料：先看项目背景。') <
+    elements['meeting-center-main'].innerHTML.indexOf('data-transcript="meeting-a"')
+);
 assert.match(elements['meeting-center-main'].innerHTML, /data-transcript="meeting-a"/);
 assert.doesNotMatch(elements['meeting-center-main'].innerHTML, /data-meeting=/);
 assert.match(elements['meeting-center-controls'].innerHTML, /第一场会议/);
@@ -117,6 +126,7 @@ elements['meeting-center-list'].lastQueryNodes[1].click();
 assert.strictEqual(renderCount, 1);
 assert.match(elements['meeting-center-list'].innerHTML, /meeting-center-item is-selected[^>]+meeting-b/);
 assert.match(elements['meeting-center-main'].innerHTML, /第二场会议/);
+assert.match(elements['meeting-center-main'].innerHTML, /原始上下文为空/);
 assert.match(elements['meeting-center-main'].innerHTML, /data-transcript="meeting-b"/);
 assert.doesNotMatch(elements['meeting-center-main'].innerHTML, /data-meeting=/);
 assert.match(elements['meeting-center-controls'].innerHTML, /第二场会议/);
@@ -135,5 +145,14 @@ assert.match(elements['meeting-center-main'].innerHTML, /第二条申请/);
 assert.match(elements['meeting-center-main'].innerHTML, /data-request="request-b"/);
 assert.match(elements['meeting-center-controls'].innerHTML, /第二条申请/);
 assert.doesNotMatch(elements['meeting-center-main'].innerHTML, /第一条申请/);
+
+currentTab = 'active';
+context.MeetingCenterUI.render(runtime());
+assert.match(elements['meeting-center-main'].innerHTML, /进行中会议/);
+assert.match(elements['meeting-center-main'].innerHTML, /实时会议原始上下文/);
+assert.ok(
+    elements['meeting-center-main'].innerHTML.indexOf('实时会议原始上下文') <
+    elements['meeting-center-main'].innerHTML.indexOf('meeting-center-timeline')
+);
 
 console.log('meeting center runtime interaction tests passed');

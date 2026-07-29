@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 from services.project_actors import task_actor_references
+from services.project_artifact_paths import task_final_result_workspace_relative_path
+from services.project_final_report import render_project_final_report_markdown
 from services.project_task_final_result import FINAL_RESULT_FILENAME, render_task_final_result_markdown
 
 PROJECTS_DIRNAME = "projects-md"
@@ -609,14 +611,38 @@ class MarkdownProjectStore:
             body_lines.append("- No activity yet")
         _atomic_write(os.path.join(project_dir, "project.md"), _dump_frontmatter(meta) + "\n" + "\n".join(body_lines) + "\n")
         for task in tasks:
-            self._write_task_file(tasks_dir, task, marked_pipeline=marked_pipeline)
+            self._write_task_file(tasks_dir, task, project=project, marked_pipeline=marked_pipeline)
+        project["tasks"] = tasks
+        self._write_project_final_report(project)
 
-    def _task_storage_paths(self, tasks_dir: str, task: Dict[str, Any]) -> Tuple[str, str]:
+    def _write_project_final_report(self, project: Dict[str, Any]) -> None:
+        orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), dict) else {}
+        final_report = orchestration.get("finalReport") if isinstance(orchestration.get("finalReport"), dict) else {}
+        rel_path = str(final_report.get("markdownPath") or "").strip()
+        workspace_path = str(project.get("workspacePath") or "").strip()
+        if not rel_path or not workspace_path:
+            return
+        destination = os.path.realpath(os.path.join(workspace_path, *rel_path.split("/")))
+        root = os.path.realpath(workspace_path)
+        if not (destination == root or destination.startswith(root + os.sep)):
+            return
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        _atomic_write(destination, render_project_final_report_markdown(project))
+
+    def _task_storage_paths(self, tasks_dir: str, task: Dict[str, Any], project: Dict[str, Any] | None = None) -> Tuple[str, str, str]:
         task_id = str(task.get("id") or self.new_id())
         title_slug = _slugify(task.get("title", "task"))
         suffix = f"{_slugify(task_id)[:8]}-{hashlib.sha256(task_id.encode()).hexdigest()[:10]}"
         stem = f"{title_slug}--{suffix}"
-        return os.path.join(tasks_dir, f"{stem}.md"), os.path.join(tasks_dir, stem, FINAL_RESULT_FILENAME)
+        workspace_relative = task_final_result_workspace_relative_path(project, task)
+        workspace_path = str((project or {}).get("workspacePath") or "").strip() if isinstance(project, dict) else ""
+        if workspace_relative and workspace_path:
+            sidecar_path = os.path.join(workspace_path, *workspace_relative.split("/"))
+            markdown_path = workspace_relative
+        else:
+            sidecar_path = os.path.join(tasks_dir, stem, FINAL_RESULT_FILENAME)
+            markdown_path = os.path.relpath(sidecar_path, self.status_dir).replace(os.sep, "/")
+        return os.path.join(tasks_dir, f"{stem}.md"), sidecar_path, markdown_path
 
     def _prepare_task_final_result_paths(self, tasks_dir: str, project: Dict[str, Any], tasks: List[Dict[str, Any]]) -> None:
         paths_by_task_id: Dict[str, str] = {}
@@ -624,8 +650,7 @@ class MarkdownProjectStore:
             final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
             if not final_result:
                 continue
-            _, sidecar_path = self._task_storage_paths(tasks_dir, task)
-            relative = os.path.relpath(sidecar_path, self.status_dir).replace(os.sep, "/")
+            _, _, relative = self._task_storage_paths(tasks_dir, task, project)
             final_result["markdownPath"] = relative
             task_id = str(task.get("id") or "")
             if task_id:
@@ -642,18 +667,18 @@ class MarkdownProjectStore:
                 if task_id in paths_by_task_id:
                     item["markdownPath"] = paths_by_task_id[task_id]
 
-    def _write_task_file(self, tasks_dir: str, task: Dict[str, Any], *, marked_pipeline: bool = False):
+    def _write_task_file(self, tasks_dir: str, task: Dict[str, Any], *, project: Dict[str, Any] | None = None, marked_pipeline: bool = False):
         task = copy.deepcopy(task)
         try:
             actors = task_actor_references(task)
         except ValueError:
             actors = {}
         task_id = str(task.get("id") or self.new_id())
-        path, sidecar_path = self._task_storage_paths(tasks_dir, task)
+        path, sidecar_path, markdown_path = self._task_storage_paths(tasks_dir, task, project)
         final_result = task.get("finalResult") if isinstance(task.get("finalResult"), dict) else {}
         if final_result:
             final_result = copy.deepcopy(final_result)
-            final_result["markdownPath"] = os.path.relpath(sidecar_path, self.status_dir).replace(os.sep, "/")
+            final_result["markdownPath"] = markdown_path
             task["finalResult"] = final_result
         comments = task.pop("comments", [])
         attachments = task.pop("attachments", [])

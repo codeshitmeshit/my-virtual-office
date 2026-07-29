@@ -35,7 +35,7 @@
         'deleted', 'delivery_unsupported', 'disabled', 'enablement_pending', 'error',
         'failed', 'high', 'insufficient_information',
         'introduction_pending', 'issued', 'late', 'late_submitted', 'loading', 'low',
-        'normalization_failed', 'normalized', 'not_required', 'not_submitted', 'offline',
+        'not_required', 'not_submitted', 'offline',
         'open', 'overloaded', 'paused', 'pending', 'processing', 'published', 'ready',
         'requested', 'response_received', 'retry', 'revoked', 'rotated', 'skill_conflict',
         'skipped', 'submitted', 'succeeded', 'unknown', 'unavailable', 'unreachable',
@@ -220,8 +220,7 @@
         const cycle = object(object(overview).cycle);
         const counts = object(cycle.counts);
         const order = [
-            'failed', 'normalization_failed', 'not_submitted', 'late',
-            'waiting', 'submitted', 'complete', 'skipped'
+            'failed', 'not_submitted', 'late', 'waiting', 'submitted', 'complete', 'skipped'
         ];
         return order
             .map(function (status) { return { status: status, count: Number(counts[status] || 0) }; })
@@ -276,15 +275,11 @@
     }
 
     function reportSubmissionLabelState(value) {
-        const state = String(value || 'unknown').toLowerCase();
-        return state === 'normalized' ? 'submitted' : state;
+        return String(value || 'unknown').toLowerCase();
     }
 
     function hrDisplayState(value) {
-        const state = String(value || 'unknown').toLowerCase();
-        if (state === 'normalized') return 'submitted';
-        if (state === 'normalization_failed') return 'failed';
-        return state;
+        return String(value || 'unknown').toLowerCase();
     }
 
     function reportScheduleLabel(value) {

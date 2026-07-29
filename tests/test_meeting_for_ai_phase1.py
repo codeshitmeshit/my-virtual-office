@@ -1724,6 +1724,8 @@ def test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_tran
             events = detail["events"]
             turns = [e for e in events if e["type"] == "participant_turn"]
             assert turns
+            assert detail["meeting"]["transcript"]
+            assert detail["meeting"]["transcript"][0]["type"] == "participant_turn"
             first_payload = turns[0]["payload"]
             assert first_payload["structured"]["position"] == "main supports the plan"
             assert first_payload["structured"]["disagreements"] == ["Do not expose provider envelope"]

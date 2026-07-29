@@ -342,6 +342,34 @@ def test_reserve_stage_run_preflights_and_atomically_reserves_all_current_stage_
     assert ports.authorize_calls == [("project-1", {"type": "management", "id": "owner"})]
 
 
+def test_reserve_stage_run_honors_task_reviewerless_execution_without_request_confirmation():
+    project = _project(tasks=[
+        _task("a", 1, reviewerAgentId=None, allowReviewerlessExecution=True),
+    ])
+    store, repo = _repo(project)
+    ports = _Ports(roles=lambda _project, task, allow_skip: (
+        {"ok": True, "executor": {"id": "executor"}}
+        if allow_skip
+        else {
+            "ok": False,
+            "confirmationRequired": True,
+            "code": "reviewer_skip_confirmation_required",
+            "error": "No reviewer is configured",
+        }
+    ))
+
+    outcome = reserve_stage_run(
+        "project-1",
+        {"revision": 0, "stage": 1},
+        repository=repo,
+        ports=ports,
+    )
+
+    assert outcome.result.status == 200
+    assert ports.role_calls == [("project-1", "a", True)]
+    assert store.save_calls == 1
+
+
 def test_reserve_stage_run_rejects_stale_revision_without_saving():
     project = _project()
     project["orchestration"]["revision"] = 3
@@ -476,7 +504,7 @@ def test_prepare_reserved_task_attempt_creates_attempt_without_project_singular_
     assert task["attempts"][-1]["startMode"] == "stage"
     assert task["attempts"][-1]["projectFlow"] is True
     assert task["attempts"][-1]["autoReviewAfterExecution"] is True
-    assert ports.seeded == [("a", "stage-dispatch")]
+    assert ports.seeded == []
     assert ports.transitions[-1][:3] == ("project-1", "a", "executing")
 
 
@@ -663,6 +691,109 @@ def test_start_marked_project_rejects_legacy_start_payload_fields():
     assert outcome.result.payload["code"] == "marked_project_legacy_start_payload_forbidden"
     assert outcome.result.payload["fields"] == ["mode", "startMode", "restartPipeline"]
     assert store.save_calls == 0
+
+
+def test_start_marked_project_restarts_inactive_running_blocked_stage_task_with_fresh_rework_window():
+    project = _project(tasks=[
+        *[
+            _task(f"done-{stage}", stage, executionState="done", completedAt="done-at", stageRunId=f"run-{stage}")
+            for stage in range(1, 6)
+        ],
+        _task(
+            "risk",
+            6,
+            executionState="blocked",
+            stageRunId="run-old",
+            reworkCount=3,
+            blockedReason="Acceptance checklist is still incomplete after three automatic rework cycles.",
+            lastError="checklist_incomplete_rework_limit",
+        ),
+    ])
+    project["orchestration"].update({
+        "state": "running",
+        "currentStage": 6,
+        "currentRunId": "run-old",
+        "revision": 4,
+    })
+    store, repo = _repo(project)
+    preflight_ports = _Ports()
+    preflight_ports.run_ids = ["run-retry"]
+    attempt_ports = _AttemptPorts()
+    dispatcher = BoundedProjectExecutionDispatcher(lambda item: item.task_id, worker_count=1, queue_capacity=2, autostart=False)
+
+    outcome = start_marked_project(
+        "project-1",
+        {"revision": 4, "stage": 6, "by": "owner"},
+        repository=repo,
+        preflight_ports=preflight_ports,
+        attempt_ports=attempt_ports,
+        dispatcher=dispatcher,
+        create_cancel_flag=lambda attempt_id: {"attemptId": attempt_id},
+    )
+
+    assert outcome.result.status == 200
+    assert outcome.result.payload["currentStage"] == 6
+    saved = store.data["projects"][0]
+    task = next(item for item in saved["tasks"] if item["id"] == "risk")
+    assert saved["orchestration"]["state"] == "running"
+    assert saved["orchestration"]["currentRunId"] == "run-retry"
+    assert task["stageRunId"] == "run-retry"
+    assert task["executionState"] == "executing"
+    assert task["activeAttemptId"] == "attempt-1"
+    assert task["reworkCount"] == 0
+    assert task["blockedReason"] is None
+    assert task["lastError"] is None
+
+
+def test_start_marked_project_recovers_stale_running_backlog_stage_residue():
+    project = _project(tasks=[
+        *[
+            _task(f"done-{stage}", stage, executionState="done", completedAt="done-at", stageRunId=f"run-{stage}")
+            for stage in range(1, 8)
+        ],
+        _task(
+            "review-meeting",
+            8,
+            executionState="backlog",
+            stageRunId="run-old",
+            activeAttemptId="attempt-old",
+            attempts=[{"id": "attempt-old", "status": "executing", "stageRunId": "run-old"}],
+        ),
+    ])
+    project["orchestration"].update({
+        "state": "running",
+        "currentStage": 8,
+        "currentRunId": "run-old",
+        "revision": 9,
+    })
+    store, repo = _repo(project)
+    preflight_ports = _Ports()
+    preflight_ports.run_ids = ["run-recovered"]
+    attempt_ports = _AttemptPorts()
+    dispatcher = BoundedProjectExecutionDispatcher(lambda item: item.task_id, worker_count=1, queue_capacity=2, autostart=False)
+
+    outcome = start_marked_project(
+        "project-1",
+        {"revision": 9, "stage": 8, "by": "owner"},
+        repository=repo,
+        preflight_ports=preflight_ports,
+        attempt_ports=attempt_ports,
+        dispatcher=dispatcher,
+        create_cancel_flag=lambda attempt_id: {"attemptId": attempt_id},
+    )
+
+    assert outcome.result.status == 200
+    saved = store.data["projects"][0]
+    task = next(item for item in saved["tasks"] if item["id"] == "review-meeting")
+    assert saved["orchestration"]["state"] == "running"
+    assert saved["orchestration"]["currentRunId"] == "run-recovered"
+    assert task["previousStageRunId"] == "run-old"
+    assert task["stageRunId"] == "run-recovered"
+    assert task["activeAttemptId"] == "attempt-1"
+    assert task["attempts"][0]["status"] == "stale"
+    assert task["attempts"][0]["staleReason"]
+    assert task["attempts"][1]["id"] == "attempt-1"
+    assert task["executionState"] == "executing"
 
 
 def test_resume_paused_project_starts_first_unfinished_stage_with_new_run_id():
@@ -1112,6 +1243,11 @@ def test_reconcile_stage_completes_orchestration_when_final_stage_is_accepted_te
     assert saved["orchestration"]["currentRunId"] is None
     assert saved["orchestration"]["completedAt"] == "completed-at"
     assert saved["status"] == "completed"
+    final_report = saved["orchestration"]["finalReport"]
+    assert final_report["status"] == "available"
+    assert final_report["markdownPath"] == "PROJECT_FINAL_REPORT.md"
+    assert final_report["taskCount"] == 2
+    assert final_report["completedTaskCount"] == 2
 
 
 def test_reconcile_stage_notifies_once_when_final_project_completes():

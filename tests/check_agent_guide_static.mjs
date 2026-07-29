@@ -57,6 +57,8 @@ for (const skill of expectedSkills) {
   assert.ok(!skillBody.includes('/home/wo/code/my-virtual-office'), `${skill} should not hardcode a non-current VO project path`);
 }
 assert.ok(!meetingRequestsReference.includes('/home/wo/code/my-virtual-office'), 'meeting request reference should not hardcode a non-current VO project path');
+assert.ok(meetingRequestsReference.includes('resolutionPolicy'), 'meeting request reference should require a resolution policy');
+assert.ok(meetingRequestsReference.includes('非 P0 必须填 `moderator_decision`'), 'non-P0 meeting requests should default to moderator decision');
 
 assert.ok(!js.includes('/Users/'), 'Agent Guide should not hardcode local absolute paths');
 assert.ok(!js.includes('.codex/skills'), 'Agent Guide should not scan global Codex skill directories');

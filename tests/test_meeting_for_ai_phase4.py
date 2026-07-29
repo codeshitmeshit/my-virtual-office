@@ -263,6 +263,9 @@ def test_phase4_high_priority_project_requires_user_confirmation_for_ai_request(
             assert confirmed["meeting"]["source"]["autoConfirmed"] is False
             assert "User approved supplemental context" in confirmed["meeting"]["context"]
             assert "Resolve high priority blocker" in confirmed["meeting"]["context"]
+            active = [m for m in server._meeting_active_projection() if m.get("id") == confirmed["meeting"]["id"]][0]
+            assert "User approved supplemental context" in active["context"]
+            assert "Resolve high priority blocker" in active["context"]
 
             project_after = server._handle_project_get(project["id"])["project"]
             assert project_after["highPriorityAiMeetingAutoApprove"] is True

@@ -327,7 +327,7 @@ def test_materialize_task_base_supplies_complete_defaults_and_backlog_fallback()
         "executorAgentId": None,
         "reviewerAgentId": None,
         "requiresUserAcceptance": False,
-        "allowReviewerlessExecution": False,
+        "allowReviewerlessExecution": True,
         "scheduledRepeatEnabled": False,
         "executionState": "backlog",
         "activeAttemptId": None,
@@ -349,6 +349,17 @@ def test_materialize_task_base_supplies_complete_defaults_and_backlog_fallback()
         "updatedAt": NOW,
         "completedAt": None,
     }
+
+
+def test_materialize_task_base_preserves_explicit_reviewerless_false():
+    task = materialize_task_base(
+        {"title": "Needs reviewer", "allowReviewerlessExecution": False},
+        columns=[{"id": "backlog", "title": "Backlog"}],
+        new_id=_ids("task-1"),
+        now=lambda: NOW,
+    )
+
+    assert task["allowReviewerlessExecution"] is False
 
 
 def test_materialize_task_base_preserves_resolved_values_and_copies_mutables():

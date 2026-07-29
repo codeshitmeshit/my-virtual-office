@@ -14044,6 +14044,48 @@ var DEFAULT_BROWSER_CDP_URL = 'http://127.0.0.1:9224';
 var DEFAULT_BROWSER_VIEWER_URL = 'https://localhost:6901';
 var _feishuChatProcessingPollTimer = null;
 var _feishuChatProcessingPollInFlight = false;
+var _mmSettingsConfigRequest = null;
+var _mmSettingsConfigCached = null;
+var _mmSettingsConfigCachedAt = 0;
+var _mmSettingsConfigCacheMs = 10000;
+var _feishuChatConfigRequest = null;
+var _feishuChatConfigCached = null;
+var _feishuChatConfigCachedAt = 0;
+var _feishuChatConfigCacheMs = 4000;
+
+function _mmFetchSettingsConfig(force) {
+    var now = Date.now();
+    if (!force && _mmSettingsConfigCached && now - _mmSettingsConfigCachedAt < _mmSettingsConfigCacheMs) {
+        return Promise.resolve(_mmSettingsConfigCached);
+    }
+    if (!force && _mmSettingsConfigRequest) return _mmSettingsConfigRequest;
+    _mmSettingsConfigRequest = fetch('/vo-config')
+        .then(function(r){ return r.json(); })
+        .then(function(cfg) {
+            _mmSettingsConfigCached = cfg;
+            _mmSettingsConfigCachedAt = Date.now();
+            return cfg;
+        })
+        .finally(function() { _mmSettingsConfigRequest = null; });
+    return _mmSettingsConfigRequest;
+}
+
+function _mmFetchFeishuChatConfig(force) {
+    var now = Date.now();
+    if (!force && _feishuChatConfigCached && now - _feishuChatConfigCachedAt < _feishuChatConfigCacheMs) {
+        return Promise.resolve(_feishuChatConfigCached);
+    }
+    if (!force && _feishuChatConfigRequest) return _feishuChatConfigRequest;
+    _feishuChatConfigRequest = fetch('/api/feishu-chat/config')
+        .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
+        .then(function(cfg) {
+            _feishuChatConfigCached = cfg;
+            _feishuChatConfigCachedAt = Date.now();
+            return cfg;
+        })
+        .finally(function() { _feishuChatConfigRequest = null; });
+    return _feishuChatConfigRequest;
+}
 
 function toggleMainMenu() {
     var panel = document.getElementById('main-menu-panel');
@@ -14062,7 +14104,7 @@ function toggleMainMenu() {
 
 function _mmLoadCurrentSettings() {
     // Populate fields from current server config
-    fetch('/vo-config').then(function(r){ return r.json(); }).then(function(cfg) {
+    _mmFetchSettingsConfig(false).then(function(cfg) {
         var gwInput = document.getElementById('mm-gateway-url');
         var nameInput = document.getElementById('mm-office-name');
         var weatherCityInput = document.getElementById('mm-weather-city');
@@ -14742,8 +14784,7 @@ function mmRefreshFeishuChatProcessingStatus() {
     if (!_mainMenuOpen || (typeof document.hidden === 'boolean' && document.hidden)) return Promise.resolve();
     if (_feishuChatProcessingPollInFlight) return Promise.resolve();
     _feishuChatProcessingPollInFlight = true;
-    return fetch('/api/feishu-chat/config')
-        .then(function(r) { return r.json(); })
+    return _mmFetchFeishuChatConfig(false)
         .then(function(cfg) {
             mmRenderFeishuChatLongConnectionStatus(cfg);
             mmRenderFeishuChatProcessingStatus(cfg);
@@ -14986,6 +15027,10 @@ function mmSaveFeishuChatConfig() {
             return;
         }
         mmFillFeishuChatMaskedInputs(d);
+        _feishuChatConfigCached = d;
+        _feishuChatConfigCachedAt = Date.now();
+        _mmSettingsConfigCached = null;
+        _mmSettingsConfigCachedAt = 0;
         mmNotifyFeishuChatConfigChanged();
         if (statusEl) statusEl.innerHTML = '<div class="mm-status ok">✅ ' + escHtml(_tr('feishu_chat_config_saved')) + '</div>';
     }).catch(function(e) {
@@ -15008,8 +15053,7 @@ function mmNotifyFeishuChatConfigChanged() {
 function mmRefreshFeishuChatStatus() {
     var statusEl = document.getElementById('mm-feishu-chat-status');
     if (statusEl) statusEl.innerHTML = '<div class="mm-status info">' + escHtml(_tr('feishu_chat_checking_status')) + '</div>';
-    fetch('/api/feishu-chat/config')
-        .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
+    _mmFetchFeishuChatConfig(true)
         .then(function(d) {
             if (!d.ok) {
                 if (statusEl) statusEl.innerHTML = '<div class="mm-status err">❌ ' + escHtml(d.error || _tr('feishu_test_failed')) + '</div>';
@@ -17034,7 +17078,7 @@ async function _mtgRefresh() {
     try {
         var [activeRes, histRes, requestsRes, agentsRes, projectsRes] = await Promise.all([
             fetch('/api/meetings/active').then(function(r) { return r.json(); }),
-            fetch('/api/meetings/history').then(function(r) { return r.json(); }),
+            fetch('/api/meetings/history?summary=1').then(function(r) { return r.json(); }),
             fetch('/api/meetings/requests').then(function(r) { return r.json(); }),
             fetch('/agents-list').then(function(r) { return r.json(); }),
             fetch('/api/projects').then(function(r) { return r.json(); }).catch(function() { return { projects: [] }; })
@@ -17152,6 +17196,7 @@ function _mtgRender() {
             meetingStageLabel: _mtgMeetingStageLabel,
             structuredValue: _mtgStructuredValue,
             hydratePendingCall: _mtgHydratePendingCall,
+            ensureMeetingDetail: _mtgLoadMeetingDetail,
             requestRender: _mtgRender
         });
         return;
@@ -17589,11 +17634,14 @@ function _mtgRenderMetaColumns(itemsLeft, itemsRight) {
 function _mtgRenderRequestContext(req) {
     var candidates = req.contextCandidates || [];
     if (!candidates.length) return '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_request_no_context', 'No context candidates.')) + '</div>';
+    var requested = (req.requestedContext && req.requestedContext.selectedContextIds) || [];
+    var requestedSet = new Set(requested.map(function(id) { return String(id || ''); }));
     return '<div class="mtg-request-context-list">' + candidates.map(function(c) {
         var title = c.title || c.sourceKind || 'Context';
         var summary = c.summary || '';
+        var checked = c.selected || requestedSet.has(String(c.id || ''));
         return '<label class="mtg-request-context-item">' +
-            '<input type="checkbox" class="mtg-request-context" data-request-id="' + _escMtg(req.id) + '" value="' + _escMtg(c.id || '') + '">' +
+            '<input type="checkbox" class="mtg-request-context" data-request-id="' + _escMtg(req.id) + '" value="' + _escMtg(c.id || '') + '"' + (checked ? ' checked' : '') + '>' +
             '<span><strong>' + _escMtg(_mtgDisplayText(title)) + '</strong><small>' + _escMtg(_mtgSourceKindLabel(c.sourceKind || '')) + '</small><em>' + _escMtg(_mtgDisplayText(summary)) + '</em></span>' +
             '</label>';
     }).join('') + '</div>';
@@ -18530,6 +18578,10 @@ function _mtgRenderTranscript(m) {
     var titleKey = m.status === 'active' ? 'meeting_live_discussion' : 'meeting_transcript';
     var titleFallback = m.status === 'active' ? 'Live discussion' : 'Round transcript';
     var html = '<div class="mtg-section"><div class="mtg-section-title">' + _escMtg(_mtgT(titleKey, titleFallback)) + '</div>';
+    if (!rows.length) {
+        html += '<div class="mtg-section-text">' + _escMtg(_mtgT('meeting_transcript_empty', 'No round transcript was recorded for this meeting.')) + '</div></div>';
+        return html;
+    }
     groups.forEach(function(group) {
         html += '<div class="mtg-round">';
         html += '<div class="mtg-round-title">' + _escMtg(group.label) + '</div>';
@@ -18540,7 +18592,7 @@ function _mtgRenderTranscript(m) {
             var isAgendaChange = turn.type === 'agenda_change';
             var isArbitration = turn.type === 'arbitration_decision';
             var isUserTurn = turn.type === 'user_intervention' || turn.actorType === 'user';
-            var info = isUserTurn ? { emoji: '👤', name: _mtgT('meeting_user', 'User') } : (_mtgAgentMap[turn.speaker] || { emoji: '🤖', name: turn.speaker || 'Unknown' });
+            var info = isUserTurn ? { emoji: '👻', name: _mtgT('meeting_user', 'User') } : (_mtgAgentMap[turn.speaker] || { emoji: '🤖', name: turn.speaker || 'Unknown' });
             var providerKind = ((turn.providerRef || {}).providerKind || '').trim();
             var pendingStatus = turn.timedOut ? _mtgT('meeting_provider_call_timeout', 'call timed out') : _mtgT('meeting_provider_calling', 'calling');
             var status = isUserTurn ? '' : (turn.pending ? ' · ' + pendingStatus : (turn.ok ? '' : ' · ' + _mtgT('meeting_turn_failed', 'failed')));
@@ -18776,6 +18828,9 @@ async function submitMeetingIntervention(meetingId) {
         if (textEl) textEl.value = '';
         if (contextEl) contextEl.value = '';
         if (data.event) _mtgApplyLiveEvent(meetingId, data.event);
+        if (_mtgShouldRunAfterIntervention(data.meeting)) {
+            await _mtgRunMeeting(meetingId, { action: data.meeting.stage === 'awaiting_user_decision' ? 'continue' : 'intervention_continue' });
+        }
         await _mtgAfterMeetingRefresh();
     } catch (e) {
         fail(e.message || String(e));
@@ -18783,6 +18838,14 @@ async function submitMeetingIntervention(meetingId) {
         if (btn) btn.disabled = false;
     }
     }, { button: btn });
+}
+
+function _mtgShouldRunAfterIntervention(meeting) {
+    if (!meeting || meeting.stage === 'paused') return false;
+    if (meeting.stage === 'awaiting_user_decision') {
+        return !((meeting.arbitration || {}).reason === 'no_consensus');
+    }
+    return meeting.stage === 'active_opening' || meeting.stage === 'active_discussion';
 }
 
 async function submitMeetingAgendaChange(meetingId) {
@@ -19359,6 +19422,22 @@ function _mtgFindMeeting(meetingId) {
     });
 }
 
+function _mtgUpsertMeetingDetail(meeting) {
+    if (!meeting || !meeting.id) return meeting;
+    var lists = [_mtgData.active || [], _mtgData.history || []];
+    for (var i = 0; i < lists.length; i++) {
+        var idx = lists[i].findIndex(function(item) { return item && item.id === meeting.id; });
+        if (idx >= 0) {
+            lists[i][idx] = Object.assign({}, lists[i][idx], meeting, { detailLoaded: true, detailLoading: false });
+            return lists[i][idx];
+        }
+    }
+    meeting.detailLoaded = true;
+    meeting.detailLoading = false;
+    _mtgData.history = _mtgSortMeetingsByTime((_mtgData.history || []).concat([meeting]));
+    return meeting;
+}
+
 function _mtgFindMeetingByRequestId(requestId) {
     if (!requestId) return null;
     return (_mtgData.active || []).concat(_mtgData.history || []).find(function(m) {
@@ -19399,6 +19478,11 @@ async function _mtgFetchRequestDetail(requestId) {
 
 function openMeetingDetailModal(meetingId) {
     var meeting = _mtgFindMeeting(meetingId);
+    if (meeting && meeting.detailLoaded === false && meeting.executableMeeting) {
+        openMeetingDetailPlaceholder(meetingId, _mtgT('loading', 'Loading...'));
+        _mtgFetchMeetingDetail(meetingId);
+        return;
+    }
     if (meeting) {
         openMeetingDetailRecord(meeting, meetingId);
         return;
@@ -19429,19 +19513,24 @@ function openMeetingDetailPlaceholder(meetingId, message) {
     modal.classList.remove('hidden');
 }
 
+async function _mtgLoadMeetingDetail(meetingId) {
+    if (!meetingId) return null;
+    var res = await fetch('/api/meetings/executable/' + encodeURIComponent(meetingId));
+    var data = await res.json();
+    if (!res.ok || data.error || !data.meeting) {
+        throw new Error(data.error || _mtgT('meeting_not_found', 'Meeting not found'));
+    }
+    if (Array.isArray(data.events)) {
+        _mtgLiveEvents[meetingId] = _mtgLiveStateFromMeeting(data.meeting);
+        data.events.forEach(function(event) { _mtgApplyLiveEvent(meetingId, event); });
+    }
+    return _mtgUpsertMeetingDetail(data.meeting);
+}
+
 async function _mtgFetchMeetingDetail(meetingId) {
     if (!meetingId) return;
     try {
-        var res = await fetch('/api/meetings/executable/' + encodeURIComponent(meetingId));
-        var data = await res.json();
-        if (!res.ok || data.error || !data.meeting) {
-            throw new Error(data.error || _mtgT('meeting_not_found', 'Meeting not found'));
-        }
-        if (Array.isArray(data.events)) {
-            _mtgLiveEvents[meetingId] = _mtgLiveStateFromMeeting(data.meeting);
-            data.events.forEach(function(event) { _mtgApplyLiveEvent(meetingId, event); });
-        }
-        openMeetingDetailRecord(data.meeting, meetingId);
+        openMeetingDetailRecord(await _mtgLoadMeetingDetail(meetingId), meetingId);
     } catch (e) {
         var body = document.getElementById('meeting-detail-body');
         if (_mtgDetailMeetingId === meetingId && body) {
