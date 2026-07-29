@@ -11,6 +11,7 @@ from services.skill_library_organization_admin import (
 )
 from services.skill_library_organization_runs import (
     SkillLibraryOrganizationService,
+    SkillOrganizationStartError,
 )
 
 
@@ -53,11 +54,13 @@ class SkillLibraryOrganizationRuntime:
         admin: SkillLibraryOrganizationAdmin,
         list_skills: Callable[[], Mapping[str, Any]],
         archive_manager_state: Callable[[], Mapping[str, Any]],
+        organization_enabled: Callable[[], bool] = lambda: True,
     ):
         self.organizer = organizer
         self.admin = admin
         self.list_skills = list_skills
         self.archive_manager_state = archive_manager_state
+        self.organization_enabled = organization_enabled
 
     def library_projection(self) -> dict[str, Any]:
         response = dict(self.list_skills() or {})
@@ -71,9 +74,16 @@ class SkillLibraryOrganizationRuntime:
         response["archiveManager"] = copy.deepcopy(
             dict(self.archive_manager_state() or {})
         )
+        response["organizationEnabled"] = bool(self.organization_enabled())
         return response
 
     def start_run(self) -> dict[str, Any]:
+        if not self.organization_enabled():
+            raise SkillOrganizationStartError(
+                "skill_organization_disabled",
+                "Skill Library organization is disabled",
+                status=404,
+            )
         result = self.organizer.start()
         return {"ok": True, **result, "_status": 202}
 

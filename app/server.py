@@ -107,6 +107,7 @@ from services.skill_library_archive_adapter import SkillLibraryArchiveManagerAda
 from services.skill_library_organization_admin import SkillLibraryOrganizationAdmin
 from services.skill_library_organization_runs import SkillLibraryOrganizationService
 from services.skill_library_organization_runtime import SkillLibraryOrganizationRuntime
+from services import skill_library_organization_config
 from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
@@ -37138,6 +37139,7 @@ def _skill_library_organization_runtime():
         admin=admin,
         list_skills=lambda: _handle_skills_library_list(),
         archive_manager_state=archive_adapter.manager_state,
+        organization_enabled=skill_library_organization_config.is_enabled,
     )
 
 

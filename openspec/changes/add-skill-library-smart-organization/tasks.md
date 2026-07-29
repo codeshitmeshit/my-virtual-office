@@ -18,7 +18,7 @@
 
 - [x] 4.1 Add `app/server_routes/skill_library_organization.py`, explicit runtime dependency wiring, and additive read projections for categories, organization result, catalog revision, and archive-manager state; cover route registration and response compatibility.
 - [x] 4.2 Add management-token authorization before body parsing for run start, marker dismissal, and manual category mutation; add HTTP contract tests for missing, invalid, and valid owner credentials plus stable busy, unavailable, disabled, validation, and revision-conflict error codes.
-- [ ] 4.3 Add `VO_SKILL_LIBRARY_ORGANIZATION_ENABLED` rollout handling so disabled deployments cannot start runs while existing skill CRUD/apply remains available; test disabled, enabled, and rollback-compatible sidecar behavior.
+- [x] 4.3 Add `VO_SKILL_LIBRARY_ORGANIZATION_ENABLED` rollout handling so disabled deployments cannot start runs while existing skill CRUD/apply remains available; test disabled, enabled, and rollback-compatible sidecar behavior.
 
 ## 5. Skills Library Interface
 
