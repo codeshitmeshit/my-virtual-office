@@ -34,15 +34,15 @@ assert.ok(!modal.includes('openMcpRegistry'));
 assert.ok(!modal.includes('mcp_registry_title'));
 
 assert.ok(
-  html.includes('skills-library-organization.css?v=20260730'),
+  html.includes('skills-library-organization.css?v=20260730a'),
   'organization stylesheet must be loaded',
 );
 assert.ok(
-  html.includes('skills-library-organization-ui.js?v=20260730'),
+  html.includes('skills-library-organization-ui.js?v=20260730a'),
   'organization UI module must be loaded',
 );
 assert.ok(
-  html.indexOf('skills-library-organization-ui.js?v=20260730') <
+  html.indexOf('skills-library-organization-ui.js?v=20260730a') <
     html.indexOf('skills-library-ui.js?v=20260730'),
   'organization renderer must be available before CRUD bootstrap',
 );
