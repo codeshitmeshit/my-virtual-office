@@ -91,56 +91,91 @@ async function toggleSkillApply(skillName) {
         return;
     }
 
-    // Fetch agent list
     try {
-        var res = await fetch('/agents-list');
+        var res = await fetch('/api/agents', { cache: 'no-store' });
         var data = await res.json();
         var agentList = Array.isArray(data) ? data : (data.agents || []);
-
-        var options = agentList.map(function(a) {
-            var id = a.id || a.agentId || a.name;
-            var name = a.name || id;
-            return '<option value="' + _sklEsc(id) + '">' + _sklEsc(name) + '</option>';
-        }).join('');
-
-        dropdown.innerHTML =
-            '<select id="skl-agent-select-' + skillName + '">' + options + '</select>' +
-            '<button onclick="applySkillToAgent(\'' + _sklEsc(skillName) + '\')">' + _sklEsc(_tr('apply')) + '</button>';
+        var translate = function(key, fallback) {
+            var value = _tr(key);
+            return !value || value === key ? fallback : value;
+        };
+        dropdown.innerHTML = AgentBranchSelector.render({
+            agents: agentList,
+            branches: typeof getBranchList === 'function' ? getBranchList() : [],
+            selectedIds: [],
+            branchInputClass: 'skl-branch-toggle',
+            agentInputClass: 'skl-agent-toggle',
+            scopeAttributes: ' data-skill-name="' + _sklEsc(skillName) + '"',
+            quickSelectLabel: translate('meeting_branch_quick_select', '按部门快捷选择'),
+            hintLabel: translate('meeting_branch_quick_select_hint', '先选择部门，再手动调整单个 Agent。'),
+            emptyLabel: translate('skill_no_assignable_agents', '暂无可应用的 Agent'),
+            escape: _sklEsc,
+            translate: translate
+        }) +
+            '<div class="skl-apply-actions"><button type="button" data-skl-apply-selected data-skill-name="' + _sklEsc(skillName) + '">' +
+                _sklEsc(translate('skill_apply_selected_agents', '应用到所选 Agent')) +
+            '</button></div>';
         dropdown.style.display = 'flex';
+        var applyButton = dropdown.querySelector('[data-skl-apply-selected]');
+        if (applyButton && dropdown.querySelector('.branch-agent-selector-empty')) applyButton.disabled = true;
+        AgentBranchSelector.syncBranches(dropdown, '.skl-branch-toggle', '.skl-agent-toggle');
     } catch (e) {
         _sklToast('❌ ' + _tr('failed_to_load'));
     }
 }
 
-async function applySkillToAgent(skillName) {
-    var select = document.getElementById('skl-agent-select-' + skillName);
-    if (!select) return;
-    var agentId = select.value;
+async function _applySkillToAgentId(skillName, agentId) {
     if (!agentId) return;
+    var res = await _sklMutationFetch('/api/skills-library/apply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ skill: skillName, agentId: agentId })
+    });
+    var data = await res.json().catch(function() { return {}; });
+    if (!res.ok) throw new Error(data.error || _tr('unknown'));
+    return data;
+}
 
-    try {
-        var res = await _sklMutationFetch('/api/skills-library/apply', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ skill: skillName, agentId: agentId })
-        });
-        var data = await res.json();
-        if (res.ok) {
-            if (data.warning) {
-                _sklToast('⚠️ ' + data.warning);
-            } else {
-                _sklToast('✅ ' + _tr('skill_applied', { skill: skillName, agent: agentId }));
-            }
-        } else {
-            _sklToast('❌ ' + _tr('apply_failed') + ': ' + (data.error || _tr('unknown')));
-        }
-    } catch (e) {
-        _sklToast('❌ ' + _tr('apply_failed') + ': ' + e.message);
-    }
-
-    // Hide dropdown after apply
+async function applySkillToSelectedAgents(skillName, button) {
     var dropdown = document.getElementById('skl-apply-' + skillName);
-    if (dropdown) dropdown.style.display = 'none';
+    if (!dropdown) return;
+    var agentIds = Array.prototype.slice.call(dropdown.querySelectorAll('.skl-agent-toggle:checked')).map(function(input) {
+        return input.value;
+    }).filter(Boolean);
+    if (!agentIds.length) {
+        _sklToast('⚠️ ' + (_tr('skill_select_agent_first') || '请先选择 Agent'));
+        return;
+    }
+    if (button) button.disabled = true;
+    var succeeded = [];
+    var failed = [];
+    var warnings = [];
+    for (var i = 0; i < agentIds.length; i += 1) {
+        try {
+            var result = await _applySkillToAgentId(skillName, agentIds[i]);
+            succeeded.push(agentIds[i]);
+            if (result && result.warning) warnings.push(agentIds[i] + ': ' + result.warning);
+        } catch (e) {
+            failed.push(agentIds[i] + ': ' + e.message);
+        }
+    }
+    if (button) button.disabled = false;
+    if (failed.length) {
+        _sklToast('⚠️ ' + _tr('skill_apply_batch_partial', {
+            success: succeeded.length,
+            failed: failed.length
+        }) + ' · ' + failed.join('; '));
+        return;
+    }
+    _sklToast('✅ ' + _tr('skill_apply_batch_success', {
+        skill: skillName,
+        count: succeeded.length
+    }) + (warnings.length ? ' · ⚠️ ' + warnings.join('; ') : ''));
+    dropdown.style.display = 'none';
+}
+
+async function applySkillToAgent(skillName) {
+    return applySkillToSelectedAgents(skillName);
 }
 
 async function openSkillEditor(skillName) {
@@ -260,6 +295,28 @@ document.getElementById('skillEditorModal').addEventListener('click', function(e
     if (e.target === this) closeSkillEditor();
 });
 
+document.addEventListener('change', function(e) {
+    var branch = e.target.closest && e.target.closest('.skl-branch-toggle');
+    if (branch) {
+        var dropdown = branch.closest('.skl-apply-dropdown');
+        if (!dropdown) return;
+        AgentBranchSelector.applyBranch(dropdown, branch, '.skl-agent-toggle');
+        AgentBranchSelector.syncBranches(dropdown, '.skl-branch-toggle', '.skl-agent-toggle');
+        return;
+    }
+    var agent = e.target.closest && e.target.closest('.skl-agent-toggle');
+    if (agent) {
+        var root = agent.closest('.skl-apply-dropdown');
+        if (root) AgentBranchSelector.syncBranches(root, '.skl-branch-toggle', '.skl-agent-toggle');
+    }
+});
+
+document.addEventListener('click', function(e) {
+    var button = e.target.closest && e.target.closest('[data-skl-apply-selected]');
+    if (!button) return;
+    applySkillToSelectedAgents(button.getAttribute('data-skill-name') || '', button);
+});
+
 // Close skills modals on Escape (extend existing keydown)
 var _origKeydownHandler = document.onkeydown;
 document.addEventListener('keydown', function(e) {
@@ -280,6 +337,7 @@ Object.assign(window, {
     refreshSkillsList,
     toggleSkillApply,
     applySkillToAgent,
+    applySkillToSelectedAgents,
     openSkillEditor,
     closeSkillEditor,
     saveSkill,

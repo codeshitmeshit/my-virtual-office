@@ -78,79 +78,26 @@ function _mcpAgentLabel(agentId) {
     return ((agent.emoji || '') + ' ' + (agent.name || agentId)).trim();
 }
 
-function _mcpAssignableAgents() {
-    return Object.keys(_mcpAgentsById).map(function(id) {
-        return _mcpAgentsById[id];
-    }).filter(function(agent) {
-        return agent.assignable !== false && agent.systemRole !== 'archive_manager' && !agent.archiveManager &&
-            ['openclaw', 'codex', 'claude', 'claude-code'].indexOf(
-            String(agent.providerKind || 'openclaw').toLowerCase()
-            ) >= 0;
-    });
-}
-
-function _mcpAgentBranchId(agent) {
-    return String((agent && (agent.branch || agent.branchId)) || 'UNASSIGNED');
-}
-
-function _mcpBranchLabel(branch) {
-    if (!branch || branch.id === 'UNASSIGNED') {
-        return '📦 ' + _mcpTr('branch_unassigned', null, '未分配');
-    }
-    var name = branch.name || branch.id;
-    if (String(name).indexOf('branch_') === 0) name = _mcpTr(name, null, branch.id);
-    return (branch.emoji || '🏢') + ' ' + name;
-}
-
 function _mcpAclMarkup(server, assigned) {
-    var agents = _mcpAssignableAgents();
-    if (!agents.length) {
-        return '<span class="mcp-agent-acl-empty">' + _mcpEsc(_mcpTr('mcp_no_assignable_agents', null, '暂无可分配 Agent')) + '</span>';
-    }
-    var configured = typeof getBranchList === 'function' ? getBranchList() : [];
-    var branches = configured.map(function(branch) {
-        return { id: String(branch.id || 'UNASSIGNED'), name: branch.name, emoji: branch.emoji };
+    return AgentBranchSelector.render({
+        agents: Object.keys(_mcpAgentsById).map(function(id) { return _mcpAgentsById[id]; }),
+        branches: typeof getBranchList === 'function' ? getBranchList() : [],
+        selectedIds: assigned,
+        supportedProviders: ['openclaw', 'codex', 'claude', 'claude-code'],
+        branchInputClass: 'mcp-branch-toggle',
+        agentInputClass: 'mcp-assignment-toggle',
+        scopeAttributes: ' data-mcp-name="' + _mcpEsc(server.name) + '"',
+        quickSelectLabel: _mcpTr('meeting_branch_quick_select', null, '按部门快捷选择'),
+        hintLabel: _mcpTr('meeting_branch_quick_select_hint', null, '先选择部门，再手动调整单个 Agent。'),
+        emptyLabel: _mcpTr('mcp_no_assignable_agents', null, '暂无可分配 Agent'),
+        escape: _mcpEsc,
+        translate: function(key, fallback) { return _mcpTr(key, null, fallback); }
     });
-    var known = {};
-    branches.forEach(function(branch) { known[branch.id] = true; });
-    agents.forEach(function(agent) {
-        var branchId = _mcpAgentBranchId(agent);
-        if (!known[branchId]) {
-            branches.push({ id: branchId, name: branchId, emoji: branchId === 'UNASSIGNED' ? '📦' : '🏢' });
-            known[branchId] = true;
-        }
-    });
-    return branches.map(function(branch) {
-        var branchAgents = agents.filter(function(agent) { return _mcpAgentBranchId(agent) === branch.id; });
-        if (!branchAgents.length) return '';
-        var options = branchAgents.map(function(agent) {
-            var agentId = String(agent.id || '');
-            var checked = assigned.indexOf(agentId) >= 0;
-            return '<label class="mcp-agent-acl-option' + (checked ? ' is-checked' : '') + '">' +
-                '<input type="checkbox" data-mcp-assignment-toggle data-mcp-name="' + _mcpEsc(server.name) + '" data-agent-id="' + _mcpEsc(agentId) + '" data-branch-id="' + _mcpEsc(branch.id) + '"' + (checked ? ' checked' : '') + '>' +
-                '<span>' + _mcpEsc(_mcpAgentLabel(agentId)) + '</span>' +
-            '</label>';
-        }).join('');
-        return '<section class="mcp-agent-acl-branch">' +
-            '<label class="mcp-agent-acl-branch-header">' +
-                '<input type="checkbox" data-mcp-branch-toggle data-mcp-name="' + _mcpEsc(server.name) + '" data-branch-id="' + _mcpEsc(branch.id) + '">' +
-                '<span>' + _mcpEsc(_mcpBranchLabel(branch)) + '</span>' +
-                '<small>' + branchAgents.length + '</small>' +
-            '</label>' +
-            '<div class="mcp-agent-acl-options">' + options + '</div>' +
-        '</section>';
-    }).join('');
 }
 
 function _mcpSyncBranchToggles() {
-    document.querySelectorAll('[data-mcp-branch-toggle]').forEach(function(branchToggle) {
-        var name = branchToggle.getAttribute('data-mcp-name') || '';
-        var branchId = branchToggle.getAttribute('data-branch-id') || '';
-        var selector = '[data-mcp-assignment-toggle][data-mcp-name="' + CSS.escape(name) + '"][data-branch-id="' + CSS.escape(branchId) + '"]';
-        var agentToggles = Array.prototype.slice.call(document.querySelectorAll(selector));
-        var checkedCount = agentToggles.filter(function(toggle) { return toggle.checked; }).length;
-        branchToggle.checked = agentToggles.length > 0 && checkedCount === agentToggles.length;
-        branchToggle.indeterminate = checkedCount > 0 && checkedCount < agentToggles.length;
+    document.querySelectorAll('.mcp-card').forEach(function(card) {
+        AgentBranchSelector.syncBranches(card, '.mcp-branch-toggle', '.mcp-assignment-toggle');
     });
 }
 
@@ -392,13 +339,12 @@ async function setMcpAgentAccess(name, agentId, allowed, checkbox) {
 }
 
 async function setMcpBranchAccess(name, branchId, allowed, branchToggle) {
-    var agents = _mcpAssignableAgents().filter(function(agent) {
-        return _mcpAgentBranchId(agent) === branchId;
-    });
-    var agentIds = agents.map(function(agent) { return String(agent.id || ''); }).filter(Boolean);
+    var card = branchToggle && branchToggle.closest('.mcp-card');
+    var agentToggles = card ? Array.prototype.slice.call(card.querySelectorAll('.mcp-assignment-toggle')).filter(function(toggle) {
+        return (toggle.getAttribute('data-branch-id') || '') === branchId;
+    }) : [];
+    var agentIds = agentToggles.map(function(toggle) { return toggle.value; }).filter(Boolean);
     if (!agentIds.length) return;
-    var selector = '[data-mcp-assignment-toggle][data-mcp-name="' + CSS.escape(name) + '"][data-branch-id="' + CSS.escape(branchId) + '"]';
-    var agentToggles = Array.prototype.slice.call(document.querySelectorAll(selector));
     if (branchToggle) branchToggle.disabled = true;
     agentToggles.forEach(function(toggle) {
         toggle.checked = allowed;
@@ -492,7 +438,7 @@ document.addEventListener('click', function(e) {
 });
 
 document.addEventListener('change', function(e) {
-    var branchToggle = e.target.closest && e.target.closest('[data-mcp-branch-toggle]');
+    var branchToggle = e.target.closest && e.target.closest('.mcp-branch-toggle');
     if (branchToggle) {
         setMcpBranchAccess(
             branchToggle.getAttribute('data-mcp-name') || '',
@@ -502,11 +448,11 @@ document.addEventListener('change', function(e) {
         );
         return;
     }
-    var checkbox = e.target.closest && e.target.closest('[data-mcp-assignment-toggle]');
+    var checkbox = e.target.closest && e.target.closest('.mcp-assignment-toggle');
     if (!checkbox) return;
     setMcpAgentAccess(
         checkbox.getAttribute('data-mcp-name') || '',
-        checkbox.getAttribute('data-agent-id') || '',
+        checkbox.getAttribute('data-agent-id') || checkbox.value || '',
         Boolean(checkbox.checked),
         checkbox
     );

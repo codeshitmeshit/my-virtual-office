@@ -5140,8 +5140,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .skl-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .skl-card-actions button { font-size: 9px; padding: 3px 7px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
 .skl-card-actions button:hover { background: #1e1e36; border-color: var(--gold); color: var(--gold); }
-.skl-apply-dropdown { margin-top: 6px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; width: 100%; }
-.skl-apply-dropdown select { background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; padding: 4px 8px; font-size: 10px; flex: 1; min-width: 0; }
+.skl-apply-dropdown { margin-top: 10px; display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; width: 100%; }
 .skl-apply-dropdown button { font-size: 9px; padding: 4px 10px; background: #1b5e20; border: 1px solid #66bb6a; color: #66bb6a; border-radius: 4px; cursor: pointer; }
 .skl-editor-body { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
 .skl-field-label { font-size: 10px; color: #888; }

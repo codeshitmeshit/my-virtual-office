@@ -1,0 +1,84 @@
+.branch-agent-selector {
+    min-width: 0;
+    color: #aaa6c1;
+    font-size: 8px;
+}
+
+.branch-agent-selector-label {
+    margin-bottom: 5px;
+    color: #a4a0b8;
+}
+
+.branch-agent-selector-branches,
+.branch-agent-selector-options {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 12px;
+}
+
+.branch-agent-selector-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: #d6bb31;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.branch-agent-selector-option input {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    accent-color: #f5d649;
+    cursor: pointer;
+}
+
+.branch-agent-selector-hint {
+    margin-top: 6px;
+    color: #706d82;
+}
+
+.branch-agent-selector-agents {
+    margin-top: 7px;
+}
+
+.branch-agent-selector-group + .branch-agent-selector-group {
+    margin-top: 7px;
+}
+
+.branch-agent-selector-group-title {
+    margin-bottom: 5px;
+    color: #9692a8;
+}
+
+.branch-agent-selector-empty {
+    color: #77748f;
+}
+
+.skl-apply-dropdown {
+    align-items: stretch;
+    flex-direction: column;
+}
+
+.skl-apply-dropdown .branch-agent-selector {
+    width: 100%;
+}
+
+.skl-apply-actions {
+    display: flex;
+    justify-content: flex-end;
+    width: 100%;
+}
+
+.skl-apply-actions button:disabled {
+    cursor: not-allowed;
+    opacity: .48;
+}
+
+@media (max-width: 560px) {
+    .branch-agent-selector-branches,
+    .branch-agent-selector-options {
+        gap: 7px 10px;
+    }
+}
