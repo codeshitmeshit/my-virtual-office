@@ -195,10 +195,10 @@ function renderMcpRegistry() {
             (registrationWarnings.length ? '<div class="mcp-card-warning"><span aria-hidden="true">!</span><div><strong>' + _mcpEsc(_mcpTr('mcp_attention', null, '需要注意')) + '</strong><p>' + _mcpEsc(registrationWarnings.join('; ')) + '</p></div></div>' : '') +
             '<div class="mcp-card-footer">' +
                 '<div class="mcp-assignment-summary">' +
-                    '<span class="mcp-assignment-icon" aria-hidden="true">A</span>' +
                     '<div class="mcp-agent-acl-copy"><span>' + _mcpEsc(_mcpTr('mcp_agent_acl', null, 'Agent 使用权限')) + '</span><div class="mcp-agent-acl">' + aclMarkup + '</div></div>' +
                 '</div>' +
                 '<div class="mcp-card-actions">' +
+                    '<button type="button" class="mcp-save-access-button" data-mcp-action="save-access" data-mcp-name="' + _mcpEsc(server.name) + '" disabled>' + _mcpEsc(_mcpTr('mcp_save_settings', null, '保存设置')) + '</button>' +
                     '<button type="button" class="mcp-guide-button" data-mcp-action="toggle-guide" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide', null, '使用说明')) + (server.hasUsageGuide ? ' ·' : '') + '</button>' +
                     '<button type="button" class="mcp-delete-button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" aria-label="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">×</button>' +
                 '</div>' +
@@ -305,69 +305,49 @@ async function registerMcpInNativeClient(name, client) {
     }
 }
 
-async function setMcpAgentAccess(name, agentId, allowed, checkbox) {
-    if (!agentId) return;
-    if (checkbox) checkbox.disabled = true;
-    try {
-        var endpoint = allowed ? '/assign-agent' : '/assign';
-        var body = allowed ? { agentId: agentId } : { agentId: agentId, mode: 'remove' };
-        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
-        });
-        var data = await res.json();
-        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_assignment_failed_plain', null, 'MCP 分配失败'));
-        if (typeof _acpShowToast === 'function') {
-            var labels = { openclaw: 'OpenClaw', codex: 'Codex', claude: 'Claude' };
-            var message = allowed
-                ? _mcpTr('mcp_access_granted', {
-                    agent: _mcpAgentLabel(agentId),
-                    client: labels[data.client] || data.client || ''
-                }, '已允许 {{agent}} 使用，并注册到 {{client}}')
-                : _mcpTr('mcp_access_revoked', { agent: _mcpAgentLabel(agentId) }, '已取消 {{agent}} 的使用权限');
-            _acpShowToast(message);
-        }
-        refreshMcpRegistry();
-    } catch (e) {
-        if (checkbox) {
-            checkbox.checked = !allowed;
-            checkbox.disabled = false;
-        }
-        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_assignment_failed', { error: e.message }, 'MCP 分配失败：{{error}}'));
-    }
+function _mcpMarkAccessDirty(card) {
+    if (!card) return;
+    card.classList.add('is-access-dirty');
+    var button = card.querySelector('[data-mcp-action="save-access"]');
+    if (button) button.disabled = false;
 }
 
-async function setMcpBranchAccess(name, branchId, allowed, branchToggle) {
+function setMcpAgentAccess(name, agentId, allowed, checkbox) {
+    var card = checkbox && checkbox.closest('.mcp-card');
+    if (card) AgentBranchSelector.syncBranches(card, '.mcp-branch-toggle', '.mcp-assignment-toggle');
+    _mcpMarkAccessDirty(card);
+}
+
+function setMcpBranchAccess(name, branchId, allowed, branchToggle) {
     var card = branchToggle && branchToggle.closest('.mcp-card');
-    var agentToggles = card ? Array.prototype.slice.call(card.querySelectorAll('.mcp-assignment-toggle')).filter(function(toggle) {
-        return (toggle.getAttribute('data-branch-id') || '') === branchId;
-    }) : [];
-    var agentIds = agentToggles.map(function(toggle) { return toggle.value; }).filter(Boolean);
-    if (!agentIds.length) return;
-    if (branchToggle) branchToggle.disabled = true;
-    agentToggles.forEach(function(toggle) {
-        toggle.checked = allowed;
-        toggle.disabled = true;
-    });
+    if (!card) return;
+    AgentBranchSelector.applyBranch(card, branchToggle, '.mcp-assignment-toggle');
+    AgentBranchSelector.syncBranches(card, '.mcp-branch-toggle', '.mcp-assignment-toggle');
+    _mcpMarkAccessDirty(card);
+}
+
+async function saveMcpAgentAccess(name, button) {
+    var card = button && button.closest('.mcp-card');
+    if (!card) return;
+    var agentIds = Array.prototype.slice.call(card.querySelectorAll('.mcp-assignment-toggle:checked')).map(function(toggle) {
+        return toggle.value;
+    }).filter(Boolean);
+    button.disabled = true;
     try {
-        var endpoint = allowed ? '/assign-agents' : '/assign';
-        var body = allowed ? { agentIds: agentIds } : { agentIds: agentIds, mode: 'remove' };
+        var endpoint = agentIds.length ? '/assign-agents' : '/assign';
         var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + endpoint, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body)
+            body: JSON.stringify({ agentIds: agentIds, mode: 'replace' })
         });
         var data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_assignment_failed_plain', null, 'MCP 分配失败'));
-        if (typeof _acpShowToast === 'function') {
-            _acpShowToast(allowed
-                ? _mcpTr('mcp_branch_access_granted', { branch: branchId, count: agentIds.length }, '已允许 {{branch}} 的 {{count}} 个 Agent 使用')
-                : _mcpTr('mcp_branch_access_revoked', { branch: branchId, count: agentIds.length }, '已取消 {{branch}} 的 {{count}} 个 Agent 使用权限'));
-        }
+        if (typeof _acpShowToast === 'function') _acpShowToast(
+            _mcpTr('mcp_settings_saved', { count: agentIds.length }, '已保存 {{count}} 个 Agent 的使用权限')
+        );
         refreshMcpRegistry();
     } catch (e) {
-        refreshMcpRegistry();
+        button.disabled = false;
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_assignment_failed', { error: e.message }, 'MCP 分配失败：{{error}}'));
     }
 }
@@ -432,6 +412,7 @@ document.addEventListener('click', function(e) {
     var name = actionButton.getAttribute('data-mcp-name') || '';
     if (action === 'copy-command') copyMcpConnection(actionButton.getAttribute('data-mcp-detail') || '');
     if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
+    if (action === 'save-access') saveMcpAgentAccess(name, actionButton);
     if (action === 'toggle-guide') toggleMcpGuide(name);
     if (action === 'save-guide') saveMcpGuide(name);
     if (action === 'delete') deleteMcpServer(name);
@@ -472,6 +453,7 @@ Object.assign(window, {
     registerMcpInNativeClient,
     setMcpAgentAccess,
     setMcpBranchAccess,
+    saveMcpAgentAccess,
     toggleMcpGuide,
     saveMcpGuide,
     copyMcpConnection,

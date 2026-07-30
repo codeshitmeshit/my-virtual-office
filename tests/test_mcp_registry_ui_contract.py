@@ -31,6 +31,9 @@ def test_agent_assignment_does_not_install_a_generated_skill():
     assert "mcp-branch-toggle" in SCRIPT
     assert "setMcpAgentAccess" in SCRIPT
     assert "setMcpBranchAccess" in SCRIPT
+    assert "saveMcpAgentAccess" in SCRIPT
+    assert 'data-mcp-action="save-access"' in SCRIPT
+    assert 'mcp-assignment-icon' not in SCRIPT
     assert "/assign-agents" in SCRIPT
     assert "toggleMcpAssignment" not in SCRIPT
     assert "/skill'" not in SCRIPT

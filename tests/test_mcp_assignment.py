@@ -139,3 +139,22 @@ def test_branch_assignment_registers_each_native_client_once_before_acl_update()
         ("register", "claude", "claude-a"),
         ("assign", ["codex-a", "codex-b", "claude-a"]),
     ]
+
+
+def test_saved_assignment_replaces_the_complete_acl_after_registration():
+    calls = []
+
+    result = mcp_assignment.assign_to_agents(
+        "echo",
+        {"agentIds": ["codex-a"], "mode": "replace"},
+        list_agents=lambda: {"agents": [{"id": "codex-a", "providerKind": "codex"}]},
+        register_client=lambda name, client, body: calls.append(("register", client)) or {"ok": True},
+        assign_registry=lambda name, body: calls.append(("assign", body))
+        or {"ok": True, "assignedAgentIds": body["agentIds"]},
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("register", "codex"),
+        ("assign", {"agentIds": ["codex-a"], "mode": "replace"}),
+    ]

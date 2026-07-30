@@ -2573,6 +2573,8 @@
   "mcp_assignment_failed_plain": "MCP assignment failed",
   "mcp_assigned": "Registered in {{client}} and assigned to {{agent}}",
   "mcp_agent_acl": "Agent access",
+  "mcp_save_settings": "Save settings",
+  "mcp_settings_saved": "Saved access for {{count}} agents",
   "mcp_no_assignable_agents": "No assignable agents",
   "mcp_access_granted": "Granted access to {{agent}} and registered in {{client}}",
   "mcp_access_revoked": "Revoked access from {{agent}}",

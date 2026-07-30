@@ -306,22 +306,6 @@
 
 .mcp-assignment-summary {
     min-width: 0;
-    display: flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.mcp-assignment-icon {
-    width: 26px;
-    height: 26px;
-    flex: 0 0 26px;
-    display: grid;
-    place-items: center;
-    color: #aaa6ca;
-    background: #23213b;
-    border: 1px solid #39365d;
-    border-radius: 7px;
-    font-size: 8px;
 }
 
 .mcp-assignment-summary > div {
@@ -343,10 +327,15 @@
     flex-wrap: nowrap;
 }
 
-.mcp-card-actions .mcp-assign-button {
+.mcp-card-actions .mcp-save-access-button {
     color: #f6d64a;
     background: rgba(246, 214, 74, 0.08);
     border-color: rgba(246, 214, 74, 0.45);
+}
+
+.mcp-card-actions .mcp-save-access-button:disabled {
+    cursor: not-allowed;
+    opacity: .38;
 }
 
 .mcp-card-actions .mcp-guide-button {

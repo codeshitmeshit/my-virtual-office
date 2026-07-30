@@ -2573,6 +2573,8 @@
   "mcp_assignment_failed_plain": "MCP 分配失败",
   "mcp_assigned": "已注册到 {{client}} 并分配给 {{agent}}",
   "mcp_agent_acl": "Agent 使用权限",
+  "mcp_save_settings": "保存设置",
+  "mcp_settings_saved": "已保存 {{count}} 个 Agent 的使用权限",
   "mcp_no_assignable_agents": "暂无可分配 Agent",
   "mcp_access_granted": "已允许 {{agent}} 使用，并注册到 {{client}}",
   "mcp_access_revoked": "已取消 {{agent}} 的使用权限",

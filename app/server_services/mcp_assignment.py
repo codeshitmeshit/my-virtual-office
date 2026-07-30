@@ -112,6 +112,14 @@ def assign_to_agents(
     agent_ids = list(dict.fromkeys(item for item in agent_ids if item))
     if not agent_ids:
         return {"ok": False, "error": "agentIds is required", "_status": 400, "stage": "resolve-agent"}
+    mode = str(body.get("mode") or "add").strip().lower()
+    if mode not in {"add", "replace"}:
+        return {
+            "ok": False,
+            "error": "mode must be add or replace",
+            "_status": 400,
+            "stage": "assign-agent",
+        }
 
     agent_payload = list_agents()
     agents = agent_payload.get("agents") if isinstance(agent_payload, dict) else None
@@ -154,7 +162,7 @@ def assign_to_agents(
             }
         registrations[client] = registration
 
-    assignment = assign_registry(server_name, {"agentIds": agent_ids, "mode": "add"})
+    assignment = assign_registry(server_name, {"agentIds": agent_ids, "mode": mode})
     if not assignment.get("ok"):
         return {
             **assignment,
