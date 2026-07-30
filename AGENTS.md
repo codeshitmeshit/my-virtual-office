@@ -10,6 +10,14 @@
 - If a task would normally trigger a Hammer workflow, skip Hammer and handle the task directly with ordinary repository inspection, implementation, testing, and review.
 - Do not create, restore, or rely on `.hammer/` workflow files or Hammer gates for this project.
 
+## Prompt Structure
+
+- All prompts constructed by this project for an Agent or language model must use XML as their outer structural format.
+- Separate instruction concerns into explicit semantic elements such as `<role>`, `<task>`, `<context>`, `<security>`, `<rules>`, and `<output_schema>` instead of relying on unstructured prose.
+- Dynamic or untrusted material must be placed inside a clearly named XML data boundary and escaped so that it cannot close or replace instruction elements. JSON may be embedded inside that XML data element when it is the clearest representation.
+- The required response format is independent of the prompt envelope: request JSON, Markdown, XML, or plain text explicitly inside `<output_schema>` or an equivalent XML element.
+- When modifying an existing prompt that does not follow this structure, migrate the touched prompt to the XML format as part of the same change.
+
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 
