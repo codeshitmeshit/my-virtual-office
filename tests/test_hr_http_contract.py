@@ -182,7 +182,15 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     status, payload = call(
         handler(
             "/api/human-resources/schedule",
-            {"enabled": True, "dailyTime": "16:45"},
+            {
+                "enabled": True,
+                "dailyTime": "16:45",
+                "timezoneName": "UTC",
+                "submissionWindowMinutes": 120,
+                "maxWorkers": 2,
+                "agentTimeoutSeconds": 30,
+                "retryLimit": 3,
+            },
             management=True,
         ),
         "POST",
@@ -198,7 +206,15 @@ def test_management_routes_cover_detail_log_health_export_and_commands(runtime):
     status, payload = call(
         handler(
             "/api/human-resources/schedule",
-            {"enabled": True, "dailyTime": "25:00"},
+            {
+                "enabled": True,
+                "dailyTime": "25:00",
+                "timezoneName": "UTC",
+                "submissionWindowMinutes": 120,
+                "maxWorkers": 2,
+                "agentTimeoutSeconds": 30,
+                "retryLimit": 3,
+            },
             management=True,
         ),
         "POST",

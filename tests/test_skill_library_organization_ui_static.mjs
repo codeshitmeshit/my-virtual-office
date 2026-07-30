@@ -19,6 +19,7 @@ for (const id of [
   'skl-organize-btn',
   'skl-search-input',
   'skl-category-list',
+  'skl-tag-filter-list',
   'skl-cards',
   'skl-detail',
 ]) {
@@ -39,15 +40,15 @@ assert.ok(!modal.includes('openMcpRegistry'));
 assert.ok(!modal.includes('mcp_registry_title'));
 
 assert.ok(
-  html.includes('skills-library-organization.css?v=20260730a'),
+  html.includes('skills-library-organization.css?v=20260730c'),
   'organization stylesheet must be loaded',
 );
 assert.ok(
-  html.includes('skills-library-organization-ui.js?v=20260730a'),
+  html.includes('skills-library-organization-ui.js?v=20260730c'),
   'organization UI module must be loaded',
 );
 assert.ok(
-  html.indexOf('skills-library-organization-ui.js?v=20260730a') <
+  html.indexOf('skills-library-organization-ui.js?v=20260730c') <
     html.indexOf('skills-library-ui.js?v=20260730'),
   'organization renderer must be available before CRUD bootstrap',
 );
@@ -82,7 +83,9 @@ assert.match(
 
 assert.ok(organization.includes("'skill_library_local_source'"));
 assert.ok(organization.includes("categoryId: 'all'"));
+assert.ok(organization.includes("tagFilter: ''"));
 assert.ok(organization.includes('skl-category-item'));
+assert.ok(organization.includes('skl-tag-filter'));
 assert.ok(organization.includes('skl-detail-actions'));
 assert.ok(
   library.includes('window.SkillLibraryOrganizationUI.update(_sklLibraryData)'),

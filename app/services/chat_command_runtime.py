@@ -19,15 +19,13 @@ def _truthy(value: Any, default: bool = False) -> bool:
 @dataclass(frozen=True)
 class CommandFeatureFlags:
     enabled: bool
-    feishu_enabled: bool
 
     @classmethod
-    def from_values(cls, global_value: Any, feishu_value: Any) -> "CommandFeatureFlags":
-        enabled = _truthy(global_value)
-        return cls(enabled, enabled and _truthy(feishu_value))
+    def from_values(cls, global_value: Any) -> "CommandFeatureFlags":
+        return cls(_truthy(global_value, default=True))
 
     def allows(self, surface: str) -> bool:
-        return self.feishu_enabled if str(surface).startswith("feishu-") else self.enabled
+        return self.enabled
 
 
 class ScopedCommandReservations:

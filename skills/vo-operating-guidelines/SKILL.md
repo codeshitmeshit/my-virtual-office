@@ -69,7 +69,7 @@ echo $VO_GATEWAY_HTTP
 - 普通跨 agent 沟通、提问、短任务委派、状态转交、复用 `conversationId`：使用 本地 `/skills/vo-agent-communication/SKILL.md`。
 - 普通跨 agent 通信统一使用 本地 `/skills/vo-agent-communication/SKILL.md`，目标可以是 OpenClaw、Hermes、Claude Code、Codex 或其他已接入 provider。
 - 需要检查 VO 共享浏览器状态、标签页或控制者，或浏览器访问遇到登录、权限、验证码、MFA、付费墙、网站拒绝自动化、支付/提交等人工介入阻塞：使用 本地 `/skills/vo-browser-control/SKILL.md`。当前 VO 没有 provider-neutral browser action endpoint，不能通过该 skill 执行点击、输入、导航或 DOM snapshot；人工介入场景应请求用户接管，不要升级为 raw CDP 操作。
-- 用户明确调用 `$vo-project-authoring`，或自然语言要求创建、复用、周期化 VO 项目，或维护已有 VO 项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建或修改真实项目。不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”。
+- 用户明确调用 `$vo-project-authoring`，或自然语言要求创建、复用、周期化 VO 项目，或维护已有 VO 项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；以 `/` 开头的控制命令或 slash-like 消息（例如 `/new`、`/compact`、`/help`、`/new now`）不得仅凭命令文本触发项目创作，除非同一消息明确调用 `$vo-project-authoring`。该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建或修改真实项目。不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”。
 - 需要读取或推进已创建项目/任务的 Project Execution、review、验收、阻塞、取消或项目 artifact：使用 本地 `/skills/vo-project-workflow/SKILL.md`。不要用项目创作 skill 绕过这些执行门禁。
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
 - 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。

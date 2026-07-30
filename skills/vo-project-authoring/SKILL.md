@@ -1,6 +1,6 @@
 ---
 name: vo-project-authoring
-description: 当用户明确调用 `$vo-project-authoring`，或用自然语言要求在当前本地 Virtual Office 中创建、复用、周期化项目，或维护已有 VO 项目时使用；创建或修改前必须先用自然语言展示完整方案并等待用户明确确认，再调用真实接口。不负责项目执行、review、验收、取消或 artifact 读取。
+description: 当用户明确调用 `$vo-project-authoring`，或用自然语言要求在当前本地 Virtual Office 中创建、复用、周期化项目，或维护已有 VO 项目时使用；以 `/` 开头的控制命令或 slash-like 消息不得触发本 skill，除非同时明确调用 `$vo-project-authoring`；创建或修改前必须先用自然语言展示完整方案并等待用户明确确认，再调用真实接口。不负责项目执行、review、验收、取消或 artifact 读取。
 ---
 
 # Virtual Office 项目创作
@@ -14,6 +14,8 @@ description: 当用户明确调用 `$vo-project-authoring`，或用自然语言�
 ## 强制流程门禁
 
 必须按下面状态机顺序执行，不得跳步、合并步骤或用“我已理解用户意图”替代确认：
+
+在进入 S0 前先做意图排除：用户消息去除首尾空白后，如果以 `/` 开头（例如 `/new`、`/compact`、`/help`、`/new now` 或其他 slash-like 控制命令），不要把它理解为创建、复用、周期化或维护 VO 项目，也不要输出项目确认模板；仅当同一消息明确写出 `$vo-project-authoring` 或用普通自然语言明确要求创建/维护 VO 项目时，才可继续本 skill。
 
 | 阶段 | 允许动作 | 禁止动作 | 进入下一阶段条件 |
 | --- | --- | --- | --- |

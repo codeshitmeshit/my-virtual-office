@@ -509,13 +509,23 @@
                 '<p class="hr-next-report-time">' + escHtml(reportScheduleLabel(reportSchedule)) + '</p></div>' +
                 '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(visibleHrStatus)) + '">' + escHtml(semanticLabel(visibleHrStatus)) + '</span>' +
             '</section>' +
-            '<section class="hr-schedule-panel"><div><h3>' + escHtml(tr('hr_schedule_title', 'Daily report schedule')) + '</h3>' +
+            '<section class="hr-schedule-panel"><div class="hr-schedule-copy"><h3>' + escHtml(tr('hr_schedule_title', 'Daily report schedule')) + '</h3>' +
                 '<p>' + escHtml(tr('hr_schedule_hint', 'Configure the automatic collection time here. The default is 18:00.')) + '</p></div>' +
                 '<div class="hr-schedule-form">' +
                     '<label><span>' + escHtml(tr('hr_schedule_time', 'Collection time')) + '</span>' +
                     '<input id="hr-schedule-time" type="time" step="60" value="' + escHtml(String(reportSchedule.dailyTime || '18:00')) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label><span>' + escHtml(tr('hr_schedule_timezone', 'Timezone')) + '</span>' +
+                    '<input id="hr-schedule-timezone" type="text" value="' + escHtml(String(reportSchedule.timezoneName || reportSchedule.timezone || 'UTC')) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label><span>' + escHtml(tr('hr_schedule_window', 'Submission window')) + '</span>' +
+                    '<input id="hr-schedule-window" type="number" min="1" max="1440" step="1" value="' + escHtml(String(reportSchedule.submissionWindowMinutes || 120)) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label><span>' + escHtml(tr('hr_schedule_workers', 'Workers')) + '</span>' +
+                    '<input id="hr-schedule-workers" type="number" min="1" max="8" step="1" value="' + escHtml(String(reportSchedule.maxWorkers || 2)) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label><span>' + escHtml(tr('hr_schedule_timeout', 'Agent timeout')) + '</span>' +
+                    '<input id="hr-schedule-timeout" type="number" min="0.1" max="300" step="0.1" value="' + escHtml(String(reportSchedule.agentTimeoutSeconds || 30)) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
+                    '<label><span>' + escHtml(tr('hr_schedule_retry', 'Retry limit')) + '</span>' +
+                    '<input id="hr-schedule-retry" type="number" min="0" max="10" step="1" value="' + escHtml(String(reportSchedule.retryLimit == null ? 3 : reportSchedule.retryLimit)) + '"' + (state.scheduleBusy ? ' disabled' : '') + '></label>' +
                     '<label class="hr-schedule-enabled"><input id="hr-schedule-enabled" type="checkbox"' + (reportSchedule.enabled ? ' checked' : '') + (state.scheduleBusy ? ' disabled' : '') + '> ' + escHtml(tr('hr_schedule_enabled', 'Enable automatic daily reports')) + '</label>' +
-                    '<button type="button" class="hr-command-button" onclick="HumanResources.saveSchedule()"' + (state.scheduleBusy ? ' disabled' : '') + '>' +
+                    '<button type="button" class="hr-command-button hr-schedule-save" onclick="HumanResources.saveSchedule()"' + (state.scheduleBusy ? ' disabled' : '') + '>' +
                     escHtml(state.scheduleBusy ? tr('hr_schedule_saving', 'Saving...') : tr('hr_schedule_save', 'Save schedule')) + '</button>' +
                 '</div></section>' +
             '<section class="hr-command-panel"><div><h3>' + escHtml(tr('hr_controls', 'HR controls')) + '</h3>' +
@@ -953,7 +963,7 @@
         if (results[1].status === 'fulfilled') {
             state.agents = array(object(results[1].value.export).rows);
             if (embeddedContext && typeof embeddedContext.setRoster === 'function') {
-                embeddedContext.setRoster(state.agents);
+                embeddedContext.setRoster(state.agents, { selectedAiId: state.selectedAgentId });
             }
         } else {
             state.errors.push(String(results[1].reason && results[1].reason.message || 'hr_roster_failed'));
@@ -1035,9 +1045,29 @@
     async function saveSchedule() {
         if (state.scheduleBusy) return false;
         const timeInput = root.document && root.document.getElementById('hr-schedule-time');
+        const timezoneInput = root.document && root.document.getElementById('hr-schedule-timezone');
         const enabledInput = root.document && root.document.getElementById('hr-schedule-enabled');
+        const windowInput = root.document && root.document.getElementById('hr-schedule-window');
+        const workersInput = root.document && root.document.getElementById('hr-schedule-workers');
+        const timeoutInput = root.document && root.document.getElementById('hr-schedule-timeout');
+        const retryInput = root.document && root.document.getElementById('hr-schedule-retry');
         const dailyTime = String(timeInput && timeInput.value || '').trim();
-        if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailyTime)) {
+        const timezoneName = String(timezoneInput && timezoneInput.value || '').trim();
+        const submissionWindowMinutes = Number.parseInt(String(windowInput && windowInput.value || ''), 10);
+        const maxWorkers = Number.parseInt(String(workersInput && workersInput.value || ''), 10);
+        const agentTimeoutSeconds = Number.parseFloat(String(timeoutInput && timeoutInput.value || ''));
+        const retryLimit = Number.parseInt(String(retryInput && retryInput.value || ''), 10);
+        if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(dailyTime) || !timezoneName) {
+            state.commandError = 'hr_schedule_settings_validation_failed';
+            render();
+            return false;
+        }
+        if (
+            !Number.isInteger(submissionWindowMinutes) || submissionWindowMinutes < 1 || submissionWindowMinutes > 1440 ||
+            !Number.isInteger(maxWorkers) || maxWorkers < 1 || maxWorkers > 8 ||
+            !Number.isFinite(agentTimeoutSeconds) || agentTimeoutSeconds < 0.1 || agentTimeoutSeconds > 300 ||
+            !Number.isInteger(retryLimit) || retryLimit < 0 || retryLimit > 10
+        ) {
             state.commandError = 'hr_schedule_settings_validation_failed';
             render();
             return false;
@@ -1055,6 +1085,11 @@
                 body: JSON.stringify({
                     enabled: Boolean(enabledInput && enabledInput.checked),
                     dailyTime,
+                    timezoneName,
+                    submissionWindowMinutes,
+                    maxWorkers,
+                    agentTimeoutSeconds,
+                    retryLimit,
                 }),
             });
             state.commandNotice = tr('hr_schedule_saved', 'Daily report schedule saved');
@@ -1161,6 +1196,9 @@
         state.detailPaging = '';
         const sequence = ++state.detailSequence;
         if (!selected) {
+            if (embeddedContext && typeof embeddedContext.clearSelection === 'function') {
+                embeddedContext.clearSelection();
+            }
             state.detailLoading = false;
             render();
             return Promise.resolve(true);

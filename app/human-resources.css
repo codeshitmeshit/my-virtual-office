@@ -282,9 +282,9 @@
 }
 
 .hr-schedule-panel {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(180px, 0.7fr) minmax(320px, 1.3fr);
+    align-items: end;
     gap: 16px;
 }
 
@@ -301,33 +301,63 @@
 }
 
 .hr-schedule-form {
-    display: flex;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(82px, 1fr)) auto;
     align-items: end;
-    flex-wrap: wrap;
-    justify-content: flex-end;
     gap: 10px;
 }
 
 .hr-schedule-form label {
+    min-width: 0;
     display: grid;
     gap: 5px;
     color: #9fb0c4;
     font-size: 9px;
 }
 
-.hr-schedule-form input[type="time"] {
-    min-height: 31px;
-    padding: 5px 8px;
+.hr-schedule-form input[type="time"],
+.hr-schedule-form input[type="text"],
+.hr-schedule-form input[type="number"] {
+    box-sizing: border-box;
+    width: 100%;
+    min-width: 0;
+    height: 34px;
+    padding: 6px 8px;
     border: 1px solid #34485f;
     border-radius: 7px;
     background: #0d1622;
     color: #dce6ef;
+    font: inherit;
+    font-size: 10px;
+    color-scheme: dark;
+    outline: none;
+}
+
+.hr-schedule-form input[type="time"]:focus,
+.hr-schedule-form input[type="text"]:focus,
+.hr-schedule-form input[type="number"]:focus {
+    border-color: #57d7ff;
+    box-shadow: 0 0 0 2px rgba(87, 215, 255, .14);
 }
 
 .hr-schedule-form .hr-schedule-enabled {
     display: flex;
     align-items: center;
-    min-height: 31px;
+    gap: 7px;
+    min-height: 34px;
+}
+
+.hr-schedule-form .hr-schedule-enabled input {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #43e3c2;
+}
+
+.hr-schedule-save {
+    min-height: 34px;
+    white-space: nowrap;
 }
 
 .hr-selection-backdrop { position: fixed; inset: 0; z-index: 10020; display: grid; place-items: center; padding: 24px; background: rgba(3, 8, 18, .78); }

@@ -15,6 +15,15 @@ assert.equal(shell.selectAgent('hermes-default'), true);
 assert.equal(shell.state.selectedAiId, 'hermes-default');
 assert.equal(shell.switchTab('humanResources'), true);
 assert.equal(shell.state.activeTab, 'humanResources');
+assert.equal(shell.setRoster([
+    { aiId: 'codex-local', name: 'Codex' },
+    { aiId: 'hermes-default', name: 'Hermes' },
+], { selectedAiId: '' }).length, 2);
+assert.equal(shell.state.selectedAiId, '', 'HR overview refresh keeps empty Agent selection');
+assert.equal(shell.switchTab('configuration'), true);
+assert.equal(shell.setRoster([{ aiId: 'codex-local', name: 'Codex' }]).length, 1);
+assert.equal(shell.state.selectedAiId, 'codex-local', 'configuration still defaults to a selectable Agent');
+assert.equal(shell.switchTab('humanResources'), true);
 assert.equal(shell.mountTab('configuration', { mount() {} }), true);
 shell.reportMutation({ state: 'saved' });
 assert.equal(shell.state.mutations.at(-1).state, 'saved');

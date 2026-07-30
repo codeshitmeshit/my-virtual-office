@@ -10,6 +10,7 @@
             organizationEnabled: false
         },
         categoryId: 'all',
+        tagFilter: '',
         selectedSlug: '',
         search: '',
         failureOnly: false,
@@ -60,22 +61,63 @@
     function categoryCount(categoryId) {
         if (categoryId === 'all') return skills().length;
         return skills().filter(function(skill) {
-            return (skill.primaryCategoryId || 'default') === categoryId;
+            return skillCategoryId(skill) === categoryId;
         }).length;
+    }
+
+    function skillCategoryId(skill) {
+        if (!skill) return 'default';
+        return skill.primaryCategoryId ||
+            (skill.primaryCategory && skill.primaryCategory.id) ||
+            'default';
+    }
+
+    function skillTags(skill) {
+        return Array.isArray(skill && skill.tags) ? skill.tags.filter(Boolean) : [];
+    }
+
+    function tagOptions() {
+        var counts = new Map();
+        skills().forEach(function(skill) {
+            if (state.categoryId !== 'all' && skillCategoryId(skill) !== state.categoryId) {
+                return;
+            }
+            skillTags(skill).forEach(function(tag) {
+                counts.set(tag, (counts.get(tag) || 0) + 1);
+            });
+        });
+        return Array.from(counts.entries())
+            .map(function(entry) { return { name: entry[0], count: entry[1] }; })
+            .sort(function(left, right) {
+                if (right.count !== left.count) return right.count - left.count;
+                return String(left.name || '').localeCompare(String(right.name || ''));
+            });
+    }
+
+    function skillSlug(value) {
+        return String(value || '')
+            .trim()
+            .toLocaleLowerCase()
+            .replace(/[^a-z0-9_-]+/g, '-')
+            .replace(/^-+|-+$/g, '')
+            .slice(0, 128);
     }
 
     function failureSlugs() {
         var organization = state.data.organization || {};
         return new Set((Array.isArray(organization.failures) ? organization.failures : [])
-            .map(function(failure) { return failure.slug || failure.skillName || failure.name || ''; })
+            .map(function(failure) {
+                return skillSlug(failure.slug || failure.skillName || failure.name || '');
+            })
             .filter(Boolean));
     }
 
     function failureForSkill(slug) {
         var organization = state.data.organization || {};
+        var normalized = skillSlug(slug);
         return (Array.isArray(organization.failures) ? organization.failures : [])
             .find(function(failure) {
-                return (failure.slug || failure.skillName || failure.name || '') === slug;
+                return skillSlug(failure.slug || failure.skillName || failure.name || '') === normalized;
             }) || null;
     }
 
@@ -84,11 +126,12 @@
         var failed = failureSlugs();
         return skills().filter(function(skill) {
             var inCategory = state.categoryId === 'all' ||
-                (skill.primaryCategoryId || 'default') === state.categoryId;
+                skillCategoryId(skill) === state.categoryId;
             if (!inCategory) return false;
-            if (state.failureOnly && !failed.has(skill.name)) return false;
+            if (state.tagFilter && skillTags(skill).indexOf(state.tagFilter) < 0) return false;
+            if (state.failureOnly && !failed.has(skillSlug(skill.name))) return false;
             if (!query) return true;
-            return [skill.name, skill.description]
+            return [skill.name, skill.description].concat(skillTags(skill))
                 .join(' ')
                 .toLocaleLowerCase()
                 .indexOf(query) >= 0;
@@ -121,6 +164,42 @@
             button.append(name, count);
             button.addEventListener('click', function() {
                 state.categoryId = category.id;
+                state.tagFilter = '';
+                state.failureOnly = false;
+                state.selectedSlug = '';
+                render();
+            });
+            container.appendChild(button);
+        });
+    }
+
+    function renderTags() {
+        var container = byId('skl-tag-filter-list');
+        if (!container) return;
+        container.replaceChildren();
+        var tags = tagOptions();
+        if (!tags.length) {
+            var empty = document.createElement('div');
+            empty.className = 'skl-tag-filter-empty';
+            empty.textContent = tr('skill_library_no_tags', null, '暂无标签');
+            container.appendChild(empty);
+            return;
+        }
+        tags.forEach(function(tag) {
+            var button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'skl-tag-filter' +
+                (state.tagFilter === tag.name ? ' is-active' : '');
+            button.setAttribute('aria-pressed', state.tagFilter === tag.name ? 'true' : 'false');
+            button.setAttribute('data-skill-tag', tag.name);
+            var name = document.createElement('span');
+            name.textContent = tag.name;
+            var count = document.createElement('span');
+            count.className = 'skl-category-count';
+            count.textContent = String(tag.count);
+            button.append(name, count);
+            button.addEventListener('click', function() {
+                state.tagFilter = state.tagFilter === tag.name ? '' : tag.name;
                 state.failureOnly = false;
                 state.selectedSlug = '';
                 render();
@@ -138,6 +217,8 @@
         if (title) {
             title.textContent = state.failureOnly
                 ? tr('skill_library_failed_filter', null, '归类失败')
+                : state.tagFilter
+                ? tr('skill_library_tag_filter_title', { tag: state.tagFilter }, '标签：' + state.tagFilter)
                 : state.categoryId === 'all'
                 ? tr('skill_library_all_skills', null, '全部技能')
                 : categoryName(state.categoryId);
@@ -171,7 +252,7 @@
                 tr('skill_library_no_description', null, '暂无描述');
             var category = document.createElement('span');
             category.className = 'skl-card-category';
-            category.textContent = categoryName(skill.primaryCategoryId || 'default');
+            category.textContent = categoryName(skillCategoryId(skill));
             card.append(name, description, category);
             var failure = failureForSkill(skill.name);
             if (failure) {
@@ -251,7 +332,7 @@
             ),
             detailField(
                 tr('skill_library_primary_category', null, '主分类'),
-                categoryName(skill.primaryCategoryId || 'default')
+                categoryName(skillCategoryId(skill))
             )
         );
         var selectedFailure = failureForSkill(skill.name);
@@ -284,15 +365,23 @@
         tagsLabel.textContent = tr('skill_library_tags', null, '标签');
         var tagList = document.createElement('div');
         tagList.className = 'skl-tag-list';
-        var tags = Array.isArray(skill.tags) ? skill.tags : [];
+        var tags = skillTags(skill);
         if (!tags.length) {
             tagList.className = 'skl-detail-value';
             tagList.textContent = tr('skill_library_no_tags', null, '暂无标签');
         } else {
             tags.forEach(function(tag) {
-                var chip = document.createElement('span');
-                chip.className = 'skl-tag';
+                var chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'skl-tag skl-tag-action';
+                chip.setAttribute('data-skill-tag', tag);
                 chip.textContent = tag;
+                chip.addEventListener('click', function() {
+                    state.tagFilter = tag;
+                    state.failureOnly = false;
+                    state.selectedSlug = '';
+                    render();
+                });
                 tagList.appendChild(chip);
             });
         }
@@ -314,7 +403,7 @@
             option.textContent = category.name;
             categorySelect.appendChild(option);
         });
-        categorySelect.value = skill.primaryCategoryId || 'default';
+        categorySelect.value = skillCategoryId(skill);
         var moveButton = document.createElement('button');
         moveButton.id = 'skl-category-move';
         moveButton.type = 'button';
@@ -534,6 +623,7 @@
     function render() {
         renderMarker();
         renderCategories();
+        renderTags();
         renderCards();
         renderDetail();
         updateOrganizeButton();
@@ -548,6 +638,7 @@
 
     function openFailures() {
         state.categoryId = 'default';
+        state.tagFilter = '';
         state.failureOnly = true;
         state.selectedSlug = '';
         render();
@@ -563,7 +654,7 @@
             !skill ||
             organization.status === 'running' ||
             !targetCategoryId ||
-            targetCategoryId === (skill.primaryCategoryId || 'default')
+            targetCategoryId === skillCategoryId(skill)
         ) return;
         state.moving = true;
         renderDetail();

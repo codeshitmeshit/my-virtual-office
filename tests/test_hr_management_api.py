@@ -143,7 +143,12 @@ def test_overview_has_lifecycle_counts_cycle_status_and_activity_without_raw_rep
         "nextAt": "2026-07-20T18:00:00+00:00",
         "nextLocalAt": "2026-07-20T18:00:00+00:00",
         "timezone": "UTC",
+        "timezoneName": "UTC",
         "dailyTime": "18:00",
+        "submissionWindowMinutes": 120,
+        "maxWorkers": 2,
+        "agentTimeoutSeconds": 30.0,
+        "retryLimit": 3,
     }
     assert result.payload["cycle"]["counts"]["submitted"] == 1
     assert result.payload["activeCommands"][0]["id"] == "sync-overview"
@@ -165,7 +170,15 @@ def test_report_schedule_exposes_due_time_before_catch_up_without_skipping_today
 def test_schedule_is_updated_from_the_management_page_and_used_immediately(setup):
     _repository, _reporting, _opened, _lifecycle, api = setup
     result = api.schedule_command(
-        {"enabled": False, "dailyTime": "07:35"},
+        {
+            "enabled": False,
+            "dailyTime": "07:35",
+            "timezoneName": "UTC",
+            "submissionWindowMinutes": 90,
+            "maxWorkers": 4,
+            "agentTimeoutSeconds": 12.5,
+            "retryLimit": 5,
+        },
         body_bytes=44,
     )
     assert result.status == 200
@@ -173,6 +186,11 @@ def test_schedule_is_updated_from_the_management_page_and_used_immediately(setup
         "enabled": False,
         "dailyTime": "07:35",
         "timezone": "UTC",
+        "timezoneName": "UTC",
+        "submissionWindowMinutes": 90,
+        "maxWorkers": 4,
+        "agentTimeoutSeconds": 12.5,
+        "retryLimit": 5,
     }
     schedule = api._report_schedule(
         local_date=date(2026, 7, 19),
@@ -182,12 +200,24 @@ def test_schedule_is_updated_from_the_management_page_and_used_immediately(setup
     assert schedule["enabled"] is False
     assert schedule["dailyTime"] == "07:35"
     assert schedule["nextLocalAt"] == "2026-07-19T07:35:00+00:00"
+    assert schedule["submissionWindowMinutes"] == 90
+    assert schedule["maxWorkers"] == 4
+    assert schedule["agentTimeoutSeconds"] == 12.5
+    assert schedule["retryLimit"] == 5
 
 
 def test_environment_scheduler_switch_overrides_persisted_page_schedule(setup):
     repository, _reporting, _opened, lifecycle, api = setup
     api.schedule_command(
-        {"enabled": True, "dailyTime": "07:35"},
+        {
+            "enabled": True,
+            "dailyTime": "07:35",
+            "timezoneName": "UTC",
+            "submissionWindowMinutes": 120,
+            "maxWorkers": 2,
+            "agentTimeoutSeconds": 30,
+            "retryLimit": 3,
+        },
         body_bytes=43,
     )
     disabled = HRManagementAPI(

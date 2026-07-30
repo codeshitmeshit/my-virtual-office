@@ -91,6 +91,7 @@ function harness() {
     'skl-search-input',
     'skl-organize-btn',
     'skl-category-list',
+    'skl-tag-filter-list',
     'skl-list-title',
     'skl-list-count',
     'skl-cards',
@@ -246,6 +247,122 @@ async function main() {
     assert(
       document.getElementById('skl-organization-marker').classList.contains('hidden'),
       'dismissed marker stays hidden',
+    );
+  }
+
+  {
+    const { window, document } = harness();
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        skills: [
+          {
+            name: 'VirtualOffice-Browser-Control',
+            description: 'Browser control helper',
+            primaryCategoryId: 'default',
+            tags: [],
+          },
+        ],
+        organization: {
+          status: 'failed',
+          failureCount: 1,
+          failures: [
+            {
+              slug: 'virtualoffice-browser-control',
+              code: 'skill_unreadable',
+              reason: '无法读取该 Skill 的安全摘要',
+            },
+          ],
+        },
+      }),
+    );
+    const card = document.getElementById('skl-cards').children[0];
+    const badge = findByClass(card, 'skl-failure-badge');
+    const reason = findByClass(card, 'skl-failure-reason');
+    assert.equal(badge.textContent, '归类失败');
+    assert.equal(reason.textContent, '无法读取该 Skill 的安全摘要');
+    assert.equal(reason.getAttribute('data-failure-code'), 'skill_unreadable');
+    const detailFailure = findByClass(document.getElementById('skl-detail'), 'skl-detail-failure');
+    assert(detailFailure, 'detail panel should include classification failure reason');
+    assert.equal(findByClass(detailFailure, 'skl-detail-value').textContent, '无法读取该 Skill 的安全摘要');
+  }
+
+  {
+    const { window, document } = harness();
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        skills: [
+          {
+            name: 'VirtualOffice-Browser-Control',
+            description: 'Browser control helper',
+            primaryCategory: {
+              id: 'development-testing',
+              name: '开发与测试',
+              kind: 'general',
+            },
+            tags: ['virtual-office'],
+          },
+        ],
+      }),
+    );
+    const categoryButtons = document.getElementById('skl-category-list').children;
+    assert.equal(categoryButtons[1].children[1].textContent, '0');
+    assert.equal(categoryButtons[2].children[1].textContent, '1');
+    categoryButtons[2].listeners.click[0]();
+    assert.equal(document.getElementById('skl-list-title').textContent, '开发与测试');
+    assert.equal(document.getElementById('skl-list-count').textContent, '1');
+    assert.equal(
+      document.getElementById('skl-cards').children[0].getAttribute('data-skill-slug'),
+      'VirtualOffice-Browser-Control',
+    );
+  }
+
+  {
+    const { window, document } = harness();
+    window.SkillLibraryOrganizationUI.update(
+      data({
+        skills: [
+          {
+            name: 'alpha',
+            description: 'Alpha skill',
+            primaryCategoryId: 'default',
+            tags: ['browser', 'shared'],
+          },
+          {
+            name: 'beta',
+            description: 'Beta skill',
+            primaryCategoryId: 'default',
+            tags: ['meeting'],
+          },
+          {
+            name: 'gamma',
+            description: 'Gamma skill',
+            primaryCategoryId: 'development-testing',
+            tags: ['browser'],
+          },
+        ],
+      }),
+    );
+    const tags = document.getElementById('skl-tag-filter-list').children;
+    assert.equal(tags[0].getAttribute('data-skill-tag'), 'browser');
+    assert.equal(tags[0].children[1].textContent, '2');
+    tags[0].listeners.click[0]();
+    assert.equal(window.SkillLibraryOrganizationUI.state.tagFilter, 'browser');
+    assert.equal(document.getElementById('skl-list-title').textContent, '标签：browser');
+    assert.equal(document.getElementById('skl-list-count').textContent, '2');
+    assert.deepEqual(
+      document
+        .getElementById('skl-cards')
+        .children.map((card) => card.getAttribute('data-skill-slug')),
+      ['alpha', 'gamma'],
+    );
+
+    const input = document.getElementById('skl-search-input');
+    input.value = 'shared';
+    input.listeners.input[0]();
+    assert.equal(document.getElementById('skl-list-count').textContent, '1');
+    assert.equal(
+      document.getElementById('skl-cards').children[0].getAttribute('data-skill-slug'),
+      'alpha',
     );
   }
 

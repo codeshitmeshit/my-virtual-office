@@ -18,9 +18,11 @@ def request(surface="virtual-office"):
 
 
 def test_flags_require_global_and_feishu_gates():
-    assert CommandFeatureFlags.from_values("1", "0").allows("virtual-office") is True
-    assert CommandFeatureFlags.from_values("1", "0").allows("feishu-dm") is False
-    assert CommandFeatureFlags.from_values("0", "1").allows("feishu-group") is False
+    assert CommandFeatureFlags.from_values(None).allows("virtual-office") is True
+    assert CommandFeatureFlags.from_values(None).allows("feishu-dm") is True
+    assert CommandFeatureFlags.from_values("1").allows("virtual-office") is True
+    assert CommandFeatureFlags.from_values("1").allows("feishu-dm") is True
+    assert CommandFeatureFlags.from_values("0").allows("feishu-group") is False
 
 
 def test_reservations_are_nonblocking_isolated_and_bounded():

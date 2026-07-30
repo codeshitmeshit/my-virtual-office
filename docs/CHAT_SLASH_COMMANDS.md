@@ -1,19 +1,15 @@
 # 聊天斜杠命令运维指南
 
-Virtual Office 支持两个完整控制消息：`/new` 新建干净上下文，`/compact` 压缩当前上下文。功能默认关闭。
+Virtual Office 支持两个完整控制消息：`/new` 新建干净上下文，`/compact` 压缩当前上下文。浏览器 VO 与飞书聊天入口默认启用。
 
 ## 配置与精确语法
 
-```bash
-export VO_CHAT_SLASH_COMMANDS_ENABLED=true
-export VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED=false
-./start.sh
-```
+浏览器 VO 与飞书入口不需要额外配置。
 
 - 仅当去除首尾空白后的整条文本严格等于 `/new` 或 `/compact`，且消息不带附件/资源时，才识别为命令。
-- 区分大小写。`/New`、`/new now`、未知 `/status` 和带附件的 `/new` 都走原普通消息路径。
+- 区分大小写。`/New`、`/new now`、未知 `/status` 会被 slash-like 拦截，带附件的 `/new` 仍走普通消息路径。
 - VO 与飞书均不提供 `/help`、参数、别名、补全或命令菜单。
-- `VO_CHAT_SLASH_COMMANDS_ENABLED` 是总开关；飞书还要求 `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED=true`。任一相关开关关闭时，命令文本保持原普通消息行为。
+- 未知或非精确 slash-like 文本会被拦截，不会下发给 Agent。
 
 ## Provider 能力
 
@@ -30,16 +26,15 @@ VO `/new` 不删除旧会话或历史；浏览器仅在服务端成功返回后�
 
 ## 灰度顺序
 
-1. 部署代码但保持两个开关关闭，验证 `/new` 仍作为普通消息送达。
-2. 仅启用 `VO_CHAT_SLASH_COMMANDS_ENABLED`，在本地/小范围 VO 中验证四个 Provider 的 `/new` 与 Codex `/compact`。
-3. 再启用 `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED`，先验收飞书私聊。
-4. 若已启用群聊，再在一次性可信群中验收明确提及、同群共享影响、跨群隔离和重复投递。
+1. 部署代码后，在本地/小范围 VO 中直接验证四个 Provider 的 `/new` 与 Codex `/compact`。
+2. 验收飞书私聊。
+3. 若已启用群聊，再在一次性可信群中验收明确提及、同群共享影响、跨群隔离和重复投递。
 
 ## 状态与观测
 
 `GET /api/feishu-chat/config` 及安全 `vo-config` 投影中的 `chatCommands` 包含：
 
-- `enabled`、`feishuEnabled`：两个开关的有效状态；
+- `enabled`：slash 命令有效状态；
 - `reservations.scopes`、`reservations.locked`：有界 scope reservation 状态；
 - `metrics`：按固定 surface、Provider、command、status 维度聚合的计数。状态包括 recognized、success、no_op、busy、unsupported、failed、stale、indeterminate、duplicate 和 feedback_failed。
 
@@ -47,4 +42,4 @@ VO `/new` 不删除旧会话或历史；浏览器仅在服务端成功返回后�
 
 ## 回滚
 
-先设置 `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED=false` 并重启，确认飞书命令恢复普通消息行为；再设置 `VO_CHAT_SLASH_COMMANDS_ENABLED=false` 并重启。回滚不删除历史、审计或已创建的 conversation，也不会逆转此前已经成功提交的 reset/compact。对 indeterminate 项先完成对账，不要通过删除 source index 强制重放。
+如需紧急回滚，关闭统一 slash 命令入口并重启，确认命令被拦截且不下发 Agent。回滚不删除历史、审计或已创建的 conversation，也不会逆转此前已经成功提交的 reset/compact。对 indeterminate 项先完成对账，不要通过删除 source index 强制重放。

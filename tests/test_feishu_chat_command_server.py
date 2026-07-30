@@ -57,7 +57,6 @@ def _configure(monkeypatch, tmp_path, *, provider="codex"):
         "profile": "local",
     })
     monkeypatch.setenv("VO_CHAT_SLASH_COMMANDS_ENABLED", "1")
-    monkeypatch.setenv("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED", "1")
 
 
 def test_server_wires_trusted_feishu_command_and_persistent_redelivery(monkeypatch, tmp_path):
@@ -86,9 +85,9 @@ def test_server_wires_trusted_feishu_command_and_persistent_redelivery(monkeypat
     assert indexed["record"]["event"] == "command_completed"
 
 
-def test_disabled_feishu_flag_preserves_ordinary_message_behavior(monkeypatch, tmp_path):
+def test_global_slash_flag_blocks_feishu_exact_command_before_agent_dispatch(monkeypatch, tmp_path):
     _configure(monkeypatch, tmp_path)
-    monkeypatch.setenv("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED", "0")
+    monkeypatch.setenv("VO_CHAT_SLASH_COMMANDS_ENABLED", "0")
     dispatches = []
     monkeypatch.setattr(server, "_dispatch_representative_agent_message", lambda *args: dispatches.append(args) or {"ok": True, "reply": "ordinary"})
 
@@ -97,8 +96,58 @@ def test_disabled_feishu_flag_preserves_ordinary_message_behavior(monkeypatch, t
         send_text=lambda *_args: {"ok": True, "messageId": "reply"},
     )
 
-    assert result["status"] == "completed"
-    assert len(dispatches) == 1 and dispatches[0][1] == "/new"
+    assert result["status"] == "disabled"
+    assert not dispatches
+    assert "未发送给 Agent" in result["reply"]
+
+
+def test_feishu_non_exact_slash_blocks_before_agent_dispatch(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    dispatches = []
+    monkeypatch.setattr(server, "_dispatch_representative_agent_message", lambda *args: dispatches.append(args) or {"ok": True, "reply": "ordinary"})
+
+    result = server._handle_feishu_chat_message_event(
+        _body(message_id="om-slash-args", text="/new now"),
+        send_text=lambda *_args: {"ok": True, "messageId": "reply"},
+    )
+
+    assert result["status"] == "slash_command_blocked"
+    assert not dispatches
+    assert "未发送给 Agent" in result["reply"]
+
+
+def test_representative_bridge_blocks_slash_before_provider_bridge(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path, provider="openclaw")
+    monkeypatch.setattr(server.PROVIDER_CONVERSATION_SERVICE, "deliver_queued", lambda *args, **kwargs: pytest.fail("provider dispatch should not run"))
+
+    result = server._dispatch_representative_agent_message(
+        "representative",
+        "/new",
+        "feishu-dm:scope",
+        {"sender": {"openId": "ou-actor"}, "sourceSurface": "feishu-dm"},
+    )
+
+    assert result["status"] == "slash_command_blocked"
+    assert "was not sent to the Agent" in result["reply"]
+
+
+def test_provider_entry_bridge_blocks_slash_before_specialized_bridge(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    calls = []
+
+    def specialized(body):
+        calls.append(body)
+        return {"ok": True}
+
+    for body in (
+        {"agentId": "missing-codex", "conversationId": "conv", "message": "/new"},
+        {"agentId": "missing-hermes", "conversationId": "conv", "message": "/new now"},
+        {"agentId": "missing-claude", "conversationId": "conv", "message": "/compact"},
+    ):
+        result = server._handle_provider_chat_entry(body, specialized)
+        assert result["status"] == "slash_command_blocked"
+        assert result["_status"] == 400
+    assert not calls
 
 
 def test_orphaned_command_is_finalized_indeterminate_without_reexecution(monkeypatch, tmp_path):
@@ -224,7 +273,6 @@ def test_public_status_exposes_only_bounded_command_flags_and_metrics(monkeypatc
     config = server._feishu_chat_config_response(include_ok=False)
 
     assert status["enabled"] is True
-    assert status["feishuEnabled"] is True
     assert set(status["reservations"]) == {"scopes", "locked"}
     assert isinstance(status["metrics"], list)
     assert config["chatCommands"] == status

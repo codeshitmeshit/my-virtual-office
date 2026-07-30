@@ -16,11 +16,11 @@ if str(APP_DIR) not in sys.path:
 from services.hr_config import HRConfig, HRConfigError
 
 
-def test_defaults_enable_hr_lifecycle_but_keep_scheduler_disabled():
+def test_defaults_enable_hr_lifecycle_and_defer_schedule_control_to_page_settings():
     config = HRConfig.from_env({})
     assert config.enabled is True
-    assert config.scheduler_enabled is False
-    assert config.scheduler_active is False
+    assert config.scheduler_enabled is True
+    assert config.scheduler_active is True
     assert config.timezone_name == "UTC"
     assert config.daily_time == time(18, 0)
     assert config.submission_window_minutes == 120

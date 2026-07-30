@@ -152,6 +152,18 @@ class HRManagementAPI:
             return settings
         return replace(settings, enabled=False)
 
+    def _effective_runtime_config(self, settings) -> HRConfig:
+        return replace(
+            self._config,
+            scheduler_enabled=settings.enabled,
+            daily_time=settings.daily_time,
+            timezone_name=settings.timezone_name,
+            submission_window_minutes=settings.submission_window_minutes,
+            max_workers=settings.max_workers,
+            agent_timeout_seconds=settings.agent_timeout_seconds,
+            retry_limit=settings.retry_limit,
+        )
+
     @staticmethod
     def _limit(value: int) -> int:
         if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 100:
@@ -178,13 +190,10 @@ class HRManagementAPI:
         local_date: date,
         cycle_exists: bool,
         now: datetime,
+        settings=None,
     ) -> dict[str, object]:
-        settings = self._effective_schedule_settings()
-        effective_config = replace(
-            self._config,
-            scheduler_enabled=settings.enabled,
-            daily_time=settings.daily_time,
-        )
+        settings = settings or self._effective_schedule_settings()
+        effective_config = self._effective_runtime_config(settings)
         calculator = HRDueTimeCalculator(effective_config)
         today = calculator.window_for_date(local_date)
         enabled = effective_config.scheduler_active
@@ -207,7 +216,12 @@ class HRManagementAPI:
             "nextAt": window.scheduled_at.isoformat(),
             "nextLocalAt": local_scheduled.isoformat(),
             "timezone": effective_config.timezone_name,
+            "timezoneName": effective_config.timezone_name,
             "dailyTime": settings.daily_time_text,
+            "submissionWindowMinutes": settings.submission_window_minutes,
+            "maxWorkers": settings.max_workers,
+            "agentTimeoutSeconds": settings.agent_timeout_seconds,
+            "retryLimit": settings.retry_limit,
         }
 
     def overview(self) -> HRServiceResult:
@@ -225,7 +239,9 @@ class HRManagementAPI:
             key = agent.availability if agent.status == "active" else "unavailable"
             counts[key] = counts.get(key, 0) + 1
         now = self._now()
-        local_day = now.astimezone(self._config.timezone).date()
+        settings = self._effective_schedule_settings()
+        effective_config = self._effective_runtime_config(settings)
+        local_day = now.astimezone(effective_config.timezone).date()
         local_date = local_day.isoformat()
         cycle = self._repository.get_daily_cycle(f"hr-cycle:{local_date}")
         cycle_payload = (
@@ -246,6 +262,7 @@ class HRManagementAPI:
                     local_date=local_day,
                     cycle_exists=cycle is not None,
                     now=now,
+                    settings=settings,
                 ),
                 "cycle": cycle_payload,
                 "activeCommands": _json_safe(
@@ -414,7 +431,12 @@ class HRManagementAPI:
                 "schedule": {
                     "enabled": settings.enabled,
                     "dailyTime": settings.daily_time_text,
-                    "timezone": self._config.timezone_name,
+                    "timezone": settings.timezone_name,
+                    "timezoneName": settings.timezone_name,
+                    "submissionWindowMinutes": settings.submission_window_minutes,
+                    "maxWorkers": settings.max_workers,
+                    "agentTimeoutSeconds": settings.agent_timeout_seconds,
+                    "retryLimit": settings.retry_limit,
                 },
             },
         )

@@ -67,7 +67,12 @@ assert.equal(hr.state.commandBusy, '');
 globalThis.document = {
   getElementById(id) {
     if (id === 'hr-schedule-time') return { value: '07:35' };
+    if (id === 'hr-schedule-timezone') return { value: 'Asia/Shanghai' };
     if (id === 'hr-schedule-enabled') return { checked: false };
+    if (id === 'hr-schedule-window') return { value: '90' };
+    if (id === 'hr-schedule-workers') return { value: '4' };
+    if (id === 'hr-schedule-timeout') return { value: '12.5' };
+    if (id === 'hr-schedule-retry') return { value: '5' };
     return null;
   },
   querySelector() { return null; },
@@ -78,6 +83,11 @@ assert.equal(requests[scheduleRequestStart].url, '/api/human-resources/schedule'
 assert.deepEqual(JSON.parse(requests[scheduleRequestStart].options.body), {
   enabled: false,
   dailyTime: '07:35',
+  timezoneName: 'Asia/Shanghai',
+  submissionWindowMinutes: 90,
+  maxWorkers: 4,
+  agentTimeoutSeconds: 12.5,
+  retryLimit: 5,
 });
 assert.equal(hr.state.scheduleBusy, false);
 

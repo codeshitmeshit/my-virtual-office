@@ -1,4 +1,4 @@
-"""Assign a VO MCP server to an agent and register its native client."""
+"""Register a VO MCP server in a provider client and install agent guidance."""
 
 from __future__ import annotations
 

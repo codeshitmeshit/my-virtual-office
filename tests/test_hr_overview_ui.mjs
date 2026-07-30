@@ -133,4 +133,28 @@ assert.equal(hr.state.overview.hr.status, 'ready', 'last valid overview remains 
 assert.deepEqual(hr.state.agents.map((agent) => agent.ai_id), ['agent-2']);
 assert.deepEqual(hr.state.errors, ['hr_repository_unavailable']);
 
+let embeddedRosterUpdate = null;
+hr.state.overview = null;
+hr.state.agents = [];
+hr.state.selectedAgentId = '';
+globalThis.i18n.managementFetch = async (url) => {
+  if (url.includes('/overview')) {
+    return response({
+      ok: true,
+      hr: { name: 'HR', status: 'ready' },
+      reportSchedule: { enabled: true, state: 'scheduled', nextLocalAt: '2026-07-20T18:00:00+08:00', timezone: 'UTC' },
+    });
+  }
+  return response({ ok: true, export: { rows: [{ ai_id: 'agent-1' }] } });
+};
+await hr.mount({
+  selectedAiId: '',
+  roster: [],
+  setRoster(roster, options) {
+    embeddedRosterUpdate = { roster, options };
+  },
+});
+assert.deepEqual(embeddedRosterUpdate.options, { selectedAiId: '' });
+assert.equal(hr.state.selectedAgentId, '', 'embedded HR overview reload keeps Agent selection empty');
+
 console.log('Human Resources overview helpers and degraded loading passed');

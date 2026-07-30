@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const chat = fs.readFileSync('app/chat.js', 'utf8');
+const guard = fs.readFileSync('app/chat-slash-guard.js', 'utf8');
 
 const newSessionStart = chat.indexOf('async newSession()');
 const sendMessageStart = chat.indexOf('async sendMessage()');
@@ -20,8 +21,10 @@ assert.ok(newSession.includes("rpc('sessions.reset', { key: this.sessionKey })")
 assert.ok(newSession.includes('showChatConfirmDialog'), 'Existing new-session button confirmation is characterized and must not change accidentally');
 
 const sendMessage = chat.slice(sendMessageStart, compactStart);
-assert.ok(!sendMessage.includes("text.startsWith('/')") && !sendMessage.includes('text.startsWith("/")'), 'Slash-prefixed ordinary messages must not be rejected wholesale');
-assert.ok(sendMessage.includes('message: text'), 'Ordinary text, including unknown slash prefixes, must continue to provider dispatch');
+assert.ok(sendMessage.includes('ChatSlashGuard?.classify'), 'Slash-prefixed messages must be classified before ordinary dispatch');
+assert.ok(guard.includes("kind: 'blocked'"), 'Unknown slash-prefixed messages must be rejected locally');
+assert.ok(sendMessage.indexOf('ChatSlashGuard?.classify') < sendMessage.indexOf('message: text'),
+  'Slash-prefixed messages must not reach provider dispatch before classification');
 
 const compact = chat.slice(compactStart, stopStart);
 assert.ok(compact.includes("fetch('/api/codex/compact'"), 'Existing compaction must use the Codex native compact endpoint');

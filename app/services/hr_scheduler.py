@@ -152,6 +152,11 @@ class HRScheduler:
             lambda: HRScheduleSettings(
                 enabled=config.scheduler_enabled,
                 daily_time=config.daily_time,
+                timezone_name=config.timezone_name,
+                submission_window_minutes=config.submission_window_minutes,
+                max_workers=config.max_workers,
+                agent_timeout_seconds=config.agent_timeout_seconds,
+                retry_limit=config.retry_limit,
             )
         )
 
@@ -173,6 +178,11 @@ class HRScheduler:
             self._config,
             scheduler_enabled=settings.enabled,
             daily_time=settings.daily_time,
+            timezone_name=settings.timezone_name,
+            submission_window_minutes=settings.submission_window_minutes,
+            max_workers=settings.max_workers,
+            agent_timeout_seconds=settings.agent_timeout_seconds,
+            retry_limit=settings.retry_limit,
         )
 
     def reconcile(

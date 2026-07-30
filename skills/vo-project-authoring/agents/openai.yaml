@@ -1,6 +1,6 @@
 interface:
   display_name: "Virtual Office 项目创作"
   short_description: "自然语言确认后直接创建未运行的完整 VO 项目"
-  default_prompt: "<skill_default_prompt><trigger>When the user asks to create, reuse, or schedule a VO project.</trigger><use_skill>$vo-project-authoring</use_skill><workflow>Present a natural-language project proposal, wait for confirmation, and then create the unstarted VO project.</workflow></skill_default_prompt>"
+  default_prompt: "<skill_default_prompt><trigger>When the user asks in ordinary natural language to create, reuse, maintain, or schedule a VO project. Do not trigger for messages whose trimmed text starts with '/' such as /new, /compact, /help, or /new now, unless the same message explicitly invokes $vo-project-authoring.</trigger><use_skill>$vo-project-authoring</use_skill><workflow>Present a natural-language project proposal, wait for confirmation, and then create the unstarted VO project.</workflow></skill_default_prompt>"
 policy:
   allow_implicit_invocation: true

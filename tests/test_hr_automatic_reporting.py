@@ -177,12 +177,28 @@ def test_running_loop_reads_page_schedule_changes_without_restart(tmp_path):
     repository, runtime = build(tmp_path, conversation)
     settings = HRScheduleSettingsService(repository)
 
-    settings.update({"enabled": False, "dailyTime": "18:00"})
+    settings.update({
+        "enabled": False,
+        "dailyTime": "18:00",
+        "timezoneName": "UTC",
+        "submissionWindowMinutes": 120,
+        "maxWorkers": 2,
+        "agentTimeoutSeconds": 30,
+        "retryLimit": 3,
+    })
     disabled = runtime.loop.tick()
     assert disabled.schedule.action == "scheduler_disabled"
     assert conversation.agent_calls == []
 
-    settings.update({"enabled": True, "dailyTime": "19:00"})
+    settings.update({
+        "enabled": True,
+        "dailyTime": "19:00",
+        "timezoneName": "UTC",
+        "submissionWindowMinutes": 120,
+        "maxWorkers": 2,
+        "agentTimeoutSeconds": 30,
+        "retryLimit": 3,
+    })
     waiting = runtime.loop.tick()
     assert waiting.schedule.action == "not_due"
     assert waiting.schedule.window.scheduled_at.isoformat() == "2026-07-19T19:00:00+00:00"

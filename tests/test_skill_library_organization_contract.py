@@ -66,6 +66,26 @@ def test_summary_contains_only_bounded_frontmatter_and_headings(tmp_path):
     assert "SECRET-BODY" not in summary["structuralSummary"]
 
 
+def test_summary_resolves_case_preserving_skill_directories(tmp_path):
+    library = tmp_path / "skills"
+    write_skill(
+        library,
+        "VirtualOffice-Browser-Control",
+        "---\n"
+        "name: VirtualOffice-Browser-Control\n"
+        "description: Browser control helper\n"
+        "---\n"
+        "# Browser Control\n",
+    )
+
+    summary = summarize_skill(library, "virtualoffice-browser-control")
+
+    assert summary["slug"] == "virtualoffice-browser-control"
+    assert summary["name"] == "VirtualOffice-Browser-Control"
+    assert summary["description"] == "Browser control helper"
+    assert "# Browser Control" in summary["structuralSummary"]
+
+
 def test_prompt_isolates_untrusted_text_and_declares_json_only_contract():
     prompt = build_classification_prompt(
         [

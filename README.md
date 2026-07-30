@@ -282,8 +282,8 @@ http://localhost:8090/setup
 | `VO_CODEX_FEISHU_APPROVAL_WORKERS` | `2` | Codex 飞书审批后台投递并发 |
 | `VO_CODEX_FEISHU_APPROVAL_QUEUE` | `16` | Codex 飞书审批有界投递队列容量 |
 | `VO_CODEX_FEISHU_APPROVAL_DEADLINE_SEC` | `12` | Codex 飞书审批投递总 deadline（秒） |
-| `VO_CHAT_SLASH_COMMANDS_ENABLED` | `false` | 启用 VO 聊天中的精确 `/new`、`/compact` 命令 |
-| `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED` | `false` | 在全局开关启用后，再启用飞书私聊和提及门禁群聊命令 |
+| `VO_CHAT_SLASH_COMMANDS_ENABLED` | `true` | VO 聊天中的精确 `/new`、`/compact` 命令；可显式设为 `false` 关闭 |
+| `VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED` | `false` | 在 VO slash 命令启用后，再启用飞书私聊和提及门禁群聊命令 |
 | `VO_FEISHU_AUDIT_MAX_BYTES` | `5242880` | 飞书通知/卡片动作 JSONL 轮转阈值 |
 | `VO_FEISHU_AUDIT_BACKUPS` | `3` | 飞书通知/卡片动作审计备份数 |
 | `VO_BROWSER_PANEL` | `true` | 是否显示 Browser Panel |

@@ -105,13 +105,26 @@ def _frontmatter_identity(content: str, fallback_slug: str) -> tuple[str, str]:
     )
 
 
+def _resolve_skill_dir(library_dir: Path, normalized_slug: str) -> Path:
+    exact = library_dir / normalized_slug
+    if exact.is_dir() or exact.exists():
+        return exact
+    try:
+        for candidate in library_dir.iterdir():
+            if candidate.name.casefold() == normalized_slug:
+                return candidate
+    except OSError:
+        pass
+    return exact
+
+
 def summarize_skill(
     library_dir: str | os.PathLike[str], slug: object
 ) -> dict[str, str]:
     """Read one safe skill file and return bounded structural classification data."""
 
     normalized_slug = normalize_skill_slug(slug)
-    skill_dir = Path(library_dir) / normalized_slug
+    skill_dir = _resolve_skill_dir(Path(library_dir), normalized_slug)
     skill_file = skill_dir / "SKILL.md"
     if skill_dir.is_symlink() or skill_file.is_symlink():
         raise OrganizationContractError(

@@ -13,12 +13,12 @@
     <link rel="stylesheet" href="projects.css?v=1785328545-project-board-scroll">
     <link rel="stylesheet" href="project-orchestration.css?v=1785328545-canvas-scrollbar">
     <link rel="stylesheet" href="archive-room.css?v=1785328545-phase13">
-    <link rel="stylesheet" href="human-resources.css?v=1785328545-hr-daily-sync">
-    <link rel="stylesheet" href="human-resources-figma.css?v=1785328545-compact-layout">
+    <link rel="stylesheet" href="human-resources.css?v=20260730-hr-settings-timezone">
+    <link rel="stylesheet" href="human-resources-figma.css?v=20260730-hr-settings-timezone">
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
-    <link rel="stylesheet" href="skills-library-organization.css?v=20260730a">
+    <link rel="stylesheet" href="skills-library-organization.css?v=20260730c">
     <link rel="stylesheet" href="fonts.css?v=1785328545.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -754,8 +754,14 @@
             </div>
             <div class="skl-workspace">
                 <nav class="skl-category-panel" aria-label="Skill categories" data-i18n-aria-label="skill_library_categories_label">
-                    <div class="skl-panel-heading" data-i18n="skill_library_categories">Categories</div>
-                    <div id="skl-category-list" class="skl-category-list"></div>
+                    <div class="skl-filter-section">
+                        <div class="skl-panel-heading" data-i18n="skill_library_categories">Categories</div>
+                        <div id="skl-category-list" class="skl-category-list"></div>
+                    </div>
+                    <div class="skl-filter-section">
+                        <div class="skl-panel-heading" data-i18n="skill_library_tags">Tags</div>
+                        <div id="skl-tag-filter-list" class="skl-tag-filter-list"></div>
+                    </div>
                 </nav>
                 <section class="skl-list-panel" aria-label="Skill list" data-i18n-aria-label="skill_library_list_label">
                     <div class="skl-list-heading">
@@ -1207,9 +1213,9 @@
     </script>
     <script src="internal-bubble.js?v=1785328545"></script>
     <script src="game.js?v=1785328545-intervention-auto-continue"></script>
-    <script src="skills-library-organization-ui.js?v=20260730a"></script>
+    <script src="skills-library-organization-ui.js?v=20260730c"></script>
     <script src="skills-library-ui.js?v=20260730"></script>
-    <script src="mcp-registry-ui.js?v=1785328545-mcp-registry"></script>
+    <script src="mcp-registry-ui.js?v=20260730-mcp-guide-wording"></script>
     <script src="meeting-center.js?v=1785328545-status-list-colors"></script>
     <script src="agent-guide.js?v=1785328545-agent-guide-skill-md"></script>
     <script src="dashboard-realtime.js?v=1785328545-startup-poll-delay"></script>
@@ -1219,12 +1225,12 @@
     <script src="project-orchestration.js?v=1785328545-dragend-merge"></script>
     <script src="projects.js?v=1785328545-dedupe-exec-reason"></script>
     <script src="archive-room.js?v=1785328545-phase13"></script>
-    <script src="human-resources.js?v=1785328545-compact-layout"></script>
+    <script src="human-resources.js?v=20260730-hr-sync-selection-fix"></script>
     <script src="agent-appearance-preview.js?v=1785328545-pixel-preview"></script>
     <script src="agent-appearance-dropdown.js?v=1785328545-upward-dropdown"></script>
     <script src="agent-management-adapters.js?v=1785328545-eager-configuration"></script>
     <script src="agent-configuration.js?v=1785328545-unregistered-preview"></script>
-    <script src="agent-management.js?v=1785328545-hr-registration"></script>
+    <script src="agent-management.js?v=20260730-hr-sync-selection-fix"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};
@@ -1450,7 +1456,8 @@
     <script src="marked.min.js"></script>
     <script src="codex-chat-timing.js?v=1785328545"></script>
     <script src="chat-history.js?v=1785328545-live-history-reconcile-feishu-media-display"></script>
-    <script src="chat.js?v=1785328545-live-history-reconcile-codex-chat-fast-path"></script>
+    <script src="chat-slash-guard.js?v=20260730"></script>
+    <script src="chat.js?v=20260730-slash-guard-live-history-reconcile-codex-chat-fast-path"></script>
     <script src="sms-panel.js?v=1785328545"></script>
     <script src="pc-monitor.js?v=1785328545"></script>
     <script src="api-usage.js?v=1785328545-usage-tabs"></script>

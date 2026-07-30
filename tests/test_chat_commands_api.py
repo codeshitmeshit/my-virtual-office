@@ -28,7 +28,6 @@ def configure(monkeypatch):
     monkeypatch.setattr(server, "STATUS_DIR", status_dir)
     monkeypatch.setattr(server, "get_roster", lambda: ROSTER)
     monkeypatch.setenv("VO_CHAT_SLASH_COMMANDS_ENABLED", "1")
-    monkeypatch.setenv("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED", "1")
     return status_dir
 
 

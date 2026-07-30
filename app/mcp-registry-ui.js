@@ -113,13 +113,13 @@ function renderMcpRegistry() {
                 '<code class="mcp-card-command">' + _mcpEsc(detail + env) + '</code>' +
                 '<div class="mcp-card-status">' + _mcpEsc(status) + '</div>' +
                 (registrationWarnings.length ? '<div class="mcp-card-warning">' + _mcpEsc(_mcpTr('mcp_registration_warning', { warning: registrationWarnings.join('; ') }, '注意：{{warning}}')) + '</div>' : '') +
-                '<div class="mcp-card-assigned">' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '分配给')) + ': ' + _mcpEsc(assignedText) + '</div>' +
+                '<div class="mcp-card-assigned">' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '已安装指引 Skill')) + ': ' + _mcpEsc(assignedText) + '</div>' +
             '</div>' +
             '<div class="mcp-card-actions">' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_openclaw_title', null, '注册到 OpenClaw')) + '" data-mcp-action="openclaw" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_openclaw', null, '注册 OpenClaw')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_codex_title', null, '注册到 Codex')) + '" data-mcp-action="codex" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_codex', null, '注册 Codex')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_claude_title', null, '注册到 Claude')) + '" data-mcp-action="claude" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_claude', null, '注册 Claude')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '分配给 Agent 并安装说明 skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '分配 Agent')) + '</button>' +
+                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '注册到 Agent 所属客户端，并为该 Agent 安装 MCP 使用指引 Skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '安装指引')) + '</button>' +
                 '<button type="button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('delete', null, '删除')) + '</button>' +
             '</div>' +
             '<div class="mcp-install-row" id="mcp-install-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
@@ -230,7 +230,7 @@ async function toggleMcpSkillInstall(name) {
             var provider = String(agent.providerKind || 'openclaw').toLowerCase();
             var providerLabel = provider === 'claude-code' || provider === 'claude' ? 'Claude' : (provider === 'codex' ? 'Codex' : 'OpenClaw');
             return '<option value="' + _mcpEsc(agent.id) + '">' + _mcpEsc((agent.emoji || '') + ' ' + (agent.name || agent.id) + ' · ' + providerLabel) + '</option>';
-        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign_and_install', null, '分配并安装')) + '</button>';
+        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign_and_install', null, '注册客户端并安装指引')) + '</button>';
         row.style.display = 'flex';
     } catch (e) {
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_agent_list_failed', { error: e.message }, 'Agent 列表加载失败：{{error}}'));
@@ -254,7 +254,7 @@ async function installMcpSkill(name) {
             _acpShowToast(_mcpTr('mcp_assigned', {
                 agent: _mcpAgentLabel(agentId),
                 client: labels[data.client] || data.client || ''
-            }, '已注册到 {{client}} 并分配给 {{agent}}'));
+            }, '已注册到 {{client}}，并为 {{agent}} 安装指引 Skill'));
         }
         refreshMcpRegistry();
     } catch (e) {

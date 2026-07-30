@@ -70,9 +70,16 @@
         element.scrollTop = state.tabs[state.activeTab].scrollTop || 0;
     }
 
-    function setRoster(roster) {
+    function setRoster(roster, options) {
         state.roster = normalizedRoster(roster);
-        if (!state.roster.some(function (item) {
+        const requestedSelection = options && Object.prototype.hasOwnProperty.call(options, 'selectedAiId')
+            ? String(options.selectedAiId || '')
+            : null;
+        if (state.activeTab === 'humanResources' && requestedSelection !== null) {
+            state.selectedAiId = state.roster.some(function (item) {
+                return item.aiId === requestedSelection;
+            }) ? requestedSelection : '';
+        } else if (!state.roster.some(function (item) {
             return item.aiId === state.selectedAiId;
         })) {
             state.selectedAiId = (
@@ -85,6 +92,13 @@
         renderRoster();
         mountActiveTab();
         return state.roster.slice();
+    }
+
+    function clearSelection() {
+        state.selectedAiId = '';
+        renderRoster();
+        mountActiveTab();
+        return true;
     }
 
     function selectAgent(aiId) {
@@ -210,6 +224,7 @@
             reportMutation: reportMutation,
             setRoster: setRoster,
             selectAgent: selectAgent,
+            clearSelection: clearSelection,
             isActive: function () {
                 return state.open && state.activeTab === tabName &&
                     state.mountRevision === mountId && panel() === container;
@@ -342,6 +357,7 @@
         switchTab: switchTab,
         setRoster: setRoster,
         selectAgent: selectAgent,
+        clearSelection: clearSelection,
         setAudience: setAudience,
         setAdapters: setAdapters,
         bootstrapAudience: bootstrapAudience,

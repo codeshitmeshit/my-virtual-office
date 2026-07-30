@@ -10,8 +10,10 @@ from datetime import datetime
 
 try:
     from services.chat_commands import parse_chat_command
+    from services.chat_slash_guard import classify_slash_message, feishu_block_reply
 except ModuleNotFoundError:  # Package import in direct unit tests.
     from .services.chat_commands import parse_chat_command
+    from .services.chat_slash_guard import classify_slash_message, feishu_block_reply
 
 ACK_EMOJIS = ("LGTM",)
 ACK_REACTION_EMOJI_TYPE = "LGTM"
@@ -838,7 +840,58 @@ def handle_message_event(
         return {"ok": False, "status": "missing_representative_agent", "record": record, "sendResult": send_result, "_status": 400}
     conversation_id = group_conversation_id(chat_id) if chat_type == "group" else representative_conversation_id(vo_user_id, chat_id)
     lock = lock_for(conversation_id)
+    slash_intent = (
+        classify_slash_message(text, message.get("resources") or [])
+        if message_type == "text"
+        else None
+    )
     command = parse_chat_command(text, message.get("resources") or []) if message_type == "text" else None
+    if slash_intent is not None and slash_intent.is_command and not command_callback:
+        reply = feishu_block_reply(text, disabled=True)
+        send_result = deliver(reply)
+        record = record_event({
+            **base_record,
+            "event": "command_completed",
+            "voUserId": vo_user_id,
+            "representativeAgentId": representative_agent_id,
+            "conversationId": conversation_id,
+            "command": slash_intent.command,
+            "commandStatus": "disabled",
+            "reply": reply,
+            "sendResult": send_result,
+            "deliveryStatus": _delivery_classification(send_result),
+            "replyInThread": reply_in_thread if chat_type == "group" else False,
+        })
+        return {
+            "ok": bool(send_result.get("ok")),
+            "status": "disabled" if send_result.get("ok") else "delivery_failed",
+            "reply": reply,
+            "sendResult": send_result,
+            "record": record,
+        }
+    if slash_intent is not None and slash_intent.is_blocked:
+        reply = feishu_block_reply(text)
+        send_result = deliver(reply)
+        record = record_event({
+            **base_record,
+            "event": "rejected",
+            "reason": "slash_command_blocked",
+            "voUserId": vo_user_id,
+            "representativeAgentId": representative_agent_id,
+            "conversationId": conversation_id,
+            "text": text,
+            "reply": reply,
+            "sendResult": send_result,
+            "deliveryStatus": _delivery_classification(send_result),
+            "replyInThread": reply_in_thread if chat_type == "group" else False,
+        })
+        return {
+            "ok": bool(send_result.get("ok")),
+            "status": "slash_command_blocked" if send_result.get("ok") else "delivery_failed",
+            "reply": reply,
+            "sendResult": send_result,
+            "record": record,
+        }
     if command is not None and command_callback:
         if not lock.acquire(blocking=False):
             reply = "当前会话正在处理其他请求，请稍后重试。"

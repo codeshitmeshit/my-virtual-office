@@ -1647,19 +1647,33 @@
       let text = this.input.value.trim();
       const hasAttachments = this.pendingAttachments.length > 0;
       if (this.sendInFlight || (!text && !hasAttachments)) return;
-      const slashCommand = !hasAttachments && (text === '/new' || text === '/compact') ? text : '';
-      if (slashCommand) {
+      const slashIntent = window.ChatSlashGuard?.classify(text, { hasAttachments }) || (
+        !hasAttachments && text.startsWith('/')
+          ? { kind: (text === '/new' || text === '/compact') ? 'command' : 'blocked', command: text, text }
+          : { kind: 'ordinary', text }
+      );
+      if (slashIntent.kind === 'command') {
         this.sendInFlight = true;
         this.input.value = '';
         this.input.style.height = 'auto';
         this.input.style.overflowY = 'hidden';
         let commandOutcome = false;
         try {
-          commandOutcome = await this.executeChatSlashCommand(slashCommand);
+          commandOutcome = await this.executeChatSlashCommand(slashIntent.command);
         } finally {
           this.sendInFlight = false;
         }
-        if (commandOutcome !== 'ordinary') return;
+        if (commandOutcome === 'ordinary') {
+          this.appendSystem(window.ChatSlashGuard?.disabledMessage(slashIntent.command) || 'Slash command is disabled; message was not sent.');
+        }
+        return;
+      }
+      if (slashIntent.kind === 'blocked') {
+        this.input.value = '';
+        this.input.style.height = 'auto';
+        this.input.style.overflowY = 'hidden';
+        this.appendSystem(window.ChatSlashGuard?.blockedMessage(slashIntent.text) || 'Unknown slash command; message was not sent.');
+        return;
       }
       if ((!connected && !this.isHermesSelected() && !this.isCodexSelected() && !this.isClaudeCodeSelected()) || this.codexBusy) return;
       const submissionFingerprint = JSON.stringify({

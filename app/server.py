@@ -124,6 +124,7 @@ from services.provider_runs import ProviderRunCoordinator
 from services.chat_commands import ChatCommand, ChatCommandService, CommandRequest, CommandScope, parse_chat_command
 from services.chat_command_providers import ChatProviderCommandAdapter, CodexCompactAdapter, ScopedConversationResetAdapter
 from services.chat_command_runtime import CallbackCommandAuditPort, CommandFeatureFlags, CommandMetrics, ScopedCommandReservations
+from services.chat_slash_guard import classify_slash_message, provider_block_response
 from services.conversation_timeline import ConversationTimelineService
 from services.chat_history_timeline import (
     ChatHistoryTimelineService,
@@ -1151,13 +1152,9 @@ def _feishu_chat_config_response(include_ok=True):
 
 
 def _chat_command_status_response():
-    flags = CommandFeatureFlags.from_values(
-        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
-        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
-    )
+    flags = CommandFeatureFlags.from_values(os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"))
     return {
         "enabled": flags.enabled,
-        "feishuEnabled": flags.feishu_enabled,
         "reservations": _CHAT_COMMAND_RESERVATIONS.diagnostics(),
         "metrics": _CHAT_COMMAND_METRICS.snapshot(),
     }
@@ -14519,6 +14516,9 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         return {"ok": False, "error": f"Representative agent '{agent_id}' not found", "_status": 404}
     provider_kind = agent.get("providerKind", "openclaw")
     source_meta = source_meta if isinstance(source_meta, dict) else {}
+    attachments = source_meta.get("attachments") if isinstance(source_meta.get("attachments"), list) else []
+    if not classify_slash_message(message, attachments).is_ordinary:
+        return provider_block_response(message)
     sender = source_meta.get("sender") if isinstance(source_meta.get("sender"), dict) else {}
     sender_name = re.sub(
         r"[\x00-\x1f\x7f]+",
@@ -14558,7 +14558,6 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         "representativeAgentId": agent_id,
         "sourceActor": source_actor,
     }
-    attachments = source_meta.get("attachments") if isinstance(source_meta.get("attachments"), list) else []
     if attachments:
         body["attachments"] = attachments
     if provider_kind == "hermes":
@@ -14597,6 +14596,15 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         "conversationId": conversation_id,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": provider_kind},
     }
+
+
+def _handle_provider_chat_entry(body, handler):
+    body = body if isinstance(body, dict) else {}
+    message = str(body.get("message") or "").strip()
+    attachments = body.get("attachments") if isinstance(body.get("attachments"), list) else []
+    if not classify_slash_message(message, attachments).is_ordinary:
+        return provider_block_response(message)
+    return handler(body)
 
 
 def _adapt_feishu_chat_inbound_envelope(body):
@@ -14793,10 +14801,7 @@ def _handle_feishu_chat_message_event(
     group_reply = reply_text
     if group_reply is None and injected_send is not None:
         group_reply = lambda chat_id, source_message_id, text, reply_in_thread: injected_send(chat_id, text)
-    command_flags = CommandFeatureFlags.from_values(
-        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
-        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
-    )
+    command_flags = CommandFeatureFlags.from_values(os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"))
     return feishu_chat_channel.handle_message_event(
         body,
         cfg=_feishu_chat_app_config(),
@@ -14818,7 +14823,7 @@ def _handle_feishu_chat_message_event(
         find_agent=_find_agent_record,
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
         mark_dispatching=_mark_feishu_source_dispatching,
-        command_callback=_dispatch_feishu_chat_command if command_flags.feishu_enabled else None,
+        command_callback=_dispatch_feishu_chat_command if command_flags.enabled else None,
         async_acknowledgement=async_acknowledgement,
     )
 
@@ -32294,7 +32299,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/hermes/runs":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_hermes_run_start(body)
+            result = _handle_provider_chat_entry(body, _handle_hermes_run_start)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32329,7 +32334,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/hermes/chat":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_hermes_chat(body)
+            result = _handle_provider_chat_entry(body, _handle_hermes_chat)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32340,7 +32345,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/codex/runs":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_codex_run_start(body)
+            result = _handle_provider_chat_entry(body, _handle_codex_run_start)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32351,7 +32356,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/claude-code/runs":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_run_start(body)
+            result = _handle_provider_chat_entry(body, _handle_claude_code_run_start)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32388,7 +32393,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/codex/chat":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_codex_chat(body)
+            result = _handle_provider_chat_entry(body, _handle_codex_chat)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -32399,7 +32404,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/api/claude-code/chat":
             length = int(self.headers.get('Content-Length', 0))
             body = json.loads(self.rfile.read(length)) if length else {}
-            result = _handle_claude_code_chat(body)
+            result = _handle_provider_chat_entry(body, _handle_claude_code_chat)
             self.send_response(result.get("_status", 200))
             self.send_header("Content-Type", "application/json")
             self.send_header("Access-Control-Allow-Origin", "*")
@@ -36464,10 +36469,7 @@ def _chat_command_provider_adapter():
 
 def _handle_chat_command_execute(body, *, surface="virtual-office", trusted_agent=None, trusted_conversation_id=""):
     body = body if isinstance(body, dict) else {}
-    flags = CommandFeatureFlags.from_values(
-        os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"),
-        os.environ.get("VO_FEISHU_CHAT_SLASH_COMMANDS_ENABLED"),
-    )
+    flags = CommandFeatureFlags.from_values(os.environ.get("VO_CHAT_SLASH_COMMANDS_ENABLED"))
     if not flags.allows(surface):
         return {"ok": False, "status": "disabled", "error": "Chat slash commands are disabled", "_status": 404}
     command = parse_chat_command(body.get("command") or body.get("message"), body.get("attachments"))

@@ -113,15 +113,25 @@ def test_group_command_keeps_mention_gate_and_shares_scope_within_chat_only():
     assert contexts[0]["sourceSurface"] == "feishu-group"
 
 
-def test_non_exact_or_attached_command_remains_an_ordinary_message():
+def test_non_exact_slash_command_is_rejected_before_agent_dispatch():
     invoke, _records, dispatches, commands, _sends, _locks = _harness()
 
-    invoke(_message("om-case", "oc-private", "ou-a", "/New"))
-    invoke(_message("om-args", "oc-private", "ou-a", "/new now"))
+    case_result = invoke(_message("om-case", "oc-private", "ou-a", "/New"))
+    args_result = invoke(_message("om-args", "oc-private", "ou-a", "/new now"))
+
+    assert case_result["status"] == "slash_command_blocked"
+    assert args_result["status"] == "slash_command_blocked"
+    assert not commands
+    assert not dispatches
+
+
+def test_attached_exact_command_remains_an_ordinary_message():
+    invoke, _records, dispatches, commands, _sends, _locks = _harness()
+
     invoke(_message("om-resource", "oc-private", "ou-a", "/new", resources=[{"type": "file"}]))
 
     assert not commands
-    assert [item[1] for item in dispatches] == ["/New", "/new now", "/new"]
+    assert [item[1] for item in dispatches] == ["/new"]
 
 
 def test_command_conversation_admission_is_non_blocking():

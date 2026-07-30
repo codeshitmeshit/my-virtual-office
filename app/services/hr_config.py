@@ -134,7 +134,7 @@ class HRConfig:
         hour, minute = (int(part) for part in daily_text.split(":"))
         return cls(
             enabled=_boolean(env, "VO_HR_ENABLED", True),
-            scheduler_enabled=_boolean(env, "VO_HR_SCHEDULER_ENABLED", False),
+            scheduler_enabled=_boolean(env, "VO_HR_SCHEDULER_ENABLED", True),
             timezone_name=timezone_name,
             daily_time=time(hour, minute),
             submission_window_minutes=_integer(
