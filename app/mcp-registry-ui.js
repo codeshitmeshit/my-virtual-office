@@ -175,14 +175,16 @@ function renderMcpRegistry() {
             '<div class="mcp-card-footer">' +
                 '<div class="mcp-assignment-summary">' +
                     '<span class="mcp-assignment-icon" aria-hidden="true">A</span>' +
-                    '<div><span>' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '已安装指引 Skill')) + '</span><strong>' + _mcpEsc(assignedText) + '</strong></div>' +
+                    '<div><span>' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '已分配给')) + '</span><strong>' + _mcpEsc(assignedText) + '</strong></div>' +
                 '</div>' +
                 '<div class="mcp-card-actions">' +
-                    '<button type="button" class="mcp-assign-button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '注册到 Agent 所属客户端，并为该 Agent 安装 MCP 使用指引 Skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '安装指引')) + '</button>' +
+                    '<button type="button" class="mcp-guide-button" data-mcp-action="toggle-guide" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide', null, '使用说明')) + (server.hasUsageGuide ? ' ·' : '') + '</button>' +
+                    '<button type="button" class="mcp-assign-button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '注册到 Agent 所属客户端并记录 MCP 可用范围')) + '" data-mcp-action="toggle-assignment" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '分配 Agent')) + '</button>' +
                     '<button type="button" class="mcp-delete-button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" aria-label="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">×</button>' +
                 '</div>' +
             '</div>' +
-            '<div class="mcp-install-row" id="mcp-install-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
+            '<div class="mcp-assignment-row" id="mcp-assignment-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
+            '<div class="mcp-guide-row" id="mcp-guide-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
         '</article>';
     }).join('');
 }
@@ -283,8 +285,8 @@ async function registerMcpInNativeClient(name, client) {
     }
 }
 
-async function toggleMcpSkillInstall(name) {
-    var row = document.getElementById('mcp-install-' + name);
+async function toggleMcpAssignment(name) {
+    var row = document.getElementById('mcp-assignment-' + name);
     if (!row) return;
     if (row.style.display !== 'none') {
         row.style.display = 'none';
@@ -299,19 +301,19 @@ async function toggleMcpSkillInstall(name) {
             var provider = String(agent.providerKind || 'openclaw').toLowerCase();
             var providerLabel = provider === 'claude-code' || provider === 'claude' ? 'Claude' : (provider === 'codex' ? 'Codex' : 'OpenClaw');
             return '<option value="' + _mcpEsc(agent.id) + '">' + _mcpEsc((agent.emoji || '') + ' ' + (agent.name || agent.id) + ' · ' + providerLabel) + '</option>';
-        }).join('') + '</select><button type="button" data-mcp-action="install-skill" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign_and_install', null, '注册客户端并安装指引')) + '</button>';
+        }).join('') + '</select><button type="button" data-mcp-action="assign-agent" data-mcp-name="' + _mcpEsc(name) + '"' + (agents.length ? '' : ' disabled') + '>' + _mcpEsc(_mcpTr('mcp_assign_and_install', null, '注册并分配')) + '</button>';
         row.style.display = 'flex';
     } catch (e) {
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_agent_list_failed', { error: e.message }, 'Agent 列表加载失败：{{error}}'));
     }
 }
 
-async function installMcpSkill(name) {
+async function assignMcpAgent(name) {
     var select = document.getElementById('mcp-agent-' + name);
     var agentId = select && select.value;
     if (!agentId) return;
     try {
-        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/skill', {
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/assign-agent', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ agentId: agentId, overwrite: true })
@@ -323,11 +325,50 @@ async function installMcpSkill(name) {
             _acpShowToast(_mcpTr('mcp_assigned', {
                 agent: _mcpAgentLabel(agentId),
                 client: labels[data.client] || data.client || ''
-            }, '已注册到 {{client}}，并为 {{agent}} 安装指引 Skill'));
+            }, '已注册到 {{client}} 并分配给 {{agent}}'));
         }
         refreshMcpRegistry();
     } catch (e) {
         if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_assignment_failed', { error: e.message }, 'MCP 分配失败：{{error}}'));
+    }
+}
+
+async function toggleMcpGuide(name) {
+    var row = document.getElementById('mcp-guide-' + name);
+    if (!row) return;
+    if (row.style.display !== 'none') {
+        row.style.display = 'none';
+        return;
+    }
+    row.innerHTML = '<span class="mcp-guide-loading">' + _mcpEsc(_mcpTr('mcp_usage_guide_loading', null, '正在加载使用说明...')) + '</span>';
+    row.style.display = 'grid';
+    try {
+        var res = await fetch('/api/mcp-registry/' + encodeURIComponent(name) + '/guide');
+        var data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_usage_guide_load_failed_plain', null, '使用说明加载失败'));
+        row.innerHTML = '<label for="mcp-guide-input-' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide_title', null, '可选使用说明')) + '</label>' +
+            '<textarea id="mcp-guide-input-' + _mcpEsc(name) + '" maxlength="20000" placeholder="' + _mcpEsc(_mcpTr('mcp_usage_guide_placeholder', null, '仅填写工具定义之外的流程、约束或注意事项。')) + '">' + _mcpEsc(data.guide || '') + '</textarea>' +
+            '<div class="mcp-guide-actions"><span>' + _mcpEsc(_mcpTr('mcp_usage_guide_hint', null, 'VO Agent 会在工具定义不足时按需读取。')) + '</span><button type="button" data-mcp-action="save-guide" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('save', null, '保存')) + '</button></div>';
+    } catch (e) {
+        row.innerHTML = '<span class="mcp-guide-error">' + _mcpEsc(_mcpTr('mcp_usage_guide_load_failed', { error: e.message }, '使用说明加载失败：{{error}}')) + '</span>';
+    }
+}
+
+async function saveMcpGuide(name) {
+    var input = document.getElementById('mcp-guide-input-' + name);
+    if (!input) return;
+    try {
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/guide', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ guide: input.value })
+        });
+        var data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_usage_guide_save_failed_plain', null, '使用说明保存失败'));
+        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_usage_guide_saved', null, '使用说明已保存'));
+        refreshMcpRegistry();
+    } catch (e) {
+        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_usage_guide_save_failed', { error: e.message }, '使用说明保存失败：{{error}}'));
     }
 }
 
@@ -352,8 +393,10 @@ document.addEventListener('click', function(e) {
     var name = actionButton.getAttribute('data-mcp-name') || '';
     if (action === 'copy-command') copyMcpConnection(actionButton.getAttribute('data-mcp-detail') || '');
     if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
-    if (action === 'toggle-skill') toggleMcpSkillInstall(name);
-    if (action === 'install-skill') installMcpSkill(name);
+    if (action === 'toggle-assignment') toggleMcpAssignment(name);
+    if (action === 'assign-agent') assignMcpAgent(name);
+    if (action === 'toggle-guide') toggleMcpGuide(name);
+    if (action === 'save-guide') saveMcpGuide(name);
     if (action === 'delete') deleteMcpServer(name);
 });
 
@@ -369,8 +412,10 @@ Object.assign(window, {
     addVibeTradingMcpTemplate,
     registerMcpInOpenClaw,
     registerMcpInNativeClient,
-    toggleMcpSkillInstall,
-    installMcpSkill,
+    toggleMcpAssignment,
+    assignMcpAgent,
+    toggleMcpGuide,
+    saveMcpGuide,
     copyMcpConnection,
     deleteMcpServer
 });

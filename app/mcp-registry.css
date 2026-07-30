@@ -175,7 +175,8 @@
 .mcp-copy-button,
 .mcp-client-connect,
 .mcp-card-actions button,
-.mcp-install-row button {
+.mcp-assignment-row button,
+.mcp-guide-row button {
     min-height: 30px;
     border-radius: 6px;
     transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
@@ -356,6 +357,12 @@
     border-color: rgba(246, 214, 74, 0.45);
 }
 
+.mcp-card-actions .mcp-guide-button {
+    color: #aaa6c1;
+    background: transparent;
+    border-color: #3a375e;
+}
+
 .mcp-card-actions .mcp-delete-button {
     width: 30px;
     padding: 0;
@@ -370,8 +377,62 @@
     border-color: rgba(255, 103, 103, 0.55);
 }
 
-.mcp-install-row {
+.mcp-assignment-row,
+.mcp-guide-row {
     padding: 0 16px 14px;
+}
+
+.mcp-assignment-row {
+    gap: 8px;
+}
+
+.mcp-assignment-row select {
+    flex: 1;
+    min-width: 0;
+}
+
+.mcp-guide-row {
+    gap: 8px;
+    border-top: 1px solid rgba(115, 104, 180, 0.12);
+    padding-top: 14px;
+}
+
+.mcp-guide-row label {
+    color: #aaa6c1;
+    font-size: 8px;
+}
+
+.mcp-guide-row textarea {
+    width: 100%;
+    min-height: 96px;
+    padding: 10px;
+    box-sizing: border-box;
+    resize: vertical;
+    color: #d5d2e1;
+    background: #10101b;
+    border: 1px solid #302d50;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 8px;
+    line-height: 1.55;
+}
+
+.mcp-guide-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mcp-guide-actions span,
+.mcp-guide-loading {
+    color: #77748f;
+    font-size: 7px;
+}
+
+.mcp-guide-error {
+    color: #ff7777;
+    font-size: 8px;
 }
 
 @media (max-width: 920px) {

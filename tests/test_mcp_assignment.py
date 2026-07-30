@@ -11,7 +11,7 @@ from server_services import mcp_assignment, mcp_registry
         ("claude-code", "claude", "user"),
     ],
 )
-def test_assignment_registers_provider_client_before_installing_skill(
+def test_assignment_registers_provider_client_before_recording_assignment(
     provider_kind,
     expected_client,
     expected_scope,
@@ -30,8 +30,8 @@ def test_assignment_registers_provider_client_before_installing_skill(
             ]
         },
         register_client=lambda name, client, body: events.append(("register", name, client)) or {"ok": True},
-        install_skill=lambda name, body: events.append(("install", name, body["agentId"]))
-        or {"ok": True, "skill": "mcp-echo"},
+        assign_registry=lambda name, body: events.append(("assign", name, body["agentId"]))
+        or {"ok": True, "assignedAgentIds": [body["agentId"]]},
     )
 
     assert result["ok"] is True
@@ -39,12 +39,14 @@ def test_assignment_registers_provider_client_before_installing_skill(
     assert result["registrationScope"] == expected_scope
     assert events == [
         ("register", "echo", expected_client),
-        ("install", "echo", "agent-1"),
+        ("assign", "echo", "agent-1"),
     ]
+    assert result["assignedAgentIds"] == ["agent-1"]
+    assert "skill" not in result
 
 
-def test_assignment_stops_before_skill_install_when_registration_fails():
-    installs = []
+def test_assignment_stops_before_registry_assignment_when_registration_fails():
+    assignments = []
 
     result = mcp_assignment.assign_to_agent(
         "echo",
@@ -55,13 +57,13 @@ def test_assignment_stops_before_skill_install_when_registration_fails():
             "error": "codex CLI not found",
             "_status": 500,
         },
-        install_skill=lambda name, body: installs.append((name, body)) or {"ok": True},
+        assign_registry=lambda name, body: assignments.append((name, body)) or {"ok": True},
     )
 
     assert result["ok"] is False
     assert result["stage"] == "register-client"
     assert result["client"] == "codex"
-    assert installs == []
+    assert assignments == []
 
 
 def test_assignment_rejects_agents_without_a_supported_native_client():
@@ -70,7 +72,7 @@ def test_assignment_rejects_agents_without_a_supported_native_client():
         {"agentId": "agent-1"},
         list_agents=lambda: {"agents": [{"id": "agent-1", "providerKind": "hermes"}]},
         register_client=lambda *args: pytest.fail("registration must not run"),
-        install_skill=lambda *args: pytest.fail("skill install must not run"),
+        assign_registry=lambda *args: pytest.fail("assignment must not run"),
     )
 
     assert result["ok"] is False
@@ -94,12 +96,12 @@ def test_registry_assignment_wires_agent_provider_to_native_registration(monkeyp
     )
     monkeypatch.setattr(
         mcp_registry,
-        "_install_mcp_skill_only",
-        lambda name, body: calls.append(("install", name, body["agentId"]))
-        or {"ok": True, "skill": "mcp-echo"},
+        "_handle_mcp_registry_assign",
+        lambda name, body: calls.append(("assign", name, body["agentId"]))
+        or {"ok": True, "assignedAgentIds": [body["agentId"]]},
     )
 
-    result = mcp_registry._handle_mcp_registry_install_skill(
+    result = mcp_registry._handle_mcp_registry_assign_agent(
         "echo",
         {"agentId": "claude-main", "overwrite": True},
     )
@@ -108,5 +110,5 @@ def test_registry_assignment_wires_agent_provider_to_native_registration(monkeyp
     assert result["client"] == "claude"
     assert calls == [
         ("register", "echo", "claude"),
-        ("install", "echo", "claude-main"),
+        ("assign", "echo", "claude-main"),
     ]

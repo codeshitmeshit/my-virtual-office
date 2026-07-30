@@ -1,4 +1,4 @@
-"""Register a VO MCP server in a provider client and install agent guidance."""
+"""Register a VO MCP server in a provider client and record agent assignment."""
 
 from __future__ import annotations
 
@@ -35,7 +35,7 @@ def assign_to_agent(
     *,
     list_agents: Callable[[], dict[str, Any]],
     register_client: Callable[[str, str, dict[str, Any]], dict[str, Any]],
-    install_skill: Callable[[str, dict[str, Any]], dict[str, Any]],
+    assign_registry: Callable[[str, dict[str, Any]], dict[str, Any]],
 ) -> dict[str, Any]:
     agent_id = str(body.get("agentId") or "").strip()
     if not agent_id:
@@ -75,12 +75,12 @@ def assign_to_agent(
             "client": client,
         }
 
-    installation = install_skill(server_name, body)
-    if not installation.get("ok"):
+    assignment = assign_registry(server_name, {"agentId": agent_id, "mode": "add"})
+    if not assignment.get("ok"):
         return {
-            **installation,
+            **assignment,
             "ok": False,
-            "stage": "install-skill",
+            "stage": "assign-agent",
             "agentId": agent_id,
             "providerKind": provider_kind,
             "client": client,
@@ -94,6 +94,6 @@ def assign_to_agent(
         "client": client,
         "registrationScope": "user" if client == "claude" else "client",
         "registration": registration,
-        "skill": installation.get("skill"),
-        "install": installation,
+        "assignment": assignment,
+        "assignedAgentIds": assignment.get("assignedAgentIds", []),
     }

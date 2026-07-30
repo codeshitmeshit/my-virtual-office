@@ -5167,10 +5167,10 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mcp-card-warning { color: #e6b85c; font-size: 9px; margin-top: 3px; }
 .mcp-card-assigned { color: #c9b27a; font-size: 9px; margin-top: 4px; overflow-wrap: anywhere; }
 .mcp-card-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-.mcp-card-actions button, .mcp-install-row button { font-size: 9px; padding: 4px 8px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
-.mcp-card-actions button:hover, .mcp-install-row button:hover { border-color: var(--gold); color: var(--gold); }
-.mcp-install-row { grid-column: 1 / -1; gap: 6px; align-items: center; }
-.mcp-install-row select { flex: 1; min-width: 0; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; padding: 5px 8px; font-size: 10px; }
+.mcp-card-actions button, .mcp-assignment-row button, .mcp-guide-row button { font-size: 9px; padding: 4px 8px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
+.mcp-card-actions button:hover, .mcp-assignment-row button:hover, .mcp-guide-row button:hover { border-color: var(--gold); color: var(--gold); }
+.mcp-assignment-row { grid-column: 1 / -1; gap: 6px; align-items: center; }
+.mcp-assignment-row select { flex: 1; min-width: 0; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; padding: 5px 8px; font-size: 10px; }
 
 @media (max-width: 760px) {
     .mcp-registry-grid { grid-template-columns: 1fr; }

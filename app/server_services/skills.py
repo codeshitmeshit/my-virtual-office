@@ -9,7 +9,7 @@ from services import skill_library_catalog_integration
 
 AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
 
-__all__ = ['AGENT_PLATFORM_COMM_SKILL_NAME', '_agent_platform_comm_skill_content', '_vo_presence_skill_content', '_vo_browser_skill_content', '_vo_meetings_skill_content', '_vo_projects_skill_content', '_builtin_office_skill_contents', '_ensure_builtin_communication_skill', '_handle_skill_list', '_extract_skill_description', '_handle_skill_write', '_get_skills_library_dir', '_parse_skill_frontmatter', '_skill_library_slug', '_handle_skills_library_list', '_handle_skills_library_get', '_handle_skills_library_create', '_handle_skills_library_save_from_agent', '_parse_cli_json', '_openclaw_skill_workshop_cli', '_skill_workshop_rpc', '_skill_workshop_agent_targets', '_normalize_skill_workshop_proposal', '_handle_skill_workshop_list', '_handle_skill_workshop_inspect', '_handle_skill_workshop_action', '_handle_skills_library_delete', '_handle_skills_library_apply', '_handle_skills_library_upload', '_handle_skill_delete', '_skill_sync_agent_context']
+__all__ = ['AGENT_PLATFORM_COMM_SKILL_NAME', '_agent_platform_comm_skill_content', '_vo_presence_skill_content', '_vo_browser_skill_content', '_vo_meetings_skill_content', '_vo_projects_skill_content', '_vo_mcp_guidance_skill_content', '_builtin_office_skill_contents', '_ensure_builtin_communication_skill', '_handle_skill_list', '_extract_skill_description', '_handle_skill_write', '_get_skills_library_dir', '_parse_skill_frontmatter', '_skill_library_slug', '_handle_skills_library_list', '_handle_skills_library_get', '_handle_skills_library_create', '_handle_skills_library_save_from_agent', '_parse_cli_json', '_openclaw_skill_workshop_cli', '_skill_workshop_rpc', '_skill_workshop_agent_targets', '_normalize_skill_workshop_proposal', '_handle_skill_workshop_list', '_handle_skill_workshop_inspect', '_handle_skill_workshop_action', '_handle_skills_library_delete', '_handle_skills_library_apply', '_handle_skills_library_upload', '_handle_skill_delete', '_skill_sync_agent_context']
 
 
 def _server_module():
@@ -323,6 +323,12 @@ curl -sS -X POST {office_url}/api/projects/PROJECT_ID/tasks \
 '''.replace("{office_url}", office_url)
 
 
+def _vo_mcp_guidance_skill_content():
+    from server_services import mcp_usage_guides
+
+    return mcp_usage_guides.global_skill_content(f"http://127.0.0.1:{PORT}")
+
+
 def _builtin_office_skill_contents():
     return {
         AGENT_PLATFORM_COMM_SKILL_NAME: _agent_platform_comm_skill_content(),
@@ -330,6 +336,7 @@ def _builtin_office_skill_contents():
         "VirtualOffice-Browser-Control": _vo_browser_skill_content(),
         "VirtualOffice-Meetings": _vo_meetings_skill_content(),
         "VirtualOffice-Projects-and-Tasks": _vo_projects_skill_content(),
+        "VirtualOffice-MCP-Guidance": _vo_mcp_guidance_skill_content(),
     }
 
 

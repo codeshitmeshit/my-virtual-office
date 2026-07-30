@@ -3697,6 +3697,12 @@ curl -sS -X POST {office_url}/api/projects/PROJECT_ID/tasks \
 '''.replace("{office_url}", office_url)
 
 
+def _vo_mcp_guidance_skill_content():
+    from server_services import mcp_usage_guides
+
+    return mcp_usage_guides.global_skill_content(f"http://127.0.0.1:{PORT}")
+
+
 def _builtin_office_skill_contents():
     return {
         AGENT_PLATFORM_COMM_SKILL_NAME: _agent_platform_comm_skill_content(),
@@ -3704,6 +3710,7 @@ def _builtin_office_skill_contents():
         "VirtualOffice-Browser-Control": _vo_browser_skill_content(),
         "VirtualOffice-Meetings": _vo_meetings_skill_content(),
         "VirtualOffice-Projects-and-Tasks": _vo_projects_skill_content(),
+        "VirtualOffice-MCP-Guidance": _vo_mcp_guidance_skill_content(),
     }
 
 

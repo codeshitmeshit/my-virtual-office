@@ -28,6 +28,8 @@ def handle_get(handler, parsed_url):
     path = parsed_url.path
     if path == "/api/mcp-registry":
         return send_json(handler, service._handle_mcp_registry_list())
+    if path.startswith("/api/mcp-registry/") and path.endswith("/guide"):
+        return send_json(handler, service._handle_mcp_registry_get_guide(_server_name(path, "/guide")))
     if path.startswith("/api/mcp-registry/"):
         return send_json(handler, service._handle_mcp_registry_get(_server_name(path)))
     return False
@@ -53,6 +55,12 @@ def handle_post(handler, parsed_url):
     if path.startswith("/api/mcp-registry/") and path.endswith("/assign"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_assign(_server_name(path, "/assign"), body))
+    if path.startswith("/api/mcp-registry/") and path.endswith("/assign-agent"):
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_mcp_registry_assign_agent(_server_name(path, "/assign-agent"), body))
+    if path.startswith("/api/mcp-registry/") and path.endswith("/guide"):
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_mcp_registry_save_guide(_server_name(path, "/guide"), body))
     if path.startswith("/api/mcp-registry/") and path.endswith("/skill"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_install_skill(_server_name(path, "/skill"), body))

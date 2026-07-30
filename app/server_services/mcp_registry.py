@@ -119,6 +119,8 @@ def _agent_ids(value: Any) -> list[str]:
 
 
 def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    from server_services import mcp_usage_guides
+
     existing = dict(existing or {})
     name = _safe_name(body.get("name") or existing.get("name"))
     transport = str(body.get("transport") or existing.get("transport") or "stdio").strip().lower()
@@ -149,6 +151,9 @@ def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = No
         "disabled": bool(body.get("disabled") if "disabled" in body else existing.get("disabled", False)),
         "parallel": bool(body.get("parallel") if "parallel" in body else existing.get("parallel", False)),
         "assignedAgentIds": _agent_ids(body.get("assignedAgentIds") if "assignedAgentIds" in body else existing.get("assignedAgentIds")),
+        "usageGuide": mcp_usage_guides.normalize_usage_guide(
+            body.get("usageGuide") if "usageGuide" in body else existing.get("usageGuide")
+        ),
         "createdAt": created_at,
         "updatedAt": _now(),
         "openclaw": dict(existing.get("openclaw") or {}),
@@ -160,6 +165,8 @@ def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = No
 
 def _public_server(server: dict[str, Any]) -> dict[str, Any]:
     item = dict(server)
+    item["hasUsageGuide"] = bool(str(item.get("usageGuide") or "").strip())
+    item.pop("usageGuide", None)
     if isinstance(item.get("env"), dict):
         item["envKeys"] = sorted(item["env"].keys())
         item.pop("env", None)
@@ -214,37 +221,6 @@ def _run_openclaw(args: list[str], timeout: int = 30) -> dict[str, Any]:
     return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "data": payload}
 
 
-def _skill_content(server: dict[str, Any]) -> str:
-    config = json.dumps(_openclaw_config(server), ensure_ascii=False, indent=2)
-    description = server.get("description") or f"Use the {server['name']} MCP server registered by Virtual Office."
-    return f"""---
-name: mcp-{server['name']}
-description: "{description}"
----
-
-# MCP Server: {server['name']}
-
-This MCP server is managed by the Virtual Office MCP Registry.
-
-## Usage
-
-Use this server when the task matches its description:
-
-{description}
-
-## Client Registration
-
-Virtual Office registers this MCP server in the native client that owns the assigned agent.
-The normalized MCP config is:
-
-```json
-{config}
-```
-
-If tools are unavailable, ask the user or VO operator to assign this MCP server again from the Skills Library MCP Registry. Do not request or print secrets.
-"""
-
-
 def _get_server(name: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
     safe = _safe_name(name)
     registry = _load_registry()
@@ -264,6 +240,35 @@ def _handle_mcp_registry_get(name: str) -> dict[str, Any]:
     if not server:
         return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
     return {"ok": True, "server": _public_server(server)}
+
+
+def _handle_mcp_registry_get_guide(name: str) -> dict[str, Any]:
+    _, server = _get_server(name)
+    if not server:
+        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    from server_services import mcp_usage_guides
+
+    return mcp_usage_guides.guide_payload(server)
+
+
+def _handle_mcp_registry_save_guide(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    registry, server = _get_server(name)
+    if not server:
+        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    from server_services import mcp_usage_guides
+
+    try:
+        guide = mcp_usage_guides.normalize_usage_guide(body.get("guide"))
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc), "_status": 400}
+    if guide:
+        server["usageGuide"] = guide
+    else:
+        server.pop("usageGuide", None)
+    server["updatedAt"] = _now()
+    registry.setdefault("servers", {})[server["name"]] = server
+    _save_registry(registry)
+    return mcp_usage_guides.guide_payload(server)
 
 
 def _handle_mcp_registry_save(body: dict[str, Any]) -> dict[str, Any]:
@@ -376,56 +381,29 @@ def _handle_mcp_registry_assign(name: str, body: dict[str, Any]) -> dict[str, An
     return {"ok": True, "server": _public_server(server), "assignedAgentIds": assigned}
 
 
-def _install_mcp_skill_only(name: str, body: dict[str, Any]) -> dict[str, Any]:
-    _, server = _get_server(name)
-    if not server:
-        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
-    agent_id = str(body.get("agentId") or "").strip()
-    if not agent_id:
-        return {"ok": False, "error": "agentId is required", "_status": 400}
-    skill_name = f"mcp-{server['name']}"
-    content = _skill_content(server)
-    from server_services import skills
-
-    skills._hydrate()
-    create = skills._handle_skills_library_create({"name": skill_name, "content": content})
-    if not create.get("ok"):
-        return create
-    apply = skills._handle_skills_library_apply({"skill": create["skill"], "agentId": agent_id, "overwrite": bool(body.get("overwrite", True))})
-    if not apply.get("ok"):
-        return apply
-    assignment = _handle_mcp_registry_assign(name, {"agentId": agent_id, "mode": "add"})
-    if not assignment.get("ok"):
-        return assignment
-    return {
-        "ok": True,
-        "skill": create["skill"],
-        "agentId": agent_id,
-        "assignedAgentIds": assignment.get("assignedAgentIds", []),
-        "library": create,
-        "install": apply,
-    }
-
-
 def _register_mcp_for_client(name: str, client: str, body: dict[str, Any]) -> dict[str, Any]:
     if client == "openclaw":
         return _handle_mcp_registry_register_openclaw(name, body)
     return _handle_mcp_registry_register_native(name, client, body)
 
 
-def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
+def _handle_mcp_registry_assign_agent(name: str, body: dict[str, Any]) -> dict[str, Any]:
     from server_services import agents, mcp_assignment
 
-    result = mcp_assignment.assign_to_agent(
+    return mcp_assignment.assign_to_agent(
         name,
         body,
         list_agents=agents._handle_agents_list,
         register_client=_register_mcp_for_client,
-        install_skill=_install_mcp_skill_only,
+        assign_registry=_handle_mcp_registry_assign,
     )
-    install_result = result.get("install") if isinstance(result, dict) else None
-    if result.get("ok") and isinstance(install_result, dict) and "assignedAgentIds" in install_result:
-        result["assignedAgentIds"] = install_result["assignedAgentIds"]
+
+
+def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Compatibility alias for clients that still post to the former /skill route."""
+    result = _handle_mcp_registry_assign_agent(name, body)
+    if isinstance(result, dict):
+        result["deprecatedRoute"] = True
     return result
 
 

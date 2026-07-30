@@ -81,7 +81,7 @@ def test_mcp_registry_tracks_agent_assignments(monkeypatch, tmp_path):
     assert listed["servers"][0]["assignedAgentIds"] == ["market-analyst-team-agent", "market-trader-agent"]
 
 
-def test_mcp_registry_install_skill_adds_assignment(monkeypatch, tmp_path):
+def test_mcp_registry_assign_agent_registers_client_without_creating_skill(monkeypatch, tmp_path):
     monkeypatch.setattr(mcp_registry, "_status_dir", lambda: str(tmp_path))
     mcp_registry._handle_mcp_registry_save(
         {
@@ -91,7 +91,7 @@ def test_mcp_registry_install_skill_adds_assignment(monkeypatch, tmp_path):
         }
     )
 
-    from server_services import agents, skills
+    from server_services import agents
 
     calls = []
     monkeypatch.setattr(
@@ -104,19 +104,8 @@ def test_mcp_registry_install_skill_adds_assignment(monkeypatch, tmp_path):
         "_handle_mcp_registry_register_native",
         lambda name, client, body=None: calls.append(("register", name, client)) or {"ok": True},
     )
-    monkeypatch.setattr(skills, "_hydrate", lambda: calls.append(("hydrate",)))
-    monkeypatch.setattr(
-        skills,
-        "_handle_skills_library_create",
-        lambda body: calls.append(("create", body["name"])) or {"ok": True, "skill": body["name"]},
-    )
-    monkeypatch.setattr(
-        skills,
-        "_handle_skills_library_apply",
-        lambda body: calls.append(("apply", body["skill"], body["agentId"])) or {"ok": True},
-    )
 
-    result = mcp_registry._handle_mcp_registry_install_skill(
+    result = mcp_registry._handle_mcp_registry_assign_agent(
         "vibe-trading",
         {"agentId": "market-analyst-team-agent"},
     )
@@ -126,7 +115,25 @@ def test_mcp_registry_install_skill_adds_assignment(monkeypatch, tmp_path):
     assert result["assignedAgentIds"] == ["market-analyst-team-agent"]
     assert calls == [
         ("register", "vibe-trading", "codex"),
-        ("hydrate",),
-        ("create", "mcp-vibe-trading"),
-        ("apply", "mcp-vibe-trading", "market-analyst-team-agent"),
     ]
+
+
+def test_mcp_registry_usage_guide_round_trip(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_registry, "_status_dir", lambda: str(tmp_path))
+    saved = mcp_registry._handle_mcp_registry_save(
+        {
+            "name": "vibe-trading",
+            "transport": "stdio",
+            "command": "vibe-trading-mcp",
+            "usageGuide": "Only use research tools unless live trading is explicitly authorized.",
+        }
+    )
+
+    assert saved["server"]["hasUsageGuide"] is True
+    assert "usageGuide" not in saved["server"]
+    guide = mcp_registry._handle_mcp_registry_get_guide("vibe-trading")
+    assert guide["guide"].startswith("Only use research")
+
+    cleared = mcp_registry._handle_mcp_registry_save_guide("vibe-trading", {"guide": "  "})
+    assert cleared["hasGuide"] is False
+    assert mcp_registry._handle_mcp_registry_list()["servers"][0]["hasUsageGuide"] is False
