@@ -90,6 +90,10 @@ assert.equal(
   helpers.activityFailureReason({ status: 'complete', error: 'ignored' }),
   'ignored',
 );
+assert.notEqual(
+  helpers.formatTime('2026-07-30T14:12:08.479013+00:00'),
+  '2026-07-30T14:12:08.479013+00:00',
+);
 
 function response(payload, ok = true) {
   return {

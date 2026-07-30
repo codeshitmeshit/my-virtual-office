@@ -262,13 +262,18 @@ class ProviderRunCoordinator:
                 self._handles.pop(run_id, None)
 
     def _publish(self, provider_kind: str, agent_id: str, conversation_id: str, event_name: str, payload: Mapping[str, Any], run_id: str):
+        provider_kind_normalized = str(provider_kind or "").strip().lower()
+
         def publish_direct(name, data):
-            result = self.journal.publish(provider_kind, agent_id, conversation_id, name, data, run_id)
-            if result is not None and self.telemetry is not None and str(provider_kind or "").strip().lower() == "codex":
+            if provider_kind_normalized == "codex" and str((data or {}).get("eventClass") or "") in {"transient", "durable_key", "terminal"}:
+                result = self.journal._publish_sanitized(provider_kind, agent_id, conversation_id, name, data, run_id)
+            else:
+                result = self.journal.publish(provider_kind, agent_id, conversation_id, name, data, run_id)
+            if result is not None and self.telemetry is not None and provider_kind_normalized == "codex":
                 self.telemetry.mark(run_id, "journal_published")
             return result
 
-        if self.event_pipeline is not None and str(provider_kind or "").strip().lower() == "codex":
+        if self.event_pipeline is not None and provider_kind_normalized == "codex":
             return self.event_pipeline.publish_event(
                 provider_kind,
                 agent_id,

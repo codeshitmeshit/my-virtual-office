@@ -2602,6 +2602,8 @@
   "mcp_registered_servers_hint": "管理连接、客户端注册与 Agent 分配",
   "mcp_connected": "已连接",
   "mcp_connect": "连接",
+  "mcp_unavailable": "不可用",
+  "mcp_retry": "重试",
   "mcp_no_description": "暂无描述",
   "mcp_connection": "连接信息",
   "mcp_copy_connection": "复制连接信息",

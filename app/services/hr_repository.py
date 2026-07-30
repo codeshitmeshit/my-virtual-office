@@ -14,6 +14,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Sequence
 from urllib.parse import quote
 
+from services.retired_native_agents import RETIRED_NATIVE_MAIN_AGENT_IDS
+
 
 SCHEMA_NAME = "vo-human-resources"
 DATABASE_FILENAME = "hr.sqlite3"
@@ -3090,12 +3092,19 @@ class HRRepository:
                 "id, ai_id, local_date, status, evidence_version, occurrence_key, "
                 "attempt_count, last_error, claimed_by, claim_expires_at, created_at, updated_at"
             )
+        where_clause = ""
+        parameters: list[Any] = [limit + 1, offset]
+        if table == "agents":
+            retired_ids = tuple(sorted(RETIRED_NATIVE_MAIN_AGENT_IDS))
+            placeholders = ", ".join("?" for _ in retired_ids)
+            where_clause = f" WHERE ai_id NOT IN ({placeholders})"
+            parameters = [*retired_ids, limit + 1, offset]
         try:
             with self._connection(readonly=True) as connection:
                 self._current_version(connection)
                 rows = connection.execute(
-                    f"SELECT {columns} FROM {table} ORDER BY {order_by} LIMIT ? OFFSET ?",
-                    (limit + 1, offset),
+                    f"SELECT {columns} FROM {table}{where_clause} ORDER BY {order_by} LIMIT ? OFFSET ?",
+                    tuple(parameters),
                 ).fetchall()
         except (sqlite3.DatabaseError, json.JSONDecodeError) as exc:
             raise HRRepositoryCorruptionError("HR repository export could not be read") from exc

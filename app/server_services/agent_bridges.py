@@ -31,22 +31,14 @@ __all__ = [
     'HERMES_PROFILE_API_PROCESSES',
     'PROVIDER_PROGRESS_MAX_AGE_MS',
     'PROVIDER_PROGRESS_TERMINAL_STATUSES',
-    'PROVIDER_RUN_BRIDGE',
-    'CLAUDE_CODE_STREAM_RUNS_LOCK',
-    'CLAUDE_CODE_STREAM_RUNS',
     '_CODEX_OPERATION_LOCKS',
     '_CODEX_OPERATION_LOCKS_GUARD',
     '_CODEX_THREAD_STATE_LOCK',
     '_CODEX_ACTIVITY_LOCK',
     '_CODEX_ACTIVE_LOCK',
     '_CODEX_ACTIVE_OPERATIONS',
-    '_CODEX_RUN_IDEMPOTENCY',
-    '_CODEX_RUN_IDEMPOTENCY_TTL_MS',
-    '_PROVIDER_RUN_IDEMPOTENCY',
-    '_PROVIDER_RUN_IDEMPOTENCY_TTL_MS',
     '_CODEX_SECRET_KEYS',
     '_CODEX_MAX_EVENT_TEXT',
-    'ProviderRunBridge',
     '_get_hermes_agent',
     '_safe_hermes_path_part',
     '_hermes_history_path',
@@ -97,9 +89,6 @@ __all__ = [
     'msg_matches_ephemeral',
     '_handle_hermes_approval_respond',
     '_hermes_stream_event_payload',
-    '_handle_hermes_run_start',
-    '_handle_hermes_run_events',
-    '_handle_hermes_run_stop',
     '_handle_hermes_history_clear',
     '_codex_provider_from_config',
     '_codex_activity_path',
@@ -118,22 +107,11 @@ __all__ = [
     '_reset_codex_thread_id',
     '_codex_operation_lock',
     '_codex_idempotency_key',
-    '_codex_idempotency_scope',
-    '_prune_codex_idempotency',
-    '_provider_run_idempotency_key',
-    '_provider_run_idempotency_scope',
-    '_prune_provider_run_idempotency',
-    '_provider_run_duplicate_response',
-    '_register_provider_run_idempotency',
-    '_finish_provider_run_idempotency',
     '_codex_git_paths',
     '_append_codex_user_comm_event',
     '_handle_codex_chat',
     '_codex_stream_event_payload',
     '_codex_activity_bridge_event_name',
-    '_handle_codex_run_start',
-    '_handle_codex_run_events',
-    '_handle_codex_run_stop',
     '_handle_codex_activity',
     '_handle_codex_interaction',
     '_normalize_codex_approval_choice',
@@ -182,14 +160,9 @@ __all__ = [
     '_set_claude_code_active_run',
     '_publish_claude_code_progress',
     '_remove_claude_code_progress_messages',
-    '_remember_claude_code_stream_run',
-    '_get_claude_code_stream_run',
-    '_clear_claude_code_stream_run',
     '_claude_code_visible_thinking',
     '_claude_code_stream_event_payload',
     '_claude_code_tool_stream_key',
-    '_handle_claude_code_run_start',
-    '_handle_claude_code_run_events',
     '_handle_claude_code_interrupt',
     '_handle_claude_code_history_clear',
     '_handle_claude_code_chat',
@@ -1722,190 +1695,6 @@ def _hermes_stream_event_payload(run_id, agent, profile, result=None, **extra):
     return payload
 
 
-def _handle_hermes_run_start(body):
-    """Start a Hermes message in the background and expose progress through ProviderRunBridge."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "hermes-default"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-    agent = _get_hermes_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Hermes agent '{agent_key}' not found", "_status": 404}
-
-    profile = agent.get("profile") or agent.get("providerAgentId") or "default"
-    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
-    agent_id = agent.get("id") or agent_key
-    idempotency_key = _provider_run_idempotency_key(body)
-    idempotency_scope = _provider_run_idempotency_scope("hermes", agent_id, conversation_id, idempotency_key) if idempotency_key else ""
-    if idempotency_scope:
-        with _CODEX_ACTIVE_LOCK:
-            _prune_provider_run_idempotency()
-            existing = _PROVIDER_RUN_IDEMPOTENCY.get(idempotency_scope)
-            if existing:
-                return _provider_run_duplicate_response("hermes", conversation_id, idempotency_key, existing)
-
-    run_id = f"hermes-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
-    status_key = agent.get("statusKey") or agent.get("id")
-    events = queue.Queue()
-    meta = {
-        "runId": run_id,
-        "agentId": agent.get("id"),
-        "agentKey": agent_key,
-        "profile": profile,
-        "statusKey": status_key,
-        "conversationId": conversation_id,
-        "events": events,
-        "startedAt": int(time.time() * 1000),
-        "done": False,
-        "result": None,
-        "idempotencyKey": idempotency_key,
-    }
-    PROVIDER_RUN_BRIDGE.remember(meta)
-    _register_provider_run_idempotency(idempotency_scope, run_id, "hermes", agent_id, conversation_id, idempotency_key, "api")
-
-    def enqueue(event_name, payload=None):
-        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
-
-    def worker():
-        enqueue("run.started", {"providerPath": "api", "conversationId": conversation_id})
-        progress_id = f"hermes-progress-{run_id}"
-        _publish_hermes_progress(profile, agent.get("id") or agent_key, progress_id, {
-            "runId": run_id,
-            "status": "running",
-            "thinking": "Waiting for Hermes run events.",
-            "tools": [_hermes_task_breakdown_tool("running", "Hermes native API run queued.")],
-        }, conversation_id)
-        if hasattr(gateway_presence, "set_provider_event"):
-            gateway_presence.set_provider_event(status_key, "hermes", {"event": "run.started", "run_id": run_id})
-
-        def on_native_event(event):
-            event = event if isinstance(event, dict) else {}
-            name = _hermes_event_name(event)
-            provider_run_id = str(event.get("run_id") or event.get("runId") or "")
-            if provider_run_id:
-                PROVIDER_RUN_BRIDGE.update(run_id, turnId=provider_run_id)
-            payload = {
-                "runId": run_id,
-                "agentId": agent.get("id") or "",
-                "profile": profile,
-                "sessionId": event.get("session_id") or event.get("sessionId") or _get_hermes_session_id(profile, conversation_id) or "",
-                "turnId": provider_run_id or run_id,
-                "providerPath": "api",
-                "rawEvent": event,
-            }
-            text = _hermes_event_text(event)
-            if text:
-                payload["delta"] = text
-                payload["reply"] = text
-                payload["thinking"] = text
-            progress_state = {
-                "runId": run_id,
-                "sessionId": payload.get("sessionId") or "",
-                "turnId": payload.get("turnId") or "",
-                "status": name or "running",
-                "reply": payload.get("reply") or "",
-                "thinking": payload.get("thinking") or "",
-                "tools": [],
-            }
-            if name in {"message.delta", "message.delta.text", "response.delta", "delta", "message", "message.completed"}:
-                enqueue("message.delta", payload)
-            elif name in {"reasoning.available", "reasoning", "thinking"}:
-                enqueue("reasoning.available", payload)
-            elif name in {"tool.started", "tool.call", "tool"}:
-                tool_card = _hermes_api_tool_card(event, "running", f"{run_id}:tool")
-                progress_state["tools"] = [tool_card]
-                enqueue("tool.started", {**payload, "toolCard": tool_card})
-            elif name in {"tool.completed", "tool.result"}:
-                tool_card = _hermes_api_tool_card(event, "done", f"{run_id}:tool")
-                progress_state["tools"] = [tool_card]
-                enqueue("tool.completed", {**payload, "toolCard": tool_card})
-            elif name == "tool.failed":
-                tool_card = _hermes_api_tool_card(event, "error", f"{run_id}:tool")
-                progress_state["tools"] = [tool_card]
-                enqueue("tool.failed", {**payload, "toolCard": tool_card})
-            _publish_hermes_progress(profile, agent.get("id") or agent_key, progress_id, progress_state, conversation_id)
-
-        run_body = dict(body)
-        run_body["_onHermesApiEvent"] = on_native_event
-        run_body.setdefault("fromType", "human")
-        run_body.setdefault("fromDisplayName", "User")
-        run_body.setdefault("sourceApp", "virtual-office")
-        run_body.setdefault("sourceSurface", "chat-window")
-        run_body.setdefault("sourceLabel", "Virtual Office Chat")
-        try:
-            result = _handle_hermes_chat(run_body)
-        except Exception as exc:
-            result = {"ok": False, "error": str(exc), "_status": 500}
-        terminal_payload = _hermes_stream_event_payload(run_id, agent, profile, result, conversationId=conversation_id)
-        if result.get("approval"):
-            enqueue("approval.required", terminal_payload)
-        status = str(result.get("status") or "").lower()
-        if result.get("ok"):
-            enqueue("run.completed", terminal_payload)
-            presence_event = "run.completed"
-        elif status in {"cancelled", "canceled"}:
-            enqueue("run.cancelled", terminal_payload)
-            presence_event = "run.cancelled"
-        else:
-            terminal_payload["error"] = result.get("error") or result.get("reply") or "Hermes run failed"
-            enqueue("run.failed", terminal_payload)
-            presence_event = "run.failed"
-        if hasattr(gateway_presence, "set_provider_event"):
-            gateway_presence.set_provider_event(status_key, "hermes", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
-        PROVIDER_RUN_BRIDGE.update(
-            run_id,
-            done=True,
-            result=result,
-            sessionId=result.get("sessionId") or "",
-            turnId=result.get("runId") or run_id,
-        )
-        _finish_provider_run_idempotency(idempotency_scope, result)
-        threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
-
-    threading.Thread(target=worker, daemon=True, name=f"hermes-run-{run_id}").start()
-    return {
-        "ok": True,
-        "runId": run_id,
-        "providerPath": "api",
-        "conversationId": conversation_id,
-        "idempotencyKey": idempotency_key,
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "hermes", "profile": profile},
-    }
-
-
-def _handle_hermes_run_events(handler, run_id):
-    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Hermes")
-
-
-def _handle_hermes_run_stop(body):
-    run_id = str(body.get("runId") or "").strip()
-    meta = PROVIDER_RUN_BRIDGE.get(run_id)
-    hermes_cfg = VO_CONFIG.get("hermes", {})
-    result = {"ok": False, "error": "Hermes run not found", "_status": 404}
-    if meta:
-        provider_run_id = str((meta.get("result") or {}).get("runId") or meta.get("turnId") or run_id)
-        if hermes_cfg.get("apiEnabled"):
-            try:
-                result = _hermes_api_client().stop_run(provider_run_id)
-                result = {"ok": result.get("ok", True), "status": "cancelled", "runId": provider_run_id, "providerPath": "api", **result}
-            except Exception as exc:
-                result = {"ok": False, "error": str(exc), "runId": provider_run_id, "providerPath": "api", "_status": 500}
-        else:
-            result = {"ok": False, "error": "Hermes native API stop is unavailable", "providerPath": "api", "_status": 409}
-        event_name = "run.cancelled" if result.get("ok") else "run.failed"
-        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, {
-            "runId": run_id,
-            "agentId": meta.get("agentId") or "",
-            "profile": meta.get("profile") or "",
-            "conversationId": meta.get("conversationId") or "",
-            "status": result.get("status") or "",
-            "error": result.get("error") or "",
-            "providerPath": "api",
-        })
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-    return result
-
-
 def _handle_hermes_history_clear(body):
     body = body or {}
     agent = _get_hermes_agent(body.get("agentId") or body.get("key") or "hermes-default") or {}
@@ -1964,10 +1753,6 @@ _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
 _CODEX_ACTIVE_OPERATIONS = {}
-_CODEX_RUN_IDEMPOTENCY = {}
-_CODEX_RUN_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000
-_PROVIDER_RUN_IDEMPOTENCY = {}
-_PROVIDER_RUN_IDEMPOTENCY_TTL_MS = 10 * 60 * 1000
 
 _CODEX_SECRET_KEYS = {"authorization", "cookie", "token", "api_key", "apikey", "password", "secret", "access_token", "refresh_token"}
 _CODEX_MAX_EVENT_TEXT = 12000
@@ -2122,86 +1907,6 @@ def _codex_idempotency_key(body):
     if not value:
         return ""
     return value[:200]
-
-
-def _codex_idempotency_scope(agent_id, conversation_id, key):
-    return f"{agent_id}\n{conversation_id}\n{key}"
-
-
-def _prune_codex_idempotency(now_ms=None):
-    now_ms = int(now_ms or time.time() * 1000)
-    for key, entry in list(_CODEX_RUN_IDEMPOTENCY.items()):
-        if now_ms - int((entry or {}).get("ts") or 0) > _CODEX_RUN_IDEMPOTENCY_TTL_MS:
-            _CODEX_RUN_IDEMPOTENCY.pop(key, None)
-
-
-def _provider_run_idempotency_key(body):
-    value = str((body or {}).get("idempotencyKey") or (body or {}).get("requestId") or "").strip()
-    if not value:
-        return ""
-    return value[:200]
-
-
-def _provider_run_idempotency_scope(provider_kind, agent_id, conversation_id, key):
-    return f"{provider_kind}\n{agent_id}\n{conversation_id}\n{key}"
-
-
-def _prune_provider_run_idempotency(now_ms=None):
-    now_ms = int(now_ms or time.time() * 1000)
-    for key, entry in list(_PROVIDER_RUN_IDEMPOTENCY.items()):
-        if now_ms - int((entry or {}).get("ts") or 0) > _PROVIDER_RUN_IDEMPOTENCY_TTL_MS:
-            _PROVIDER_RUN_IDEMPOTENCY.pop(key, None)
-
-
-def _provider_run_duplicate_response(provider_kind, conversation_id, idempotency_key, entry):
-    entry = entry if isinstance(entry, dict) else {}
-    provider_path = entry.get("providerPath") or provider_kind
-    if not entry.get("done") and entry.get("runId"):
-        return {
-            "ok": True,
-            "status": "duplicate",
-            "runId": entry.get("runId"),
-            "conversationId": conversation_id,
-            "idempotencyKey": idempotency_key,
-            "providerPath": provider_path,
-        }
-    return {
-        "ok": True,
-        "status": "duplicate_completed",
-        "runId": entry.get("runId") or "",
-        "conversationId": conversation_id,
-        "idempotencyKey": idempotency_key,
-        "result": entry.get("result") or {},
-        "providerPath": provider_path,
-    }
-
-
-def _register_provider_run_idempotency(scope, run_id, provider_kind, agent_id, conversation_id, idempotency_key, provider_path):
-    if not scope:
-        return
-    with _CODEX_ACTIVE_LOCK:
-        _PROVIDER_RUN_IDEMPOTENCY[scope] = {
-            "runId": run_id,
-            "providerKind": provider_kind,
-            "agentId": agent_id,
-            "conversationId": conversation_id,
-            "idempotencyKey": idempotency_key,
-            "providerPath": provider_path,
-            "ts": int(time.time() * 1000),
-            "done": False,
-            "result": None,
-        }
-
-
-def _finish_provider_run_idempotency(scope, result):
-    if not scope:
-        return
-    with _CODEX_ACTIVE_LOCK:
-        entry = _PROVIDER_RUN_IDEMPOTENCY.get(scope)
-        if entry:
-            entry["done"] = True
-            entry["result"] = result if isinstance(result, dict) else {}
-            entry["ts"] = int(time.time() * 1000)
 
 
 def _codex_git_paths(workspace):
@@ -2422,6 +2127,8 @@ def _codex_stream_event_payload(run_id, agent, record=None, result=None, **extra
             payload["thinking"] = visible_thinking
     if record:
         payload["activity"] = record
+        if record.get("eventClass"):
+            payload["eventClass"] = record.get("eventClass")
     if result:
         payload.update({
             "reply": result.get("reply") or "",
@@ -2457,191 +2164,6 @@ def _codex_activity_bridge_event_name(record):
     if event_type in {"turn", "run"} and status in {"error", "failed", "failure"}:
         return "run.failed"
     return "provider.activity"
-
-
-def _handle_codex_run_start(body):
-    """Start a Codex message in the background and expose legacy activity over SSE."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "codex-local"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-    agent = _get_codex_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Codex agent '{agent_key}' not found", "_status": 404}
-    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
-    if not conversation_id:
-        return {"ok": False, "status": "invalid_request", "error": "conversationId is required", "_status": 400}
-
-    agent_id = agent.get("id") or agent_key
-    idempotency_key = _codex_idempotency_key(body)
-    idempotency_scope = _codex_idempotency_scope(agent_id, conversation_id, idempotency_key) if idempotency_key else ""
-    if idempotency_scope:
-        with _CODEX_ACTIVE_LOCK:
-            _prune_codex_idempotency()
-            existing = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
-            if existing:
-                if not existing.get("done") and existing.get("runId"):
-                    return {
-                        "ok": True,
-                        "status": "duplicate",
-                        "runId": existing.get("runId"),
-                        "conversationId": conversation_id,
-                        "idempotencyKey": idempotency_key,
-                        "providerPath": "codex-app-server",
-                    }
-                return {
-                    "ok": True,
-                    "status": "duplicate_completed",
-                    "runId": existing.get("runId") or "",
-                    "conversationId": conversation_id,
-                    "idempotencyKey": idempotency_key,
-                    "result": existing.get("result") or {},
-                    "providerPath": "codex-app-server",
-                }
-
-    run_id = f"codex-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
-    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-    status_key = agent.get("statusKey") or agent.get("id")
-    events = queue.Queue()
-    meta = {
-        "runId": run_id,
-        "agentId": agent.get("id"),
-        "agentKey": agent_key,
-        "profile": profile,
-        "statusKey": status_key,
-        "conversationId": conversation_id,
-        "events": events,
-        "startedAt": int(time.time() * 1000),
-        "done": False,
-        "result": None,
-        "idempotencyKey": idempotency_key,
-    }
-    PROVIDER_RUN_BRIDGE.remember(meta)
-    if idempotency_scope:
-        with _CODEX_ACTIVE_LOCK:
-            _CODEX_RUN_IDEMPOTENCY[idempotency_scope] = {
-                "runId": run_id,
-                "agentId": agent_id,
-                "conversationId": conversation_id,
-                "idempotencyKey": idempotency_key,
-                "ts": int(time.time() * 1000),
-                "done": False,
-                "result": None,
-            }
-
-    def enqueue(event_name, payload=None):
-        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
-
-    def worker():
-        enqueue("run.started", {"providerPath": "codex-app-server", "conversationId": conversation_id})
-        progress_id = f"codex-progress-{run_id}"
-        _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, {
-            "runId": run_id,
-            "status": "running",
-            "thinking": "Waiting for Codex run events.",
-        })
-        if hasattr(gateway_presence, "set_provider_event"):
-            gateway_presence.set_provider_event(status_key, "codex", {"event": "run.started", "run_id": run_id})
-
-        def on_activity(record):
-            progress_state = {
-                "runId": run_id,
-                "threadId": record.get("threadId") or meta.get("threadId") or "",
-                "turnId": record.get("turnId") or meta.get("turnId") or "",
-                "status": record.get("status") or "running",
-                "reply": record.get("text") or "",
-                "thinking": _provider_visible_thinking("codex", {**record, "thinking": record.get("text")}) if record.get("type") in {"reasoning", "thinking"} else "",
-                "tools": [record] if record.get("type") in {"activity", "tool", "command"} else [],
-                "approval": record if record.get("type") == "interaction" and record.get("status") == "pending" else None,
-            }
-            _append_codex_progress_comm_event(agent, agent.get("id") or agent_key, conversation_id, progress_id, progress_state)
-            PROVIDER_RUN_BRIDGE.update(
-                run_id,
-                threadId=record.get("threadId") or meta.get("threadId") or "",
-                turnId=record.get("turnId") or meta.get("turnId") or "",
-            )
-            event_name = _codex_activity_bridge_event_name(record)
-            enqueue(event_name, _codex_stream_event_payload(run_id, agent, record))
-            if hasattr(gateway_presence, "set_provider_event"):
-                gateway_presence.set_provider_event(status_key, "codex", {
-                    "event": event_name,
-                    "run_id": run_id,
-                    "thread_id": record.get("threadId") or "",
-                    "turn_id": record.get("turnId") or "",
-                    "status": record.get("status") or "",
-                })
-
-        run_body = dict(body)
-        run_body["_streamRunId"] = run_id
-        run_body["_onActivity"] = on_activity
-        run_body.setdefault("fromType", "human")
-        run_body.setdefault("fromDisplayName", "User")
-        run_body.setdefault("sourceApp", "virtual-office")
-        run_body.setdefault("sourceSurface", "chat-window")
-        run_body.setdefault("sourceLabel", "Virtual Office Chat")
-        try:
-            result = _handle_codex_chat(run_body)
-        except Exception as exc:
-            result = {"ok": False, "status": "execution_failed", "error": str(exc), "_status": 500}
-        _remove_comm_progress_events("codex-progress", progress_id, conversation_id)
-        terminal_payload = _codex_stream_event_payload(run_id, agent, result=result, conversationId=conversation_id)
-        status = str(result.get("status") or "").lower()
-        if result.get("ok"):
-            enqueue("run.completed", terminal_payload)
-            presence_event = "run.completed"
-        elif status in {"cancelled", "canceled"}:
-            enqueue("run.cancelled", terminal_payload)
-            presence_event = "run.cancelled"
-        else:
-            terminal_payload["error"] = result.get("error") or result.get("reply") or "Codex run failed"
-            enqueue("run.failed", terminal_payload)
-            presence_event = "run.failed"
-        if hasattr(gateway_presence, "set_provider_event"):
-            gateway_presence.set_provider_event(status_key, "codex", {"event": presence_event, "run_id": run_id, "error": terminal_payload.get("error") or ""})
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-        if idempotency_scope:
-            with _CODEX_ACTIVE_LOCK:
-                entry = _CODEX_RUN_IDEMPOTENCY.get(idempotency_scope)
-                if entry:
-                    entry["done"] = True
-                    entry["result"] = result
-                    entry["ts"] = int(time.time() * 1000)
-        threading.Timer(600, PROVIDER_RUN_BRIDGE.clear, args=(run_id,)).start()
-
-    threading.Thread(target=worker, daemon=True, name=f"codex-run-{run_id}").start()
-    return {
-        "ok": True,
-        "runId": run_id,
-        "providerPath": "codex-app-server",
-        "conversationId": conversation_id,
-        "idempotencyKey": idempotency_key,
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "codex", "profile": profile},
-    }
-
-
-def _handle_codex_run_events(handler, run_id):
-    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Codex")
-
-
-def _handle_codex_run_stop(body):
-    run_id = str(body.get("runId") or "").strip()
-    meta = PROVIDER_RUN_BRIDGE.get(run_id)
-    if meta:
-        body = {**body, "agentId": body.get("agentId") or meta.get("agentId") or meta.get("agentKey") or "codex-local", "conversationId": body.get("conversationId") or meta.get("conversationId") or ""}
-    result = _handle_codex_cancel(body)
-    if meta:
-        event_name = "run.cancelled" if result.get("ok") else "run.failed"
-        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, {
-            "runId": run_id,
-            "agentId": meta.get("agentId") or "",
-            "profile": meta.get("profile") or "",
-            "conversationId": meta.get("conversationId") or "",
-            "status": result.get("status") or "",
-            "error": result.get("error") or "",
-            "providerPath": "codex-app-server",
-        })
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-    return result
 
 
 def _handle_codex_activity(query):
@@ -3397,131 +2919,6 @@ def _remove_claude_code_progress_messages(messages):
     return _remove_provider_progress_messages(messages, "claude-code")
 
 
-class ProviderRunBridge:
-    """Provider-neutral run registry and SSE event distributor."""
-
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._runs = {}
-
-    def remember(self, meta):
-        if not isinstance(meta, dict) or not meta.get("runId"):
-            return
-        with self._lock:
-            self._runs[str(meta["runId"])] = meta
-
-    def get(self, run_id):
-        with self._lock:
-            meta = self._runs.get(str(run_id or ""))
-            return meta if isinstance(meta, dict) else None
-
-    def clear(self, run_id):
-        with self._lock:
-            self._runs.pop(str(run_id or ""), None)
-
-    def update(self, run_id, **updates):
-        with self._lock:
-            meta = self._runs.get(str(run_id or ""))
-            if isinstance(meta, dict):
-                meta.update({k: v for k, v in updates.items() if v is not None})
-            return meta if isinstance(meta, dict) else None
-
-    def emit(self, run_id, event_name, payload=None):
-        meta = self.get(run_id)
-        if not meta:
-            return False
-        events = meta.get("events")
-        if not isinstance(events, queue.Queue):
-            return False
-        payload = payload if isinstance(payload, dict) else {}
-        payload.setdefault("runId", run_id)
-        payload.setdefault("agentId", meta.get("agentId") or "")
-        payload.setdefault("profile", meta.get("profile") or "")
-        try:
-            events.put_nowait({"event": event_name, "data": payload, "ts": int(time.time() * 1000)})
-            return True
-        except Exception:
-            return False
-
-    def stream_events(self, handler, run_id, missing_provider_label="Provider"):
-        meta = self.get(run_id)
-        if not meta:
-            handler.send_response(404)
-            handler.send_header("Content-Type", "text/event-stream")
-            handler.send_header("Cache-Control", "no-cache")
-            handler.send_header("Access-Control-Allow-Origin", "*")
-            handler.end_headers()
-            payload = json.dumps({"error": f"{missing_provider_label} run not found"}, ensure_ascii=False)
-            handler.wfile.write(f"event: run.failed\ndata: {payload}\n\n".encode("utf-8"))
-            return
-
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/event-stream")
-        handler.send_header("Cache-Control", "no-cache")
-        handler.send_header("Connection", "keep-alive")
-        handler.send_header("Access-Control-Allow-Origin", "*")
-        handler.end_headers()
-
-        events = meta.get("events")
-        if not isinstance(events, queue.Queue):
-            return
-
-        last_keepalive = time.time()
-        try:
-            while True:
-                try:
-                    item = events.get(timeout=0.5)
-                except queue.Empty:
-                    if meta.get("done") and events.empty():
-                        result = meta.get("result") if isinstance(meta.get("result"), dict) else {}
-                        status = str(result.get("status") or "").lower()
-                        event_name = "run.completed" if result.get("ok") else ("run.cancelled" if status in {"cancelled", "canceled"} else "run.failed")
-                        payload = result if isinstance(result, dict) else {}
-                        payload = dict(payload)
-                        payload.setdefault("runId", run_id)
-                        payload.setdefault("agentId", meta.get("agentId") or "")
-                        payload.setdefault("profile", meta.get("profile") or "")
-                        encoded = json.dumps(payload, ensure_ascii=False, default=str)
-                        handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-                        handler.wfile.flush()
-                        break
-                    if time.time() - last_keepalive >= 10:
-                        handler.wfile.write(b": keepalive\n\n")
-                        handler.wfile.flush()
-                        last_keepalive = time.time()
-                    continue
-
-                event_name = str(item.get("event") or "message")
-                payload = item.get("data") if isinstance(item.get("data"), dict) else {}
-                encoded = json.dumps(payload, ensure_ascii=False, default=str)
-                handler.wfile.write(f"event: {event_name}\ndata: {encoded}\n\n".encode("utf-8"))
-                handler.wfile.flush()
-                if event_name in {"run.completed", "run.failed", "run.cancelled", "run.canceled"}:
-                    break
-        except (BrokenPipeError, ConnectionError, OSError):
-            pass
-        finally:
-            if meta.get("done"):
-                self.clear(run_id)
-
-
-PROVIDER_RUN_BRIDGE = ProviderRunBridge()
-CLAUDE_CODE_STREAM_RUNS_LOCK = PROVIDER_RUN_BRIDGE._lock
-CLAUDE_CODE_STREAM_RUNS = PROVIDER_RUN_BRIDGE._runs
-
-
-def _remember_claude_code_stream_run(meta):
-    PROVIDER_RUN_BRIDGE.remember(meta)
-
-
-def _get_claude_code_stream_run(run_id):
-    return PROVIDER_RUN_BRIDGE.get(run_id)
-
-
-def _clear_claude_code_stream_run(run_id):
-    PROVIDER_RUN_BRIDGE.clear(run_id)
-
-
 def _claude_code_visible_thinking(run_state):
     return _provider_visible_thinking("claude-code", run_state)
 
@@ -3556,176 +2953,6 @@ def _claude_code_tool_stream_key(tool, idx=0):
     if not isinstance(tool, dict):
         return f"claude-code-tool-{idx}"
     return str(tool.get("id") or f"{idx}:{tool.get('name') or 'tool'}:{json.dumps(tool.get('arguments') or {}, sort_keys=True, default=str)[:120]}")
-
-
-def _handle_claude_code_run_start(body):
-    """Start a Claude Code message in the background and expose progress over SSE."""
-    message = (body.get("message") or "").strip()
-    agent_key = body.get("agentId") or body.get("key") or body.get("sessionKey") or "claude-code-local"
-    if not message:
-        return {"ok": False, "error": "message is required", "_status": 400}
-
-    agent = _get_claude_code_agent(agent_key)
-    if not agent:
-        return {"ok": False, "error": f"Claude Code agent '{agent_key}' not found", "_status": 404}
-
-    profile = agent.get("profile") or agent.get("providerAgentId") or "local"
-    conversation_id = str(body.get("conversationId") or body.get("threadId") or "").strip()
-    agent_id = agent.get("id") or agent_key
-    idempotency_key = _provider_run_idempotency_key(body)
-    idempotency_scope = _provider_run_idempotency_scope("claude-code", agent_id, conversation_id, idempotency_key) if idempotency_key else ""
-    if idempotency_scope:
-        with _CODEX_ACTIVE_LOCK:
-            _prune_provider_run_idempotency()
-            existing = _PROVIDER_RUN_IDEMPOTENCY.get(idempotency_scope)
-            if existing:
-                return _provider_run_duplicate_response("claude-code", conversation_id, idempotency_key, existing)
-
-    run_id = f"claude-code-{int(time.time() * 1000)}-{str(uuid.uuid4())[:8]}"
-    progress_id = f"claude-code-progress-{run_id}"
-    events = queue.Queue()
-    status_key = agent.get("statusKey") or agent.get("id")
-    meta = {
-        "runId": run_id,
-        "agentId": agent.get("id"),
-        "agentKey": agent_key,
-        "profile": profile,
-        "statusKey": status_key,
-        "conversationId": conversation_id,
-        "events": events,
-        "startedAt": int(time.time() * 1000),
-        "done": False,
-        "result": None,
-        "idempotencyKey": idempotency_key,
-    }
-    _remember_claude_code_stream_run(meta)
-    _register_provider_run_idempotency(idempotency_scope, run_id, "claude-code", agent_id, conversation_id, idempotency_key, "claude-code-cli")
-
-    def enqueue(event_name, payload=None):
-        PROVIDER_RUN_BRIDGE.emit(run_id, event_name, payload)
-
-    def worker():
-        last_reply = ""
-        last_thinking = ""
-        last_token_usage_signature = ""
-        seen_tools = {}
-        enqueue("run.started", {"providerPath": "claude-code-cli"})
-        _publish_claude_code_progress(profile, agent.get("id") or agent_key, progress_id, {
-            "runId": run_id,
-            "status": "running",
-            "thinking": "Waiting for Claude Code stream events.",
-        }, conversation_id)
-        if hasattr(gateway_presence, "set_provider_event"):
-            gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.started", "run_id": run_id})
-
-        def on_progress(run_state):
-            nonlocal last_reply, last_thinking, last_token_usage_signature
-            run_state = run_state if isinstance(run_state, dict) else {}
-            PROVIDER_RUN_BRIDGE.update(
-                run_id,
-                sessionId=run_state.get("sessionId") or run_state.get("threadId") or meta.get("sessionId") or "",
-                turnId=run_state.get("runId") or meta.get("turnId") or "",
-            )
-            _publish_claude_code_progress(profile, agent.get("id") or agent_key, progress_id, {
-                **run_state,
-                "runId": run_id,
-                "turnId": run_state.get("runId") or meta.get("turnId") or "",
-            }, conversation_id)
-            if hasattr(gateway_presence, "set_provider_event"):
-                gateway_presence.set_provider_event(status_key, "claude-code", {
-                    "event": "turn.stream",
-                    "session_id": run_state.get("sessionId") or run_state.get("threadId") or "",
-                    "run_id": run_state.get("runId") or run_id,
-                    "status": run_state.get("status") or "",
-                })
-
-            token_usage = run_state.get("tokenUsage") if isinstance(run_state.get("tokenUsage"), dict) else {}
-            if token_usage:
-                token_usage_signature = json.dumps(token_usage, sort_keys=True, default=str)
-                if token_usage_signature != last_token_usage_signature:
-                    last_token_usage_signature = token_usage_signature
-                    enqueue("session.metrics", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
-
-            reply = str(run_state.get("reply") or "")
-            if reply and reply != last_reply:
-                delta = reply[len(last_reply):] if reply.startswith(last_reply) else ""
-                last_reply = reply
-                enqueue("message.delta", _claude_code_stream_event_payload(run_id, agent, profile, run_state, delta=delta))
-
-            thinking = _claude_code_visible_thinking(run_state)
-            if thinking and thinking != last_thinking:
-                last_thinking = thinking
-                enqueue("reasoning.available", _claude_code_stream_event_payload(run_id, agent, profile, run_state))
-
-            for idx, tool in enumerate(run_state.get("tools") or []):
-                if not isinstance(tool, dict):
-                    continue
-                key = _claude_code_tool_stream_key(tool, idx)
-                status = str(tool.get("status") or "").lower()
-                is_terminal = status in {"done", "error", "failed"}
-                prior = seen_tools.get(key)
-                if not prior:
-                    enqueue("tool.started", _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                    if hasattr(gateway_presence, "set_provider_event"):
-                        gateway_presence.set_provider_event(status_key, "claude-code", {"event": "tool.started", "run_id": run_id, "toolCallId": key, "name": tool.get("name") or "Claude tool"})
-                if is_terminal and (not prior or prior.get("status") != status or prior.get("result") != tool.get("result") or prior.get("error") != tool.get("error")):
-                    event_name = "tool.failed" if status in {"error", "failed"} or tool.get("error") else "tool.completed"
-                    enqueue(event_name, _claude_code_stream_event_payload(run_id, agent, profile, run_state, toolCard=tool, toolCallId=key))
-                    if hasattr(gateway_presence, "set_provider_event"):
-                        gateway_presence.set_provider_event(status_key, "claude-code", {"event": event_name, "run_id": run_id, "toolCallId": key, "name": tool.get("name") or "Claude tool"})
-                seen_tools[key] = dict(tool)
-
-        run_body = dict(body)
-        run_body["_streamRunId"] = run_id
-        run_body["_streamProgressId"] = progress_id
-        run_body["_onProgress"] = on_progress
-        try:
-            result = _handle_claude_code_chat(run_body)
-        except Exception as exc:
-            result = {"ok": False, "error": str(exc), "_status": 500}
-        history = _remove_claude_code_progress_messages(_load_claude_code_history(profile, conversation_id))
-        _save_claude_code_history(profile, history, conversation_id, result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "")
-        token_usage = result.get("tokenUsage") if isinstance(result.get("tokenUsage"), dict) else {}
-        payload = {
-            "runId": run_id,
-            "agentId": agent.get("id") or "",
-            "profile": profile,
-            "sessionId": result.get("sessionId") or _get_claude_code_session_id(profile, conversation_id) or "",
-            "turnId": result.get("runId") or result.get("sessionId") or meta.get("turnId") or "",
-            "reply": result.get("reply") or "",
-            "tools": result.get("tools") or [],
-            "thinking": result.get("thinking") or "",
-            "tokenUsage": token_usage,
-            "contextUsed": _provider_context_used_from_token_usage(token_usage),
-            "contextWindow": _provider_context_window_from_token_usage(token_usage),
-            "providerPath": result.get("providerPath") or "claude-code-cli",
-        }
-        if result.get("ok"):
-            enqueue("run.completed", payload)
-            if hasattr(gateway_presence, "set_provider_event"):
-                gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.completed", "run_id": run_id})
-        else:
-            payload["error"] = result.get("error") or result.get("reply") or "Claude Code run failed"
-            enqueue("run.failed", payload)
-            if hasattr(gateway_presence, "set_provider_event"):
-                gateway_presence.set_provider_event(status_key, "claude-code", {"event": "run.failed", "run_id": run_id, "error": payload["error"]})
-        PROVIDER_RUN_BRIDGE.update(run_id, done=True, result=result)
-        _finish_provider_run_idempotency(idempotency_scope, result)
-        threading.Timer(600, _clear_claude_code_stream_run, args=(run_id,)).start()
-
-    threading.Thread(target=worker, daemon=True, name=f"claude-code-run-{run_id}").start()
-    return {
-        "ok": True,
-        "runId": run_id,
-        "providerPath": "claude-code-cli",
-        "conversationId": conversation_id,
-        "idempotencyKey": idempotency_key,
-        "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": "claude-code", "profile": profile},
-    }
-
-
-def _handle_claude_code_run_events(handler, run_id):
-    PROVIDER_RUN_BRIDGE.stream_events(handler, run_id, "Claude Code")
 
 
 def _handle_claude_code_interrupt(body):

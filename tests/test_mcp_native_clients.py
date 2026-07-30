@@ -141,7 +141,7 @@ def test_registry_persists_codex_and_claude_registration_status(monkeypatch, tmp
     calls = []
 
     def fake_register(client, server, claude_scope="user"):
-        calls.append((client, server["name"], claude_scope))
+        calls.append((client, server["name"], server["command"], server.get("args"), claude_scope))
         return {"ok": True}
 
     monkeypatch.setattr(mcp_native_clients, "register_native_client", fake_register)
@@ -160,4 +160,8 @@ def test_registry_persists_codex_and_claude_registration_status(monkeypatch, tmp
     assert codex["server"]["codex"]["registered"] is True
     assert claude["server"]["codex"]["registered"] is True
     assert claude["server"]["claude"]["registered"] is True
-    assert calls == [("codex", "echo", "user"), ("claude", "echo", "user")]
+    launcher = str(tmp_path / "mcp" / "echo" / "run-mcp.sh")
+    assert calls == [
+        ("codex", "echo", launcher, None, "user"),
+        ("claude", "echo", launcher, None, "user"),
+    ]

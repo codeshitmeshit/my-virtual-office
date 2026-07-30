@@ -57,7 +57,11 @@ def fixture(count):
     deadline = time.time() + 5
     while time.time() < deadline:
         snapshots = repository.snapshots()
-        if len(snapshots) == count and all(item.get("terminal") for item in snapshots.values()):
+        if (
+            len(snapshots) == count
+            and all(item.get("terminal") for item in snapshots.values())
+            and coordinator.diagnostics()["activeHandleCount"] == 0
+        ):
             break
         time.sleep(0.001)
     total_ns = time.perf_counter_ns() - overall

@@ -83,6 +83,28 @@ class ProviderEventJournalTests(unittest.TestCase):
         malformed = journal.publish("codex", "agent", "conv", "message.delta", "not-a-dict", "run-2")
         self.assertEqual(malformed["data"]["runId"], "run-2")
 
+    def test_public_publish_sanitizes_even_when_payload_claims_fast_path_marker(self):
+        journal = ProviderEventJournal()
+        item = journal.publish("codex", "agent", "conv", "message.delta", {
+            "eventClass": "transient",
+            "authorization": "Bearer secret",
+            "activity": {"api_key": "secret", "text": "visible"},
+        }, "run")
+        self.assertEqual(item["data"]["eventClass"], "transient")
+        self.assertNotIn("authorization", item["data"])
+        self.assertNotIn("api_key", item["data"]["activity"])
+
+    def test_internal_sanitized_publish_preserves_indexes_and_skips_second_sanitize(self):
+        journal = ProviderEventJournal()
+        item = journal._publish_sanitized("codex", "agent", "conv", "message.delta", {
+            "eventClass": "transient",
+            "delta": "A",
+            "activity": {"text": "A"},
+        }, "run")
+        self.assertEqual(item["data"]["eventClass"], "transient")
+        self.assertEqual(journal.run_events_after("run"), [item])
+        self.assertEqual(journal.conversation_events_after("codex", "agent", "conv"), [item])
+
     def test_conversation_index_includes_unscoped_provider_events(self):
         journal = ProviderEventJournal()
         journal.publish("hermes", "agent", "", "provider.activity", {"kind": "global"})

@@ -24,10 +24,15 @@ def test_mcp_registry_saves_and_redacts_env(monkeypatch, tmp_path):
 
     raw = json.loads((tmp_path / "mcp-registry.json").read_text())
     assert raw["servers"]["vibe-trading"]["env"] == {"VIBE_MODE": "research"}
+    launcher = tmp_path / "mcp" / "vibe-trading" / "run-mcp.sh"
+    assert launcher.is_file()
+    assert launcher.stat().st_mode & 0o111
+    assert "export VIBE_MODE=research" in launcher.read_text()
 
     listed = mcp_registry._handle_mcp_registry_list()
     assert listed["servers"][0]["envKeys"] == ["VIBE_MODE"]
     assert "env" not in listed["servers"][0]
+    assert listed["servers"][0]["launcherPath"] == str(launcher)
 
 
 def test_mcp_registry_registers_openclaw_with_config(monkeypatch, tmp_path):
@@ -36,6 +41,8 @@ def test_mcp_registry_registers_openclaw_with_config(monkeypatch, tmp_path):
 
     def fake_run(args, timeout=30):
         calls.append(args)
+        if args[:2] == ["mcp", "probe"]:
+            return {"ok": True, "data": {"servers": {"vibe-trading": {}}, "diagnostics": []}}
         return {"ok": True, "data": {}}
 
     monkeypatch.setattr(mcp_registry, "_run_openclaw", fake_run)
@@ -53,10 +60,44 @@ def test_mcp_registry_registers_openclaw_with_config(monkeypatch, tmp_path):
     assert result["ok"] is True
     assert calls[0][:3] == ["mcp", "set", "vibe-trading"]
     config = json.loads(calls[0][3])
-    assert config["command"] == "vibe-trading-mcp"
+    assert config["command"] == str(tmp_path / "mcp" / "vibe-trading" / "run-mcp.sh")
+    assert "args" not in config
     assert config["include"] == ["*"]
     assert calls[1] == ["mcp", "reload"]
+    assert calls[2] == ["mcp", "probe", "vibe-trading", "--json"]
     assert result["server"]["openclaw"]["registered"] is True
+    assert result["server"]["openclaw"]["available"] is True
+
+
+def test_mcp_registry_openclaw_registration_rejects_probe_diagnostics(monkeypatch, tmp_path):
+    monkeypatch.setattr(mcp_registry, "_status_dir", lambda: str(tmp_path))
+
+    def fake_run(args, timeout=30):
+        if args[:2] == ["mcp", "probe"]:
+            return {
+                "ok": True,
+                "stdout": json.dumps({"servers": {}, "diagnostics": [{"message": "Error: write EPIPE"}]}),
+                "data": {"servers": {}, "diagnostics": [{"message": "Error: write EPIPE"}]},
+            }
+        return {"ok": True, "data": {}}
+
+    monkeypatch.setattr(mcp_registry, "_run_openclaw", fake_run)
+    mcp_registry._handle_mcp_registry_save(
+        {
+            "name": "vibe-trading",
+            "transport": "stdio",
+            "command": "vibe-trading-mcp",
+        }
+    )
+
+    result = mcp_registry._handle_mcp_registry_register_openclaw("vibe-trading", {})
+
+    assert result["ok"] is False
+    assert result["openclaw"]["registered"] is True
+    assert result["openclaw"]["available"] is False
+    assert result["openclaw"]["probeError"] == "MCP command not found in PATH: vibe-trading-mcp"
+    listed = mcp_registry._handle_mcp_registry_list()
+    assert listed["servers"][0]["openclaw"]["available"] is False
 
 
 def test_mcp_registry_tracks_agent_assignments(monkeypatch, tmp_path):

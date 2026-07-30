@@ -1,0 +1,132 @@
+{
+  "compatibilityBounds": {
+    "globalEventRetention": 4000,
+    "runAndIdempotencyRetentionMs": 600000
+  },
+  "environment": {
+    "cpuCount": 4,
+    "platform": "Linux-6.8.0-117-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3"
+  },
+  "eventFixtures": [
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 10,
+      "lastEventId": 10,
+      "lockCallCountProxy": 11,
+      "peakAllocatedBytes": 13328,
+      "publishLatency": {
+        "maxNs": 129362,
+        "medianNs": 86937,
+        "p95Ns": 129362
+      },
+      "publishedEvents": 10,
+      "replayLatencyNs": 374105,
+      "replayScanUpperBound": 10,
+      "replayedEvents": 10,
+      "retainedBytesJson": 2682,
+      "retainedEvents": 10,
+      "selectionLockUpperBoundNs": 5761
+    },
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 1000,
+      "lastEventId": 1000,
+      "lockCallCountProxy": 1001,
+      "peakAllocatedBytes": 1382160,
+      "publishLatency": {
+        "maxNs": 702796,
+        "medianNs": 55336,
+        "p95Ns": 111252
+      },
+      "publishedEvents": 1000,
+      "replayLatencyNs": 45296466,
+      "replayScanUpperBound": 1000,
+      "replayedEvents": 1000,
+      "retainedBytesJson": 273676,
+      "retainedEvents": 1000,
+      "selectionLockUpperBoundNs": 222724
+    },
+    {
+      "firstRetainedEventId": 1,
+      "fixtureCount": 4000,
+      "lastEventId": 4000,
+      "lockCallCountProxy": 4001,
+      "peakAllocatedBytes": 5574064,
+      "publishLatency": {
+        "maxNs": 2101519,
+        "medianNs": 56923,
+        "p95Ns": 112136
+      },
+      "publishedEvents": 4000,
+      "replayLatencyNs": 240755047,
+      "replayScanUpperBound": 4000,
+      "replayedEvents": 4000,
+      "retainedBytesJson": 1104676,
+      "retainedEvents": 4000,
+      "selectionLockUpperBoundNs": 821769
+    }
+  ],
+  "implementation": "ProviderRunRepository + ProviderEventJournal",
+  "measurementNotes": [
+    "lockCallCountProxy counts public bridge lock acquisitions, not wall-clock lock hold instrumentation",
+    "provider and downstream call counts are zero because fixed fixtures use the in-memory bridge only",
+    "timings are comparative evidence; call counts and capacity bounds are release gates"
+  ],
+  "runFixtures": [
+    {
+      "adapterLaunches": 1,
+      "fixtureCount": 1,
+      "lockCallCountProxy": 5,
+      "operationLatency": {
+        "maxNs": 658126,
+        "medianNs": 658126,
+        "p95Ns": 658126
+      },
+      "peakAllocatedBytes": 6619,
+      "registeredRuns": 1,
+      "retainedBytesJson": 1068,
+      "retainedEvents": 2,
+      "terminalEvents": 1
+    },
+    {
+      "adapterLaunches": 20,
+      "fixtureCount": 20,
+      "lockCallCountProxy": 100,
+      "operationLatency": {
+        "maxNs": 675636,
+        "medianNs": 547808,
+        "p95Ns": 638706
+      },
+      "peakAllocatedBytes": 91959,
+      "registeredRuns": 20,
+      "retainedBytesJson": 21185,
+      "retainedEvents": 40,
+      "terminalEvents": 20
+    },
+    {
+      "adapterLaunches": 100,
+      "fixtureCount": 100,
+      "lockCallCountProxy": 500,
+      "operationLatency": {
+        "maxNs": 1980891,
+        "medianNs": 701785,
+        "p95Ns": 941947
+      },
+      "peakAllocatedBytes": 425016,
+      "registeredRuns": 100,
+      "retainedBytesJson": 106828,
+      "retainedEvents": 200,
+      "terminalEvents": 100
+    }
+  ],
+  "schema": 1,
+  "scopedReplayFixture": {
+    "replayLatencyNs": 433620,
+    "replayScanUpperBound": 40,
+    "retainedEvents": 4000,
+    "scopeCount": 100,
+    "selectionLockUpperBoundNs": 5313,
+    "targetEvents": 40
+  }
+}

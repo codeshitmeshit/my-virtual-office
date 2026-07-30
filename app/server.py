@@ -7266,6 +7266,7 @@ def _handle_codex_chat(body):
     reply_event_appended = {"done": False, "writing": False, "error": None, "operationError": None}
     reply_event_lock = threading.Lock()
     approval_delivery_failure = {"failed": False}
+    telemetry_marks = {"native": False, "displayable": False, "terminal": False}
 
     def append_reply_event(reply, metadata=None, ok=True):
         text = str(reply or "")
@@ -7351,11 +7352,15 @@ def _handle_codex_chat(body):
         return True
 
     def on_event(event):
-        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_native_event")
+        if not telemetry_marks["native"]:
+            telemetry_marks["native"] = True
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_native_event")
         event_class = classify_codex_event(event)
-        if event_class == "transient":
+        if event_class == "transient" and not telemetry_marks["displayable"]:
+            telemetry_marks["displayable"] = True
             _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "first_displayable_fragment")
-        if event_class == "terminal":
+        if event_class == "terminal" and not telemetry_marks["terminal"]:
+            telemetry_marks["terminal"] = True
             _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
         record = _CODEX_EVENT_FAST_PATH.process_event(
             agent_id,
@@ -7532,7 +7537,9 @@ def _handle_codex_chat(body):
             modified_files=modified_files,
             extra={"recoveredFromArchivedThread": result.get("recoveredFromArchivedThread")},
         )
-        _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
+        if not telemetry_marks["terminal"]:
+            telemetry_marks["terminal"] = True
+            _CODEX_FAST_PATH_TELEMETRY.mark(fast_scope_run_id, "provider_terminal")
         if normalized.get("busyReason"):
             _CODEX_FAST_PATH_TELEMETRY.increment_busy(normalized.get("busyReason"))
         normalized_terminal_fence = (
@@ -7638,6 +7645,8 @@ def _codex_stream_event_payload(run_id, agent, record=None, result=None, **extra
             payload["thinking"] = visible_thinking
     if record:
         payload["activity"] = record
+        if record.get("eventClass"):
+            payload["eventClass"] = record.get("eventClass")
     if result:
         payload.update({
             "reply": result.get("reply") or "",

@@ -172,16 +172,23 @@ def _normalize_server(body: dict[str, Any], existing: dict[str, Any] | None = No
 
 
 def _public_server(server: dict[str, Any]) -> dict[str, Any]:
+    from server_services import mcp_launchers
+
     item = dict(server)
     item["hasUsageGuide"] = bool(str(item.get("usageGuide") or "").strip())
     item.pop("usageGuide", None)
     if isinstance(item.get("env"), dict):
         item["envKeys"] = sorted(item["env"].keys())
         item.pop("env", None)
+    if item.get("transport") == "stdio":
+        item["launcherPath"] = str(mcp_launchers.launcher_path(_status_dir(), str(item.get("name") or "")))
     return item
 
 
 def _openclaw_config(server: dict[str, Any]) -> dict[str, Any]:
+    from server_services import mcp_launchers
+
+    server = mcp_launchers.client_config_server(_status_dir(), server)
     config: dict[str, Any] = {"disabled": bool(server.get("disabled", False))}
     if server.get("transport") == "stdio":
         config["command"] = server.get("command")
@@ -227,6 +234,34 @@ def _run_openclaw(args: list[str], timeout: int = 30) -> dict[str, Any]:
             "_status": 500,
         }
     return {"ok": True, "stdout": result.stdout, "stderr": result.stderr, "data": payload}
+
+
+def _probe_openclaw_mcp(name: str) -> dict[str, Any]:
+    result = _run_openclaw(["mcp", "probe", name, "--json"], timeout=30)
+    if not result.get("ok"):
+        return result
+    output = str(result.get("stdout") or "")
+    payload = result.get("data")
+    if payload is None:
+        json_start = output.find("{")
+        if json_start >= 0:
+            try:
+                payload = json.loads(output[json_start:])
+            except json.JSONDecodeError:
+                payload = None
+    diagnostics = payload.get("diagnostics") if isinstance(payload, dict) else None
+    if diagnostics:
+        first = diagnostics[0] if isinstance(diagnostics[0], dict) else {}
+        return {
+            "ok": False,
+            "error": str(first.get("message") or output or "OpenClaw MCP probe failed")[:2000],
+            "_status": 500,
+            "data": payload,
+        }
+    servers = payload.get("servers") if isinstance(payload, dict) else None
+    if isinstance(servers, dict) and name not in servers:
+        return {"ok": False, "error": "OpenClaw MCP probe did not report the server as available", "_status": 500, "data": payload}
+    return result
 
 
 def _get_server(name: str) -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -311,6 +346,8 @@ def _handle_mcp_registry_organize_guide(name: str) -> dict[str, Any]:
 
 
 def _handle_mcp_registry_save(body: dict[str, Any]) -> dict[str, Any]:
+    from server_services import mcp_launchers
+
     try:
         name = _safe_name(body.get("name"))
         registry = _load_registry()
@@ -318,6 +355,8 @@ def _handle_mcp_registry_save(body: dict[str, Any]) -> dict[str, Any]:
         server = _normalize_server(body, existing if isinstance(existing, dict) else None)
     except ValueError as exc:
         return {"ok": False, "error": str(exc), "_status": 400}
+    if server.get("transport") == "stdio":
+        mcp_launchers.ensure_stdio_launcher(_status_dir(), server)
     registry.setdefault("servers", {})[server["name"]] = server
     _save_registry(registry)
     return {"ok": True, "server": _public_server(server)}
@@ -337,9 +376,12 @@ def _handle_mcp_registry_delete(name: str) -> dict[str, Any]:
 
 
 def _handle_mcp_registry_register_openclaw(name: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    from server_services import mcp_launchers
+
     registry, server = _get_server(name)
     if not server:
         return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    command_error = mcp_launchers.stdio_command_error(server)
     config = _openclaw_config(server)
     result = _run_openclaw(["mcp", "set", server["name"], json.dumps(config, ensure_ascii=False)])
     if not result.get("ok"):
@@ -347,16 +389,31 @@ def _handle_mcp_registry_register_openclaw(name: str, body: dict[str, Any] | Non
     reload_result = _run_openclaw(["mcp", "reload"], timeout=15)
     server["openclaw"] = {
         "registered": True,
+        "available": False,
         "registeredAt": _now(),
         "reloaded": bool(reload_result.get("ok")),
         "reloadError": reload_result.get("error", ""),
     }
+    probe_result = _probe_openclaw_mcp(server["name"])
+    server["openclaw"]["available"] = bool(probe_result.get("ok"))
+    if not probe_result.get("ok"):
+        server["openclaw"]["probeError"] = command_error or probe_result.get("error", "")
     registry.setdefault("servers", {})[server["name"]] = server
     _save_registry(registry)
+    if not probe_result.get("ok"):
+        return {
+            "ok": False,
+            "error": probe_result.get("error", "OpenClaw MCP probe failed"),
+            "_status": probe_result.get("_status", 500),
+            "server": _public_server(server),
+            "openclaw": server["openclaw"],
+        }
     return {"ok": True, "server": _public_server(server), "openclaw": server["openclaw"]}
 
 
 def _handle_mcp_registry_register_native(name: str, client: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    from server_services import mcp_launchers
+
     registry, server = _get_server(name)
     if not server:
         return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
@@ -365,7 +422,7 @@ def _handle_mcp_registry_register_native(name: str, client: str, body: dict[str,
     options = body or {}
     result = mcp_native_clients.register_native_client(
         client,
-        server,
+        mcp_launchers.client_config_server(_status_dir(), server),
         claude_scope=str(options.get("scope") or "user"),
     )
     if not result.get("ok"):

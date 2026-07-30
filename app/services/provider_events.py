@@ -123,6 +123,26 @@ class ProviderEventJournal:
         name = canonical_event_name(event_name)
         cleaned = sanitize_payload(payload if isinstance(payload, dict) else {})
         cleaned = cleaned if isinstance(cleaned, dict) else {}
+        return self._publish_cleaned(provider_kind, agent_id, conversation_id, name, cleaned, run_id)
+
+    def _publish_sanitized(
+        self,
+        provider_kind: str,
+        agent_id: str,
+        conversation_id: str,
+        event_name: str,
+        payload: dict[str, Any] | None = None,
+        run_id: str = "",
+    ) -> dict[str, Any] | None:
+        provider_kind = str(provider_kind or "").strip().lower()[:80]
+        agent_id = str(agent_id or "").strip()[:160]
+        conversation_id = str(conversation_id or "").strip()[:200]
+        run_id = str(run_id or "").strip()[:200]
+        name = canonical_event_name(event_name)
+        cleaned = dict(payload) if isinstance(payload, dict) else {}
+        return self._publish_cleaned(provider_kind, agent_id, conversation_id, name, cleaned, run_id)
+
+    def _publish_cleaned(self, provider_kind: str, agent_id: str, conversation_id: str, name: str, cleaned: dict[str, Any], run_id: str):
         cleaned.setdefault("providerKind", provider_kind)
         cleaned.setdefault("agentId", agent_id)
         cleaned.setdefault("conversationId", conversation_id)

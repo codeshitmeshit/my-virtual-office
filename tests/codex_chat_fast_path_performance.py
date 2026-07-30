@@ -278,6 +278,7 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
         "PROVIDER_EVENT_JOURNAL": server.PROVIDER_EVENT_JOURNAL,
         "PROVIDER_RUN_COORDINATOR": server.PROVIDER_RUN_COORDINATOR,
         "PROVIDER_SSE_TRANSPORT": server.PROVIDER_SSE_TRANSPORT,
+        "_with_vo_provider_guidance": server._with_vo_provider_guidance,
     }
     counter = CounterPatch()
     provider = None
@@ -301,6 +302,7 @@ def run_fixture(warmups: int, runs: int) -> dict[str, Any]:
             telemetry=server._CODEX_FAST_PATH_TELEMETRY,
         )
         server.PROVIDER_SSE_TRANSPORT = server._provider_sse_transport_for(repository, journal)
+        server._with_vo_provider_guidance = lambda message: message
         provider = WarmCodexProvider(workspace, make_fake_codex(tmp))
         server._codex_provider_from_config = lambda: provider
         counter.install()

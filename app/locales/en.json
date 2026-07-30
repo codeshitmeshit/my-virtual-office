@@ -2602,6 +2602,8 @@
   "mcp_registered_servers_hint": "Manage connections, client registrations, and agent assignments",
   "mcp_connected": "Connected",
   "mcp_connect": "Connect",
+  "mcp_unavailable": "Unavailable",
+  "mcp_retry": "Retry",
   "mcp_no_description": "No description",
   "mcp_connection": "Connection",
   "mcp_copy_connection": "Copy connection details",

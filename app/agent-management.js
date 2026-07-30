@@ -42,9 +42,16 @@
         ) || '');
     }
 
+    function isRetiredNativeMainAgent(agent) {
+        const aiId = stableId(agent);
+        return aiId === 'codex-main' || aiId === 'claude-code-main' ||
+            String(agent && agent.source || '') === 'native-main';
+    }
+
     function normalizedRoster(roster) {
         const byId = new Map();
         (Array.isArray(roster) ? roster : []).forEach(function (agent) {
+            if (isRetiredNativeMainAgent(agent)) return;
             const aiId = stableId(agent);
             if (aiId) byId.set(aiId, Object.assign({}, agent, { aiId: aiId }));
         });

@@ -152,6 +152,16 @@ def test_agent_status_filter_and_cursor_pagination(repository):
     ]
 
 
+def test_management_agent_export_hides_retired_native_main_entries(repository):
+    observe(repository, "codex-local")
+    observe(repository, "codex-main", name="Main")
+    observe(repository, "claude-code-main", name="Main", provider_kind="claude-code")
+
+    exported = repository.management_export("agents").rows
+
+    assert [item["ai_id"] for item in exported] == ["codex-local"]
+
+
 def test_identity_history_cursor_is_stable_when_timestamps_repeat(tmp_path):
     fixed = datetime(2026, 7, 19, tzinfo=timezone.utc)
     repository = HRRepository(tmp_path / "status", clock=lambda: fixed)

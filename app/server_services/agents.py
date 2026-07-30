@@ -4,6 +4,7 @@ import os
 import sys
 
 from services import provider_skill_sync
+from services.retired_native_agents import is_retired_native_main_agent
 
 __all__ = ['_handle_agents_list', '_safe_agent_workspace_key', '_load_agent_workspaces', '_save_agent_workspaces', '_find_agent_record', '_skill_sync_agent_context', '_agent_workspace_abs_path', '_safe_workspace_relpath', '_resolve_workspace_file', '_read_workspace_text_file', '_save_workspace_text_file', '_delete_workspace_text_file', '_workspace_file_summaries', '_agent_skill_summaries', '_agent_project_tasks', '_agent_recent_activity', '_agent_score_info', '_office_config_agent_override', '_update_office_config_agent', '_get_agent_workspace_payload', '_handle_agent_workspace_update', '_handle_agent_platforms', '_comm_log_path', '_office_agent_lookup', '_office_agent_ref', '_append_comm_event', '_rewrite_comm_events', '_comm_event_progress_marker', '_upsert_comm_progress_event', '_remove_comm_progress_events', '_append_codex_progress_comm_event', '_load_comm_history', '_is_a2a_envelope_text', '_dedupe_visible_comm_history', '_comm_event_to_chat_message', '_merge_comm_events_into_agent_chat', '_handle_agent_platform_comm_send', '_handle_agent_platform_comm_history', '_sanitize_agent_id', '_remove_openclaw_agent_paths', '_run_async_blocking', '_gateway_rpc_call_async', '_gateway_rpc_call', '_agent_template_files', '_default_openclaw_agent_model', '_handle_agent_create', '_handle_hermes_agent_create', '_handle_codex_agent_create', '_handle_claude_code_agent_create', '_write_template', '_signal_gateway_reload', '_handle_agent_delete']
 
@@ -1787,6 +1788,8 @@ def _handle_agents_list():
     _oc_overrides, _oc_branches = _load_office_agent_overrides()
     roster = []
     for a in get_roster():
+        if is_retired_native_main_agent(a):
+            continue
         oc = _office_agent_override_for(a, _oc_overrides)
         provider_kind = a.get("providerKind", "openclaw")
         branch_id = oc.get("branch", "")

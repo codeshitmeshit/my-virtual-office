@@ -18,11 +18,23 @@ def test_registered_mcp_view_uses_structured_management_card():
 
 
 def test_registered_clients_are_states_instead_of_duplicate_actions():
-    assert "server[client] && server[client].registered" in SCRIPT
+    assert "status.registered" in SCRIPT
     assert "mcp-client-state" in SCRIPT
     assert "mcp-client-connect" in SCRIPT
     assert "mcp_client_cwd_not_persisted" in SCRIPT
     assert "legacyMatch" in SCRIPT
+    assert "_mcpSetClientConnectBusy" in SCRIPT
+    assert "aria-busy" in SCRIPT
+    assert "status.available !== false" in SCRIPT
+    assert "_mcpClientAvailable(server, 'openclaw')" in SCRIPT
+    assert "_mcpClientUnavailable" in SCRIPT
+    assert "mcp_unavailable" in SCRIPT
+    assert "mcp_retry" in SCRIPT
+    assert "probeError" in SCRIPT
+    assert "mcp-client-item.is-unavailable" in STYLES
+    assert "mcp-client-action-stack" in STYLES
+    assert "mcp-client-connect:disabled" in STYLES
+    assert "server.launcherPath || server.command" in SCRIPT
 
 
 def test_agent_assignment_does_not_install_a_generated_skill():

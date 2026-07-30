@@ -177,6 +177,15 @@
         return String(value.aiId || value.ai_id || value.id || value.statusKey || '');
     }
 
+    function visibleAgents(agents) {
+        return array(agents).filter(function (agent) {
+            const value = object(agent);
+            const id = agentId(value);
+            return id !== 'codex-main' && id !== 'claude-code-main' &&
+                String(value.source || '') !== 'native-main';
+        });
+    }
+
     function seedFromEmbeddedContext(context) {
         const source = context || embeddedContext;
         if (!source) return false;
@@ -186,7 +195,7 @@
             changed = true;
         }
         if (array(source.roster).length && !state.agents.length) {
-            state.agents = source.roster.slice();
+            state.agents = visibleAgents(source.roster);
             changed = true;
         }
         return changed;
@@ -444,10 +453,11 @@
         const action = String(activity.action || 'activity');
         const status = hrDisplayState(activity.status);
         const timestamp = String(activity.createdAt || activity.created_at || '');
+        const displayTime = formatTime(timestamp);
         const reason = activityFailureReason(activity);
         return '<li><span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' +
             escHtml(semanticLabel(status)) + '</span><span>' + escHtml(actionLabel(action)) + '</span>' +
-            (timestamp ? '<time datetime="' + escHtml(timestamp) + '">' + escHtml(timestamp) + '</time>' : '') +
+            (timestamp ? '<time datetime="' + escHtml(timestamp) + '">' + escHtml(displayTime) + '</time>' : '') +
             (reason ? '<small class="hr-activity-detail">' + escHtml(tr('hr_activity_failure_reason', 'Reason: {{reason}}', { reason })) + '</small>' : '') +
             '</li>';
     }
@@ -961,7 +971,7 @@
         if (results[0].status === 'fulfilled') state.overview = results[0].value;
         else state.errors.push(String(results[0].reason && results[0].reason.message || 'hr_overview_failed'));
         if (results[1].status === 'fulfilled') {
-            state.agents = array(object(results[1].value.export).rows);
+            state.agents = visibleAgents(object(results[1].value.export).rows);
             if (embeddedContext && typeof embeddedContext.setRoster === 'function') {
                 embeddedContext.setRoster(state.agents, { selectedAiId: state.selectedAgentId });
             }
@@ -1282,6 +1292,7 @@
             availabilityCounts,
             mergeByKey,
             prettyJson,
+            formatTime,
             reportScheduleLabel,
             isCurrentRecord,
             reportSubmissionLabelState,

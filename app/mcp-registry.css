@@ -221,6 +221,11 @@
     border-color: rgba(99, 190, 126, 0.32);
 }
 
+.mcp-client-item.is-unavailable {
+    background: rgba(207, 157, 39, 0.07);
+    border-color: rgba(207, 157, 39, 0.28);
+}
+
 .mcp-client-identity {
     min-width: 0;
     display: flex;
@@ -243,10 +248,26 @@
     box-shadow: 0 0 8px rgba(112, 211, 136, 0.42);
 }
 
+.is-unavailable .mcp-client-dot {
+    background: #d7b153;
+    box-shadow: 0 0 8px rgba(215, 177, 83, 0.32);
+}
+
 .mcp-client-state {
     color: #70d388;
     font-size: 7px;
     white-space: nowrap;
+}
+
+.mcp-client-state.is-unavailable {
+    color: #d7b153;
+}
+
+.mcp-client-action-stack {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
 }
 
 .mcp-client-connect {
@@ -257,6 +278,14 @@
     border: 1px solid #3a375e;
     font-size: 7px;
     cursor: pointer;
+}
+
+.mcp-client-connect:disabled,
+.mcp-client-connect[aria-busy="true"] {
+    color: #6f6b89;
+    border-color: #302e4e;
+    cursor: wait;
+    opacity: 0.78;
 }
 
 .mcp-card-warning {

@@ -122,22 +122,44 @@ function _mcpClientWarnings(server, client) {
     var status = server[client] || {};
     var warningCodes = Array.isArray(status.warningCodes) ? status.warningCodes : [];
     var warnings = warningCodes.length ? warningCodes : (Array.isArray(status.warnings) ? status.warnings : []);
+    if (status.probeError) {
+        warnings = warnings.concat([status.probeError]);
+    }
+    if (status.error) {
+        warnings = warnings.concat([status.error]);
+    }
     return warnings.map(_mcpWarningText).filter(Boolean);
 }
 
+function _mcpClientAvailable(server, client) {
+    var status = server[client] || {};
+    return Boolean(status.registered && status.available !== false);
+}
+
+function _mcpClientUnavailable(server, client) {
+    var status = server[client] || {};
+    return Boolean(status.registered && status.available === false);
+}
+
 function _mcpClientMarkup(server, client, label) {
-    var registered = Boolean(server[client] && server[client].registered);
+    var status = server[client] || {};
+    var registered = _mcpClientAvailable(server, client);
+    var unavailable = _mcpClientUnavailable(server, client);
     var name = _mcpEsc(server.name);
-    return '<div class="mcp-client-item' + (registered ? ' is-connected' : '') + '">' +
+    var stateClass = registered ? ' is-connected' : (unavailable ? ' is-unavailable' : '');
+    return '<div class="mcp-client-item' + stateClass + '">' +
         '<div class="mcp-client-identity">' +
             '<span class="mcp-client-dot" aria-hidden="true"></span>' +
             '<span>' + _mcpEsc(label) + '</span>' +
         '</div>' +
         (registered
             ? '<span class="mcp-client-state">' + _mcpEsc(_mcpTr('mcp_connected', null, '已连接')) + '</span>'
-            : '<button type="button" class="mcp-client-connect" data-mcp-action="' + client + '" data-mcp-name="' + name + '">' +
-                _mcpEsc(_mcpTr('mcp_connect', null, '连接')) +
-              '</button>') +
+            : '<div class="mcp-client-action-stack">' +
+                (unavailable ? '<span class="mcp-client-state is-unavailable">' + _mcpEsc(_mcpTr('mcp_unavailable', null, '不可用')) + '</span>' : '') +
+                '<button type="button" class="mcp-client-connect" data-mcp-action="' + client + '" data-mcp-name="' + name + '">' +
+                _mcpEsc(_mcpTr(unavailable ? 'mcp_retry' : 'mcp_connect', null, unavailable ? '重试' : '连接')) +
+                '</button>' +
+              '</div>') +
     '</div>';
 }
 
@@ -152,15 +174,15 @@ function renderMcpRegistry() {
     }
     list.innerHTML = _mcpServers.map(function(server) {
         var registeredClients = [
-            server.openclaw && server.openclaw.registered ? 'OpenClaw' : '',
-            server.codex && server.codex.registered ? 'Codex' : '',
-            server.claude && server.claude.registered ? 'Claude' : ''
+            _mcpClientAvailable(server, 'openclaw') ? 'OpenClaw' : '',
+            _mcpClientAvailable(server, 'codex') ? 'Codex' : '',
+            _mcpClientAvailable(server, 'claude') ? 'Claude' : ''
         ].filter(Boolean);
-        var registrationWarnings = ['codex', 'claude'].reduce(function(items, client) {
+        var registrationWarnings = ['openclaw', 'codex', 'claude'].reduce(function(items, client) {
             return items.concat(_mcpClientWarnings(server, client));
         }, []);
         var detail = server.transport === 'stdio'
-            ? [server.command || '', (server.args || []).join(' ')].join(' ').trim()
+            ? [server.launcherPath || server.command || '', (server.launcherPath ? [] : (server.args || [])).join(' ')].join(' ').trim()
             : [server.transport || '', server.url || ''].join(' ').trim();
         var env = server.envKeys && server.envKeys.length ? ' · ' + _mcpTr('mcp_env_keys', null, '环境变量') + ': ' + server.envKeys.join(', ') : '';
         var assigned = Array.isArray(server.assignedAgentIds) ? server.assignedAgentIds : [];
@@ -281,9 +303,28 @@ async function registerMcpInOpenClaw(name) {
     return registerMcpInNativeClient(name, 'openclaw');
 }
 
-async function registerMcpInNativeClient(name, client) {
+function _mcpSetClientConnectBusy(button, busy) {
+    if (!button) return;
+    if (busy) {
+        button.dataset.idleText = button.textContent;
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+        button.textContent = _mcpTr('connecting', null, '连接中...');
+        return;
+    }
+    button.disabled = false;
+    button.removeAttribute('aria-busy');
+    if (button.dataset.idleText) {
+        button.textContent = button.dataset.idleText;
+        delete button.dataset.idleText;
+    }
+}
+
+async function registerMcpInNativeClient(name, client, button) {
     var labels = { openclaw: 'OpenClaw', codex: 'Codex', claude: 'Claude' };
     var label = labels[client] || client;
+    if (button && button.disabled) return;
+    _mcpSetClientConnectBusy(button, true);
     try {
         var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/' + encodeURIComponent(client), { method: 'POST' });
         var data = await res.json();
@@ -298,11 +339,12 @@ async function registerMcpInNativeClient(name, client) {
             }
             _acpShowToast(message);
         }
-        refreshMcpRegistry();
+        await refreshMcpRegistry();
     } catch (e) {
         if (typeof _acpShowToast === 'function') {
             _acpShowToast(_mcpTr('mcp_client_failed', { client: label, error: e.message }, '{{client}} 注册失败：{{error}}'));
         }
+        await refreshMcpRegistry();
     }
 }
 
@@ -447,7 +489,7 @@ document.addEventListener('click', function(e) {
     var action = actionButton.getAttribute('data-mcp-action');
     var name = actionButton.getAttribute('data-mcp-name') || '';
     if (action === 'copy-command') copyMcpConnection(actionButton.getAttribute('data-mcp-detail') || '');
-    if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
+    if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action, actionButton);
     if (action === 'save-access') saveMcpAgentAccess(name, actionButton);
     if (action === 'toggle-guide') toggleMcpGuide(name);
     if (action === 'ai-organize-guide') organizeMcpGuide(name, actionButton);

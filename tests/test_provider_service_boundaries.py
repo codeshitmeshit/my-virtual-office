@@ -46,6 +46,22 @@ class ProviderServiceBoundaryTests(unittest.TestCase):
         self.assertIsInstance(server.PROVIDER_EVENT_JOURNAL, server.ProviderEventJournal)
         self.assertIsInstance(server.HERMES_APPROVAL_SERVICE, server.ProviderApprovalService)
 
+    def test_agent_bridge_routes_hydrate_to_authoritative_server_handlers(self):
+        import server
+        from server_routes import agent_bridges as routes
+
+        service = routes._bridge_service()
+        pairs = (
+            "_handle_codex_run_start",
+            "_handle_codex_run_events",
+            "_handle_hermes_run_start",
+            "_handle_hermes_run_events",
+            "_handle_claude_code_run_start",
+            "_handle_claude_code_run_events",
+        )
+        for name in pairs:
+            self.assertIs(getattr(service, name), getattr(server, name), name)
+
     def test_codex_start_uses_shared_coordinator_without_legacy_launch_authority(self):
         source = (APP / "server.py").read_text(encoding="utf-8")
         body = source[source.index("def _handle_codex_run_start"):source.index("def _handle_codex_run_events")]
@@ -82,6 +98,21 @@ class ProviderServiceBoundaryTests(unittest.TestCase):
         self.assertNotIn("def _handle_hermes_desktop_run_events", source)
         self.assertNotIn("_handle_hermes_desktop_run_events", run_events)
         self.assertIn("PROVIDER_SSE_TRANSPORT.stream_run", run_events)
+
+    def test_agent_bridge_split_contains_no_obsolete_run_authorities(self):
+        source = (APP / "server_services" / "agent_bridges.py").read_text(encoding="utf-8")
+        for obsolete in (
+            "class ProviderRunBridge",
+            "PROVIDER_RUN_BRIDGE",
+            "CLAUDE_CODE_STREAM_RUNS",
+            "_remember_claude_code_stream_run",
+            "_CODEX_RUN_IDEMPOTENCY",
+            "_PROVIDER_RUN_IDEMPOTENCY",
+            "_register_provider_run_idempotency",
+        ):
+            self.assertNotIn(obsolete, source)
+        self.assertIn("def _hydrate", source)
+        self.assertIn("globals()[key] = value", source)
 
     def test_hermes_approval_callers_use_bounded_fenced_service(self):
         source = (APP / "server.py").read_text(encoding="utf-8")

@@ -4,6 +4,7 @@ import path from 'path';
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const server = fs.readFileSync(path.join(root, 'app', 'server.py'), 'utf8');
+const agentBridgeRoutes = fs.readFileSync(path.join(root, 'app', 'server_routes', 'agent_bridges.py'), 'utf8');
 const chat = fs.readFileSync(path.join(root, 'app', 'chat.js'), 'utf8');
 const style = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
 
@@ -54,12 +55,15 @@ if (!chatHandler.includes('"direction": "reply"') || !chatHandler.includes('"inR
   throw new Error('Codex chat should persist replies linked to the human message');
 }
 
-const codexChatRoute = server.slice(server.indexOf('elif self.path == "/api/codex/chat"'), server.indexOf('elif self.path == "/api/codex/reset"'));
-if (!codexChatRoute.includes('result = _handle_codex_chat(body)')) {
-  throw new Error('Codex chat fallback should call _handle_codex_chat directly');
+const codexChatRoute = agentBridgeRoutes.slice(
+  agentBridgeRoutes.indexOf('"/api/codex/chat": service._handle_codex_chat'),
+  agentBridgeRoutes.indexOf('"/api/claude-code/chat": service._handle_claude_code_chat')
+);
+if (!codexChatRoute.includes('"/api/codex/chat": service._handle_codex_chat')) {
+  throw new Error('Codex chat route should dispatch directly to _handle_codex_chat');
 }
 if (codexChatRoute.includes('_handle_agent_platform_comm_send(body)')) {
-  throw new Error('Codex chat fallback should not wrap chat-window messages as agent-platform A2A envelopes');
+  throw new Error('Codex chat route should not wrap chat-window messages as agent-platform A2A envelopes');
 }
 
 const chatRequired = [
