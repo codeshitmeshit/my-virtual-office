@@ -399,14 +399,6 @@ def _handle_mcp_registry_assign_agent(name: str, body: dict[str, Any]) -> dict[s
     )
 
 
-def _handle_mcp_registry_install_skill(name: str, body: dict[str, Any]) -> dict[str, Any]:
-    """Compatibility alias for clients that still post to the former /skill route."""
-    result = _handle_mcp_registry_assign_agent(name, body)
-    if isinstance(result, dict):
-        result["deprecatedRoute"] = True
-    return result
-
-
 def _handle_mcp_registry_vibe_template() -> dict[str, Any]:
     body = {
         "name": "vibe-trading",

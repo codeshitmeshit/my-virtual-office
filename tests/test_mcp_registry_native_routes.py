@@ -26,7 +26,8 @@ class _Handler:
 def _post(path):
     handler = _Handler()
     handled = routes.handle_post(handler, urllib.parse.urlparse(path))
-    return handled, handler.status, json.loads(handler.wfile.getvalue())
+    raw = handler.wfile.getvalue()
+    return handled, handler.status, json.loads(raw) if raw else None
 
 
 def _get(path):
@@ -62,11 +63,6 @@ def test_assignment_and_guide_routes(monkeypatch):
     )
     monkeypatch.setattr(
         mcp_registry,
-        "_handle_mcp_registry_install_skill",
-        lambda name, body: calls.append(("legacy-skill", name, body)) or {"ok": True},
-    )
-    monkeypatch.setattr(
-        mcp_registry,
         "_handle_mcp_registry_get_guide",
         lambda name: calls.append(("get-guide", name)) or {"ok": True, "guide": ""},
     )
@@ -77,12 +73,11 @@ def test_assignment_and_guide_routes(monkeypatch):
     )
 
     assert _post("/api/mcp-registry/echo/assign-agent")[:2] == (True, 200)
-    assert _post("/api/mcp-registry/echo/skill")[:2] == (True, 200)
+    assert _post("/api/mcp-registry/echo/skill")[0] is False
     assert _get("/api/mcp-registry/echo/guide")[:2] == (True, 200)
     assert _post("/api/mcp-registry/echo/guide")[:2] == (True, 200)
     assert [call[:2] for call in calls] == [
         ("assign-agent", "echo"),
-        ("legacy-skill", "echo"),
         ("get-guide", "echo"),
         ("save-guide", "echo"),
     ]

@@ -61,9 +61,6 @@ def handle_post(handler, parsed_url):
     if path.startswith("/api/mcp-registry/") and path.endswith("/guide"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_save_guide(_server_name(path, "/guide"), body))
-    if path.startswith("/api/mcp-registry/") and path.endswith("/skill"):
-        body, error = _body(handler)
-        return send_json(handler, error or service._handle_mcp_registry_install_skill(_server_name(path, "/skill"), body))
     return False
 
 
