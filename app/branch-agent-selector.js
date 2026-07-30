@@ -69,13 +69,17 @@
             if (!byBranch[id]) byBranch[id] = [];
             byBranch[id].push(agent);
         });
-        var branchInputs = branches.map(function(branch) {
-            var branchAgents = byBranch[branch.id] || [];
-            if (!branchAgents.length) return '';
-            return '<label class="branch-agent-selector-option">' +
+        var branchToggleInGroup = options.branchTogglePlacement === 'group-title';
+        function branchToggle(branch, extraClass) {
+            return '<label class="branch-agent-selector-option' + (extraClass ? ' ' + extraClass : '') + '">' +
                 '<input type="checkbox" class="' + escape(options.branchInputClass) + '" data-branch-id="' + escape(branch.id) + '"' + options.scopeAttributes + '> ' +
                 escape(branchLabel(branch, translate)) +
             '</label>';
+        }
+        var branchInputs = branches.map(function(branch) {
+            var branchAgents = byBranch[branch.id] || [];
+            if (!branchAgents.length || branchToggleInGroup) return '';
+            return branchToggle(branch, '');
         }).join('');
         var agentGroups = branches.map(function(branch) {
             var branchAgents = byBranch[branch.id] || [];
@@ -89,7 +93,11 @@
                 '</label>';
             }).join('');
             return '<div class="branch-agent-selector-group" data-branch-id="' + escape(branch.id) + '">' +
-                '<div class="branch-agent-selector-group-title">' + escape(branchLabel(branch, translate)) + '</div>' +
+                '<div class="branch-agent-selector-group-title">' +
+                    (branchToggleInGroup
+                        ? branchToggle(branch, 'branch-agent-selector-group-toggle')
+                        : escape(branchLabel(branch, translate))) +
+                '</div>' +
                 '<div class="branch-agent-selector-options">' + inputs + '</div>' +
             '</div>';
         }).join('');
@@ -98,7 +106,7 @@
         }
         return '<div class="branch-agent-selector">' +
             '<div class="branch-agent-selector-label">' + escape(options.quickSelectLabel) + '</div>' +
-            '<div class="branch-agent-selector-branches">' + branchInputs + '</div>' +
+            (branchToggleInGroup ? '' : '<div class="branch-agent-selector-branches">' + branchInputs + '</div>') +
             '<div class="branch-agent-selector-hint">' + escape(options.hintLabel) + '</div>' +
             '<div class="branch-agent-selector-agents">' + agentGroups + '</div>' +
         '</div>';

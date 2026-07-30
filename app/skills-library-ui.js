@@ -103,6 +103,7 @@ async function toggleSkillApply(skillName) {
             agents: agentList,
             branches: typeof getBranchList === 'function' ? getBranchList() : [],
             selectedIds: [],
+            branchTogglePlacement: 'group-title',
             branchInputClass: 'skl-branch-toggle',
             agentInputClass: 'skl-agent-toggle',
             scopeAttributes: ' data-skill-name="' + _sklEsc(skillName) + '"',
