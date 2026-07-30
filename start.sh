@@ -517,11 +517,6 @@ PY
     echo -e "  ${GREEN}✓${NC} HTTP/WS 端口可用: ${VO_PORT}/${VO_WS_PORT}"
     echo ""
 
-    # Cache-busting
-    local cache_v
-    cache_v=$(date +%s)
-    sed -i "s/?v=[0-9]*/?v=${cache_v}/g" "$SCRIPT_DIR/app/index.html" 2>/dev/null || true
-
     cd "$SCRIPT_DIR/app"
     "$python_bin" server.py &
     local server_pid=$!

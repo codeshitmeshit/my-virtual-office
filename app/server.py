@@ -2762,6 +2762,7 @@ from services.managed_skills import (
     seed_managed_skill_library,
     sync_managed_skill_to_workspace,
 )
+from services import provider_skill_sync
 from services.project_task_checklists import normalize_task_checklist
 
 PROJECT_STORE = MarkdownProjectStore(STATUS_DIR, watch_external_changes=True)
@@ -2814,6 +2815,46 @@ def _find_agent_record(agent_key):
         if needle in values:
             return agent
     return None
+
+
+def _skill_sync_agent_context(agent_key):
+    refresh_agent_maps()
+    agent = _find_agent_record(agent_key) or _office_agent_lookup(agent_key)
+    if not agent:
+        return None
+    item = dict(agent)
+    provider = str(item.get("providerKind") or "openclaw").lower()
+    profile = str(item.get("profile") or item.get("providerAgentId") or "").strip()
+    workspace = str(item.get("workspace") or item.get("home") or "").strip()
+
+    if provider == "openclaw":
+        ws_dir = AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(item.get("statusKey")) or AGENT_WORKSPACES.get(item.get("id"))
+        if ws_dir:
+            workspace = ws_dir if os.path.isabs(str(ws_dir)) else os.path.join(WORKSPACE_BASE, str(ws_dir))
+    elif provider == "hermes":
+        hermes_cfg = VO_CONFIG.get("hermes", {}) or {}
+        home = os.path.expanduser(str(hermes_cfg.get("homePath") or os.environ.get("VO_HERMES_HOME") or "~/.hermes"))
+        workspace = home if not profile or profile == "default" else os.path.join(home, "profiles", profile)
+    elif provider == "codex":
+        codex_cfg = VO_CONFIG.get("codex", {}) or {}
+        workspace = workspace or (
+            codex_cfg.get("mainWorkspace") if profile == "main" else codex_cfg.get("workspace")
+        ) or os.environ.get("VO_CODEX_WORKSPACE") or os.getcwd()
+    elif provider == "claude-code":
+        claude_cfg = VO_CONFIG.get("claudeCode", {}) or {}
+        workspace = workspace or (
+            claude_cfg.get("mainWorkspace") if profile == "main" else claude_cfg.get("workspace")
+        ) or os.environ.get("VO_CLAUDE_CODE_WORKSPACE") or os.getcwd()
+
+    item["providerKind"] = provider
+    item["workspace"] = os.path.abspath(os.path.expanduser(workspace)) if workspace else ""
+    return item
+
+
+def _load_synced_skills_for_agent(agent):
+    key = str((agent or {}).get("id") or (agent or {}).get("statusKey") or "")
+    context = _skill_sync_agent_context(key) or dict(agent or {})
+    return provider_skill_sync.load_synced_skill_prompt(context)
 
 
 _WORKSPACE_TEXT_EXTS = {
@@ -3389,9 +3430,14 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "deleteAgentSkill":
-        if payload["agent"].get("providerKind") != "openclaw":
-            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
-        result = _handle_skill_delete(key, (body.get("name") or "").strip())
+        name = (body.get("name") or "").strip()
+        if payload["agent"].get("providerKind") == "openclaw":
+            result = _handle_skill_delete(key, name)
+        else:
+            try:
+                result = provider_skill_sync.delete_skill(name, _skill_sync_agent_context(key) or payload["agent"])
+            except provider_skill_sync.SkillSyncError as exc:
+                return {"error": str(exc), "_status": 400}
         if not result.get("ok"):
             return result
     elif action == "saveLibrarySkill":
@@ -3403,8 +3449,6 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "applyLibrarySkill":
-        if payload["agent"].get("providerKind") != "openclaw":
-            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         result = _handle_skills_library_apply({
             "skill": (body.get("name") or "").strip(),
             "agentId": key,
@@ -11495,6 +11539,7 @@ def _vo_agent_communication_service():
                 project_id=project_id,
                 task_id=task_id,
             ),
+            load_synced_skills=_load_synced_skills_for_agent,
         )
     )
 
@@ -12409,19 +12454,18 @@ def _handle_skills_library_apply(body):
     src_file = os.path.join(lib_dir, skill_name, "SKILL.md")
     if not os.path.isfile(src_file):
         return {"error": f"Skill '{skill_name}' not found in library", "_status": 404}
-    # Find agent workspace
-    refresh_agent_maps()
-    ws_dir = AGENT_WORKSPACES.get(agent_id)
-    if not ws_dir:
+    agent = _skill_sync_agent_context(agent_id)
+    if not agent:
         return {"error": f"Agent '{agent_id}' not found", "_status": 404}
-    ws_path = os.path.join(WORKSPACE_BASE, ws_dir)
-    dest_dir = os.path.join(ws_path, "skills", skill_name)
-    dest_file = os.path.join(dest_dir, "SKILL.md")
-    if os.path.isfile(dest_file) and not overwrite:
-        return {"ok": False, "warning": f"Agent '{agent_id}' already has skill '{skill_name}'. Set overwrite=true to replace.", "exists": True}
-    os.makedirs(dest_dir, exist_ok=True)
-    shutil.copy2(src_file, dest_file)
-    return {"ok": True, "skill": skill_name, "agentId": agent_id, "path": dest_file, "overwritten": os.path.isfile(dest_file) and overwrite}
+    try:
+        return provider_skill_sync.install_skill_file(
+            src_file,
+            skill_name,
+            agent,
+            overwrite=bool(overwrite),
+        )
+    except provider_skill_sync.SkillSyncError as exc:
+        return {"error": str(exc), "_status": 400, "agentId": agent_id}
 
 
 def _handle_skills_library_upload(body):

@@ -7,6 +7,20 @@ var _sklSkills = [];
 var _sklLibraryData = { skills: [], categories: [] };
 var _sklEditingName = null; // null = new, string = editing existing
 
+function _sklToast(message) {
+    var toast = window._acpShowToast || window._showOfficeToast;
+    if (typeof toast === 'function') {
+        toast(message);
+    }
+}
+
+function _sklMutationFetch(input, init) {
+    if (window.i18n && typeof window.i18n.managementFetch === 'function') {
+        return window.i18n.managementFetch(input, init || {});
+    }
+    return fetch(input, init || {});
+}
+
 function openSkillsLibrary() {
     document.getElementById('skillsLibraryModal').classList.remove('hidden');
     refreshSkillsList();
@@ -94,7 +108,7 @@ async function toggleSkillApply(skillName) {
             '<button onclick="applySkillToAgent(\'' + _sklEsc(skillName) + '\')">' + _sklEsc(_tr('apply')) + '</button>';
         dropdown.style.display = 'flex';
     } catch (e) {
-        _acpShowToast('❌ ' + _tr('failed_to_load'));
+        _sklToast('❌ ' + _tr('failed_to_load'));
     }
 }
 
@@ -105,7 +119,7 @@ async function applySkillToAgent(skillName) {
     if (!agentId) return;
 
     try {
-        var res = await fetch('/api/skills-library/apply', {
+        var res = await _sklMutationFetch('/api/skills-library/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ skill: skillName, agentId: agentId })
@@ -113,15 +127,15 @@ async function applySkillToAgent(skillName) {
         var data = await res.json();
         if (res.ok) {
             if (data.warning) {
-                _acpShowToast('⚠️ ' + data.warning);
+                _sklToast('⚠️ ' + data.warning);
             } else {
-                _acpShowToast('✅ ' + _tr('skill_applied', { skill: skillName, agent: agentId }));
+                _sklToast('✅ ' + _tr('skill_applied', { skill: skillName, agent: agentId }));
             }
         } else {
-            _acpShowToast('❌ ' + _tr('apply_failed') + ': ' + (data.error || _tr('unknown')));
+            _sklToast('❌ ' + _tr('apply_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ ' + _tr('apply_failed') + ': ' + e.message);
+        _sklToast('❌ ' + _tr('apply_failed') + ': ' + e.message);
     }
 
     // Hide dropdown after apply
@@ -146,7 +160,7 @@ async function openSkillEditor(skillName) {
             contentArea.value = data.content || '';
         } catch (e) {
             contentArea.value = '';
-            _acpShowToast('❌ ' + _tr('failed_load_skill') + ': ' + e.message);
+            _sklToast('❌ ' + _tr('failed_load_skill') + ': ' + e.message);
         }
     } else {
         // New skill
@@ -171,26 +185,26 @@ async function saveSkill() {
     var content = contentArea.value || '';
 
     if (!name) {
-        _acpShowToast('❌ ' + _tr('skill_name_required'));
+        _sklToast('❌ ' + _tr('skill_name_required'));
         return;
     }
 
     try {
-        var res = await fetch('/api/skills-library', {
+        var res = await _sklMutationFetch('/api/skills-library', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name, content: content })
         });
         var data = await res.json();
         if (res.ok) {
-            _acpShowToast('✅ ' + _tr('skill_saved', { name: name }));
+            _sklToast('✅ ' + _tr('skill_saved', { name: name }));
             closeSkillEditor();
             refreshSkillsList();
         } else {
-            _acpShowToast('❌ ' + _tr('save_failed') + ': ' + (data.error || _tr('unknown')));
+            _sklToast('❌ ' + _tr('save_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ ' + _tr('save_failed') + ': ' + e.message);
+        _sklToast('❌ ' + _tr('save_failed') + ': ' + e.message);
     }
 }
 
@@ -198,16 +212,16 @@ async function deleteLibrarySkill(skillName) {
     if (!confirm(_tr('delete_library_skill_confirm', { name: skillName }))) return;
 
     try {
-        var res = await fetch('/api/skills-library/' + encodeURIComponent(skillName), { method: 'DELETE' });
+        var res = await _sklMutationFetch('/api/skills-library/' + encodeURIComponent(skillName), { method: 'DELETE' });
         if (res.ok) {
-            _acpShowToast('🗑️ ' + _tr('skill_deleted', { name: skillName }));
+            _sklToast('🗑️ ' + _tr('skill_deleted', { name: skillName }));
             refreshSkillsList();
         } else {
             var data = await res.json().catch(function() { return {}; });
-            _acpShowToast('❌ ' + _tr('failed_delete') + ': ' + (data.error || _tr('unknown')));
+            _sklToast('❌ ' + _tr('failed_delete') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ ' + _tr('failed_delete') + ': ' + e.message);
+        _sklToast('❌ ' + _tr('failed_delete') + ': ' + e.message);
     }
 }
 
@@ -218,20 +232,20 @@ async function handleSkillUpload(input) {
 
     try {
         var text = await file.text();
-        var res = await fetch('/api/skills-library', {
+        var res = await _sklMutationFetch('/api/skills-library', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: name, content: text })
         });
         if (res.ok) {
-            _acpShowToast('✅ ' + _tr('uploaded', { name: name }));
+            _sklToast('✅ ' + _tr('uploaded', { name: name }));
             refreshSkillsList();
         } else {
             var data = await res.json().catch(function() { return {}; });
-            _acpShowToast('❌ ' + _tr('upload_failed') + ': ' + (data.error || _tr('unknown')));
+            _sklToast('❌ ' + _tr('upload_failed') + ': ' + (data.error || _tr('unknown')));
         }
     } catch (e) {
-        _acpShowToast('❌ ' + _tr('upload_failed') + ': ' + e.message);
+        _sklToast('❌ ' + _tr('upload_failed') + ': ' + e.message);
     }
 
     // Reset input so same file can be re-uploaded

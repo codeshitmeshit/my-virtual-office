@@ -13,7 +13,9 @@
 .skl-modal-header {
     flex: 0 0 auto;
     min-height: 48px;
-    margin-bottom: 10px;
+    margin: 0 0 10px;
+    padding: 0 0 10px;
+    top: 0;
 }
 
 .skl-title-group {
@@ -149,6 +151,10 @@
     white-space: nowrap;
     padding: 7px 12px;
     font-size: 9px;
+}
+
+.skl-upload-input {
+    display: none;
 }
 
 .skl-organize-btn {
@@ -502,15 +508,15 @@
     .skl-category-panel {
         border-right: 0;
         border-bottom: 1px solid #292944;
-        overflow-x: auto;
+        overflow-x: hidden;
     }
 
     .skl-category-list {
-        flex-direction: row;
-        min-width: max-content;
+        flex-direction: column;
+        min-width: 0;
     }
 
     .skl-category-item {
-        width: auto;
+        width: 100%;
     }
 }

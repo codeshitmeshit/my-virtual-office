@@ -748,9 +748,8 @@
                 <div class="skl-header-actions">
                     <button id="skl-organize-btn" class="mtg-btn skl-organize-btn" type="button" onclick="SkillLibraryOrganizationUI.startOrganization()" data-i18n="skill_library_smart_organize">✦ Smart Organize</button>
                     <button class="mtg-btn" type="button" onclick="openSkillEditor(null)" data-i18n="skill_library_create">＋ Create Skill</button>
-                    <label class="mtg-btn skl-upload-label"><span data-i18n="skill_library_import">⇧ Import Skill</span>
-                    <input type="file" accept=".md" id="skl-upload-input" style="display:none" onchange="handleSkillUpload(this)">
-                    </label>
+                    <button class="mtg-btn skl-upload-label" type="button" onclick="document.getElementById('skl-upload-input').click()" data-i18n="skill_library_import">⇧ Import Skill</button>
+                    <input type="file" accept=".md" id="skl-upload-input" class="skl-upload-input" onchange="handleSkillUpload(this)" aria-hidden="true" tabindex="-1">
                 </div>
             </div>
             <div class="skl-workspace">

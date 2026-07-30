@@ -1,8 +1,11 @@
 """Agent workspace, platform, and lifecycle service split from server.py."""
 
+import os
 import sys
 
-__all__ = ['_handle_agents_list', '_safe_agent_workspace_key', '_load_agent_workspaces', '_save_agent_workspaces', '_find_agent_record', '_agent_workspace_abs_path', '_safe_workspace_relpath', '_resolve_workspace_file', '_read_workspace_text_file', '_save_workspace_text_file', '_delete_workspace_text_file', '_workspace_file_summaries', '_agent_skill_summaries', '_agent_project_tasks', '_agent_recent_activity', '_agent_score_info', '_office_config_agent_override', '_update_office_config_agent', '_get_agent_workspace_payload', '_handle_agent_workspace_update', '_handle_agent_platforms', '_comm_log_path', '_office_agent_lookup', '_office_agent_ref', '_append_comm_event', '_rewrite_comm_events', '_comm_event_progress_marker', '_upsert_comm_progress_event', '_remove_comm_progress_events', '_append_codex_progress_comm_event', '_load_comm_history', '_is_a2a_envelope_text', '_dedupe_visible_comm_history', '_comm_event_to_chat_message', '_merge_comm_events_into_agent_chat', '_handle_agent_platform_comm_send', '_handle_agent_platform_comm_history', '_sanitize_agent_id', '_remove_openclaw_agent_paths', '_run_async_blocking', '_gateway_rpc_call_async', '_gateway_rpc_call', '_agent_template_files', '_default_openclaw_agent_model', '_handle_agent_create', '_handle_hermes_agent_create', '_handle_codex_agent_create', '_handle_claude_code_agent_create', '_write_template', '_signal_gateway_reload', '_handle_agent_delete']
+from services import provider_skill_sync
+
+__all__ = ['_handle_agents_list', '_safe_agent_workspace_key', '_load_agent_workspaces', '_save_agent_workspaces', '_find_agent_record', '_skill_sync_agent_context', '_agent_workspace_abs_path', '_safe_workspace_relpath', '_resolve_workspace_file', '_read_workspace_text_file', '_save_workspace_text_file', '_delete_workspace_text_file', '_workspace_file_summaries', '_agent_skill_summaries', '_agent_project_tasks', '_agent_recent_activity', '_agent_score_info', '_office_config_agent_override', '_update_office_config_agent', '_get_agent_workspace_payload', '_handle_agent_workspace_update', '_handle_agent_platforms', '_comm_log_path', '_office_agent_lookup', '_office_agent_ref', '_append_comm_event', '_rewrite_comm_events', '_comm_event_progress_marker', '_upsert_comm_progress_event', '_remove_comm_progress_events', '_append_codex_progress_comm_event', '_load_comm_history', '_is_a2a_envelope_text', '_dedupe_visible_comm_history', '_comm_event_to_chat_message', '_merge_comm_events_into_agent_chat', '_handle_agent_platform_comm_send', '_handle_agent_platform_comm_history', '_sanitize_agent_id', '_remove_openclaw_agent_paths', '_run_async_blocking', '_gateway_rpc_call_async', '_gateway_rpc_call', '_agent_template_files', '_default_openclaw_agent_model', '_handle_agent_create', '_handle_hermes_agent_create', '_handle_codex_agent_create', '_handle_claude_code_agent_create', '_write_template', '_signal_gateway_reload', '_handle_agent_delete']
 
 
 def _server_module():
@@ -42,6 +45,43 @@ def _wrap_exports():
             return wrapper
 
         setattr(current, name, make_wrapper(value))
+
+
+def _skill_sync_agent_context(agent_key):
+    server = _server_module()
+    if server is not None and server is not sys.modules.get(__name__):
+        helper = getattr(server, "_skill_sync_agent_context", None)
+        if callable(helper):
+            return helper(agent_key)
+    refresh_agent_maps()
+    agent = _find_agent_record(agent_key) or _office_agent_lookup(agent_key)
+    if not agent:
+        return None
+    item = dict(agent)
+    provider = str(item.get("providerKind") or "openclaw").lower()
+    profile = str(item.get("profile") or item.get("providerAgentId") or "").strip()
+    workspace = str(item.get("workspace") or item.get("home") or "").strip()
+    if provider == "openclaw":
+        ws_dir = AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(item.get("statusKey")) or AGENT_WORKSPACES.get(item.get("id"))
+        if ws_dir:
+            workspace = ws_dir if os.path.isabs(str(ws_dir)) else os.path.join(WORKSPACE_BASE, str(ws_dir))
+    elif provider == "hermes":
+        hermes_cfg = VO_CONFIG.get("hermes", {}) or {}
+        home = os.path.expanduser(str(hermes_cfg.get("homePath") or os.environ.get("VO_HERMES_HOME") or "~/.hermes"))
+        workspace = home if not profile or profile == "default" else os.path.join(home, "profiles", profile)
+    elif provider == "codex":
+        codex_cfg = VO_CONFIG.get("codex", {}) or {}
+        workspace = workspace or (
+            codex_cfg.get("mainWorkspace") if profile == "main" else codex_cfg.get("workspace")
+        ) or os.environ.get("VO_CODEX_WORKSPACE") or os.getcwd()
+    elif provider == "claude-code":
+        claude_cfg = VO_CONFIG.get("claudeCode", {}) or {}
+        workspace = workspace or (
+            claude_cfg.get("mainWorkspace") if profile == "main" else claude_cfg.get("workspace")
+        ) or os.environ.get("VO_CLAUDE_CODE_WORKSPACE") or os.getcwd()
+    item["providerKind"] = provider
+    item["workspace"] = os.path.abspath(os.path.expanduser(workspace)) if workspace else ""
+    return item
 
 
 def _safe_agent_workspace_key(agent_key):
@@ -628,9 +668,14 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "deleteAgentSkill":
-        if payload["agent"].get("providerKind") != "openclaw":
-            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
-        result = _handle_skill_delete(key, (body.get("name") or "").strip())
+        name = (body.get("name") or "").strip()
+        if payload["agent"].get("providerKind") == "openclaw":
+            result = _handle_skill_delete(key, name)
+        else:
+            try:
+                result = provider_skill_sync.delete_skill(name, _skill_sync_agent_context(key) or payload["agent"])
+            except provider_skill_sync.SkillSyncError as exc:
+                return {"error": str(exc), "_status": 400}
         if not result.get("ok"):
             return result
     elif action == "saveLibrarySkill":
@@ -642,8 +687,6 @@ def _handle_agent_workspace_update(agent_key, body):
         if not result.get("ok"):
             return result
     elif action == "applyLibrarySkill":
-        if payload["agent"].get("providerKind") != "openclaw":
-            return {"error": "Workspace skills are OpenClaw-only for this platform", "_status": 400}
         result = _handle_skills_library_apply({
             "skill": (body.get("name") or "").strip(),
             "agentId": key,

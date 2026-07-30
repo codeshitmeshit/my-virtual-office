@@ -29,6 +29,11 @@ const organize = modal.indexOf('data-i18n="skill_library_smart_organize"');
 const create = modal.indexOf('data-i18n="skill_library_create"');
 const importSkill = modal.indexOf('data-i18n="skill_library_import"');
 assert.ok(organize >= 0 && organize < create && create < importSkill);
+assert.match(
+  modal,
+  /<button[^>]+class="mtg-btn skl-upload-label"[^>]+data-i18n="skill_library_import"/,
+  'import skill control must be a keyboard-focusable button',
+);
 assert.ok(modal.includes('class="skl-header-actions"'));
 assert.ok(!modal.includes('openMcpRegistry'));
 assert.ok(!modal.includes('mcp_registry_title'));
@@ -64,6 +69,16 @@ assert.match(
   /@media \(max-width:\s*620px\)[\s\S]*?\.skl-workspace\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
   'mobile layout must collapse to one column',
 );
+assert.match(
+  css,
+  /@media \(max-width:\s*620px\)[\s\S]*?\.skl-category-list\s*\{[^}]*flex-direction:\s*column/s,
+  'mobile categories must stack vertically instead of creating horizontal scroll',
+);
+assert.match(
+  css,
+  /\.skl-modal-header\s*\{[^}]*margin:\s*0 0 10px/s,
+  'Skills Library header must not inherit global negative modal margins',
+);
 
 assert.ok(organization.includes("'skill_library_local_source'"));
 assert.ok(organization.includes("categoryId: 'all'"));
@@ -72,6 +87,17 @@ assert.ok(organization.includes('skl-detail-actions'));
 assert.ok(
   library.includes('window.SkillLibraryOrganizationUI.update(_sklLibraryData)'),
   'legacy CRUD module must delegate organization rendering',
+);
+assert.ok(
+  library.includes('function _sklToast') && !library.includes('_acpShowToast('),
+  'Skills Library CRUD module must not hard-depend on the agent panel toast',
+);
+assert.ok(
+  library.includes('function _sklMutationFetch') &&
+    library.includes("window.i18n.managementFetch") &&
+    library.includes("_sklMutationFetch('/api/skills-library'") &&
+    library.includes("_sklMutationFetch('/api/skills-library/apply'"),
+  'Skills Library mutation requests must use the management-token fetch wrapper',
 );
 
 for (const source of [modal, css, organization, library]) {

@@ -17,6 +17,8 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from providers.claude_env import merge_user_claude_env
+
 
 _ACTIVE_RUNS: dict[str, subprocess.Popen] = {}
 _ACTIVE_RUNS_LOCK = threading.Lock()
@@ -466,7 +468,7 @@ class ClaudeCodeProvider:
         return {"ok": True, "deleted": deleted, "profile": safe_profile, "agentId": f"claude-code-{safe_profile}"}
 
     def _subprocess_env(self) -> dict[str, str]:
-        env = os.environ.copy()
+        env = merge_user_claude_env(os.environ.copy(), self.home_path)
         if self.home_path:
             env["VO_CLAUDE_CODE_HOME"] = self.home_path
             env.setdefault("CLAUDE_CONFIG_DIR", self.home_path)

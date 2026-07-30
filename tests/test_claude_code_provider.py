@@ -291,6 +291,40 @@ def test_claude_code_send_uses_profile_workspace_and_agent_flag():
             claude_provider_module.subprocess.Popen = original
 
 
+def test_claude_code_subprocess_env_imports_third_party_shell_exports(monkeypatch):
+    with tempfile.TemporaryDirectory() as tmp:
+        home = os.path.join(tmp, "home")
+        claude_home = os.path.join(home, ".claude")
+        os.makedirs(claude_home)
+        with open(os.path.join(home, ".bashrc"), "w", encoding="utf-8") as f:
+            f.write("[ -z \"$PS1\" ] && return\n")
+            f.write("export ANTHROPIC_BASE_URL=https://gateway.example.test\n")
+            f.write("export ANTHROPIC_AUTH_TOKEN=secret-token\n")
+            f.write("export ANTHROPIC_MODEL=deepseek-v4-pro[1m]\n")
+            f.write("export UNRELATED_SECRET=should-not-load\n")
+
+        monkeypatch.delenv("ANTHROPIC_BASE_URL", raising=False)
+        monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+        monkeypatch.delenv("UNRELATED_SECRET", raising=False)
+        monkeypatch.setenv("HOME", home)
+
+        provider = ClaudeCodeProvider(
+            enabled=True,
+            workspace=tmp,
+            workspace_root=os.path.join(tmp, "agents"),
+            home_path=claude_home,
+            reply_text="ok",
+        )
+        env = provider._subprocess_env()
+
+        assert env["ANTHROPIC_BASE_URL"] == "https://gateway.example.test"
+        assert env["ANTHROPIC_AUTH_TOKEN"] == "secret-token"
+        assert env["ANTHROPIC_MODEL"] == "deepseek-v4-pro[1m]"
+        assert "UNRELATED_SECRET" not in env
+        assert env["HOME"] == home
+
+
 def test_claude_code_send_progress_callback_streams_snapshots():
     with tempfile.TemporaryDirectory() as tmp:
         binary = os.path.join(tmp, "claude")

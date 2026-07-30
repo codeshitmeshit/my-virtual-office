@@ -1,12 +1,15 @@
 """Agent skills and skills-library service split from server.py."""
 
+import os
+import shutil
 import sys
 
+from services import provider_skill_sync
 from services import skill_library_catalog_integration
 
 AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
 
-__all__ = ['AGENT_PLATFORM_COMM_SKILL_NAME', '_agent_platform_comm_skill_content', '_vo_presence_skill_content', '_vo_browser_skill_content', '_vo_meetings_skill_content', '_vo_projects_skill_content', '_builtin_office_skill_contents', '_ensure_builtin_communication_skill', '_handle_skill_list', '_extract_skill_description', '_handle_skill_write', '_get_skills_library_dir', '_parse_skill_frontmatter', '_skill_library_slug', '_handle_skills_library_list', '_handle_skills_library_get', '_handle_skills_library_create', '_handle_skills_library_save_from_agent', '_parse_cli_json', '_openclaw_skill_workshop_cli', '_skill_workshop_rpc', '_skill_workshop_agent_targets', '_normalize_skill_workshop_proposal', '_handle_skill_workshop_list', '_handle_skill_workshop_inspect', '_handle_skill_workshop_action', '_handle_skills_library_delete', '_handle_skills_library_apply', '_handle_skills_library_upload', '_handle_skill_delete']
+__all__ = ['AGENT_PLATFORM_COMM_SKILL_NAME', '_agent_platform_comm_skill_content', '_vo_presence_skill_content', '_vo_browser_skill_content', '_vo_meetings_skill_content', '_vo_projects_skill_content', '_builtin_office_skill_contents', '_ensure_builtin_communication_skill', '_handle_skill_list', '_extract_skill_description', '_handle_skill_write', '_get_skills_library_dir', '_parse_skill_frontmatter', '_skill_library_slug', '_handle_skills_library_list', '_handle_skills_library_get', '_handle_skills_library_create', '_handle_skills_library_save_from_agent', '_parse_cli_json', '_openclaw_skill_workshop_cli', '_skill_workshop_rpc', '_skill_workshop_agent_targets', '_normalize_skill_workshop_proposal', '_handle_skill_workshop_list', '_handle_skill_workshop_inspect', '_handle_skill_workshop_action', '_handle_skills_library_delete', '_handle_skills_library_apply', '_handle_skills_library_upload', '_handle_skill_delete', '_skill_sync_agent_context']
 
 
 def _server_module():
@@ -46,6 +49,43 @@ def _wrap_exports():
             return wrapper
 
         setattr(current, name, make_wrapper(value))
+
+
+def _skill_sync_agent_context(agent_key):
+    server = _server_module()
+    if server is not None and server is not sys.modules.get(__name__):
+        helper = getattr(server, "_skill_sync_agent_context", None)
+        if callable(helper):
+            return helper(agent_key)
+    refresh_agent_maps()
+    agent = _find_agent_record(agent_key) or _office_agent_lookup(agent_key)
+    if not agent:
+        return None
+    item = dict(agent)
+    provider = str(item.get("providerKind") or "openclaw").lower()
+    profile = str(item.get("profile") or item.get("providerAgentId") or "").strip()
+    workspace = str(item.get("workspace") or item.get("home") or "").strip()
+    if provider == "openclaw":
+        ws_dir = AGENT_WORKSPACES.get(agent_key) or AGENT_WORKSPACES.get(item.get("statusKey")) or AGENT_WORKSPACES.get(item.get("id"))
+        if ws_dir:
+            workspace = ws_dir if os.path.isabs(str(ws_dir)) else os.path.join(WORKSPACE_BASE, str(ws_dir))
+    elif provider == "hermes":
+        hermes_cfg = VO_CONFIG.get("hermes", {}) or {}
+        home = os.path.expanduser(str(hermes_cfg.get("homePath") or os.environ.get("VO_HERMES_HOME") or "~/.hermes"))
+        workspace = home if not profile or profile == "default" else os.path.join(home, "profiles", profile)
+    elif provider == "codex":
+        codex_cfg = VO_CONFIG.get("codex", {}) or {}
+        workspace = workspace or (
+            codex_cfg.get("mainWorkspace") if profile == "main" else codex_cfg.get("workspace")
+        ) or os.environ.get("VO_CODEX_WORKSPACE") or os.getcwd()
+    elif provider == "claude-code":
+        claude_cfg = VO_CONFIG.get("claudeCode", {}) or {}
+        workspace = workspace or (
+            claude_cfg.get("mainWorkspace") if profile == "main" else claude_cfg.get("workspace")
+        ) or os.environ.get("VO_CLAUDE_CODE_WORKSPACE") or os.getcwd()
+    item["providerKind"] = provider
+    item["workspace"] = os.path.abspath(os.path.expanduser(workspace)) if workspace else ""
+    return item
 
 
 def _agent_platform_comm_skill_content():
@@ -781,19 +821,18 @@ def _handle_skills_library_apply(body):
     src_file = os.path.join(lib_dir, skill_name, "SKILL.md")
     if not os.path.isfile(src_file):
         return {"error": f"Skill '{skill_name}' not found in library", "_status": 404}
-    # Find agent workspace
-    refresh_agent_maps()
-    ws_dir = AGENT_WORKSPACES.get(agent_id)
-    if not ws_dir:
+    agent = _skill_sync_agent_context(agent_id)
+    if not agent:
         return {"error": f"Agent '{agent_id}' not found", "_status": 404}
-    ws_path = os.path.join(WORKSPACE_BASE, ws_dir)
-    dest_dir = os.path.join(ws_path, "skills", skill_name)
-    dest_file = os.path.join(dest_dir, "SKILL.md")
-    if os.path.isfile(dest_file) and not overwrite:
-        return {"ok": False, "warning": f"Agent '{agent_id}' already has skill '{skill_name}'. Set overwrite=true to replace.", "exists": True}
-    os.makedirs(dest_dir, exist_ok=True)
-    shutil.copy2(src_file, dest_file)
-    return {"ok": True, "skill": skill_name, "agentId": agent_id, "path": dest_file, "overwritten": os.path.isfile(dest_file) and overwrite}
+    try:
+        return provider_skill_sync.install_skill_file(
+            src_file,
+            skill_name,
+            agent,
+            overwrite=bool(overwrite),
+        )
+    except provider_skill_sync.SkillSyncError as exc:
+        return {"error": str(exc), "_status": 400, "agentId": agent_id}
 
 
 def _handle_skills_library_upload(body):
