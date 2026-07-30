@@ -84,6 +84,7 @@ function _mcpAclMarkup(server, assigned) {
         branches: typeof getBranchList === 'function' ? getBranchList() : [],
         selectedIds: assigned,
         supportedProviders: ['openclaw', 'codex', 'claude', 'claude-code'],
+        branchTogglePlacement: 'group-title',
         branchInputClass: 'mcp-branch-toggle',
         agentInputClass: 'mcp-assignment-toggle',
         scopeAttributes: ' data-mcp-name="' + _mcpEsc(server.name) + '"',

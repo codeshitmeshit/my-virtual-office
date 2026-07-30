@@ -24,6 +24,7 @@ def test_shared_selector_matches_meeting_branch_then_agent_interaction():
 def test_mcp_and_skill_library_use_the_shared_branch_selector():
     assert "AgentBranchSelector.render" in MCP
     assert "AgentBranchSelector.render" in SKILLS
+    assert "branchTogglePlacement: 'group-title'" in MCP
     assert "skl-branch-toggle" in SKILLS
     assert "branchTogglePlacement: 'group-title'" in SKILLS
     assert "skl-agent-toggle" in SKILLS
