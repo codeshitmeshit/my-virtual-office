@@ -387,6 +387,11 @@
         }
         tagsField.append(tagsLabel, tagList);
         container.appendChild(tagsField);
+        if (global.SkillLibraryAgentUsageUI) {
+            container.appendChild(global.SkillLibraryAgentUsageUI.createField(skill, {
+                translate: tr
+            }));
+        }
 
         var categoryControl = document.createElement('div');
         categoryControl.className = 'skl-category-control';

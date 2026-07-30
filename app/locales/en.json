@@ -2633,6 +2633,8 @@
   "skill_library_moving": "Moving…",
   "skill_library_move": "Move",
   "skill_library_apply_to_ai": "Apply to AI",
+  "skill_library_loaded_agents": "Loaded agents ({{count}})",
+  "skill_library_no_loaded_agents": "Not loaded by any agent yet",
   "skill_no_assignable_agents": "No eligible agents",
   "skill_apply_selected_agents": "Apply to selected agents",
   "skill_select_agent_first": "Select at least one agent",

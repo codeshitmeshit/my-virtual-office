@@ -400,6 +400,40 @@
     overflow-wrap: anywhere;
 }
 
+.skl-agent-usage-empty {
+    color: #777895;
+}
+
+.skl-agent-usage-groups {
+    display: grid;
+    gap: 8px;
+}
+
+.skl-agent-usage-group {
+    display: grid;
+    gap: 5px;
+}
+
+.skl-agent-usage-branch {
+    color: #8d8ba5;
+    font-size: 8px;
+}
+
+.skl-agent-usage-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.skl-agent-usage-chip {
+    padding: 4px 6px;
+    border: 1px solid #343454;
+    border-radius: 5px;
+    background: #1c1c30;
+    color: #d4d2e6;
+    font-size: 8px;
+}
+
 .skl-detail-failure .skl-detail-label,
 .skl-detail-failure .skl-detail-value {
     color: #d4b45e;

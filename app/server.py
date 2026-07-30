@@ -101,6 +101,7 @@ from services import agent_management_session_mint as agent_management_session_m
 from services import agent_management_session_exchange as agent_management_session_exchange_service
 from services import agent_management_browser as agent_management_browser_service
 from services import skill_library_catalog_integration
+from services import skill_agent_usage
 from services import archive_manager_coordinated_work
 from services.archive_manager_work_coordinator import ArchiveManagerWorkCoordinator
 from services.skill_library_archive_adapter import SkillLibraryArchiveManagerAdapter
@@ -12130,7 +12131,17 @@ def _handle_skills_library_list():
         })
     response = skill_library_catalog_integration.enrich_skill_list(lib_dir, skills)
     response["migrationConflicts"] = conflicts
-    return response
+    try:
+        agent_payload = _handle_agents_list()
+        agents = agent_payload.get("agents", []) if isinstance(agent_payload, dict) else []
+        return skill_agent_usage.enrich_library_response(
+            response,
+            agents,
+            _skill_sync_agent_context,
+        )
+    except Exception as exc:
+        response["agentUsageWarning"] = str(exc)
+        return response
 
 
 def _handle_skills_library_get(skill_name):

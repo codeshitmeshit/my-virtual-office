@@ -5,6 +5,7 @@ import shutil
 import sys
 
 from services import provider_skill_sync
+from services import skill_agent_usage
 from services import skill_library_catalog_integration
 
 AGENT_PLATFORM_COMM_SKILL_NAME = "AgentPlatform-to-AgentPlatform_Communications"
@@ -500,7 +501,18 @@ def _handle_skills_library_list():
         if not description:
             description = _extract_skill_description(skill_md)
         skills.append({"name": entry, "description": description, "path": skill_md})
-    return skill_library_catalog_integration.enrich_skill_list(lib_dir, skills)
+    response = skill_library_catalog_integration.enrich_skill_list(lib_dir, skills)
+    try:
+        agent_payload = _handle_agents_list()
+        agents = agent_payload.get("agents", []) if isinstance(agent_payload, dict) else []
+        return skill_agent_usage.enrich_library_response(
+            response,
+            agents,
+            _skill_sync_agent_context,
+        )
+    except Exception as exc:
+        response["agentUsageWarning"] = str(exc)
+        return response
 
 
 def _handle_skills_library_get(skill_name):

@@ -2633,6 +2633,8 @@
   "skill_library_moving": "移动中…",
   "skill_library_move": "移动",
   "skill_library_apply_to_ai": "应用到 AI",
+  "skill_library_loaded_agents": "已加载 Agent（{{count}}）",
+  "skill_library_no_loaded_agents": "暂未被任何 Agent 加载",
   "skill_no_assignable_agents": "暂无可应用的 Agent",
   "skill_apply_selected_agents": "应用到所选 Agent",
   "skill_select_agent_first": "请先选择 Agent",

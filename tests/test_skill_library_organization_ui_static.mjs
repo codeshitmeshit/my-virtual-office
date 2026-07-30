@@ -7,6 +7,10 @@ const organization = fs.readFileSync(
   'app/skills-library-organization-ui.js',
   'utf8',
 );
+const agentUsage = fs.readFileSync(
+  'app/skill-library-agent-usage-ui.js',
+  'utf8',
+);
 const library = fs.readFileSync('app/skills-library-ui.js', 'utf8');
 const en = JSON.parse(fs.readFileSync('app/locales/en.json', 'utf8'));
 const zh = JSON.parse(fs.readFileSync('app/locales/zh.json', 'utf8'));
@@ -40,17 +44,23 @@ assert.ok(!modal.includes('openMcpRegistry'));
 assert.ok(!modal.includes('mcp_registry_title'));
 
 assert.ok(
-  html.includes('skills-library-organization.css?v=20260730c'),
+  html.includes('skills-library-organization.css?v=20260730d'),
   'organization stylesheet must be loaded',
 );
 assert.ok(
-  html.includes('skills-library-organization-ui.js?v=20260730c'),
+  html.includes('skill-library-agent-usage-ui.js?v=20260730'),
+  'agent usage UI module must be loaded',
+);
+assert.ok(
+  html.includes('skills-library-organization-ui.js?v=20260730d'),
   'organization UI module must be loaded',
 );
 assert.ok(
-  html.indexOf('skills-library-organization-ui.js?v=20260730c') <
+  html.indexOf('skill-library-agent-usage-ui.js?v=20260730') <
+    html.indexOf('skills-library-organization-ui.js?v=20260730d') &&
+    html.indexOf('skills-library-organization-ui.js?v=20260730d') <
     html.indexOf('skills-library-ui.js?v=20260730'),
-  'organization renderer must be available before CRUD bootstrap',
+  'agent usage and organization renderers must be available before CRUD bootstrap',
 );
 
 assert.match(
@@ -87,6 +97,9 @@ assert.ok(organization.includes("tagFilter: ''"));
 assert.ok(organization.includes('skl-category-item'));
 assert.ok(organization.includes('skl-tag-filter'));
 assert.ok(organization.includes('skl-detail-actions'));
+assert.ok(organization.includes('SkillLibraryAgentUsageUI.createField'));
+assert.ok(agentUsage.includes('loadedAgents'));
+assert.ok(agentUsage.includes('skl-agent-usage-groups'));
 assert.ok(
   library.includes('window.SkillLibraryOrganizationUI.update(_sklLibraryData)'),
   'legacy CRUD module must delegate organization rendering',
@@ -103,7 +116,7 @@ assert.ok(
   'Skills Library mutation requests must use the management-token fetch wrapper',
 );
 
-for (const source of [modal, css, organization, library]) {
+for (const source of [modal, css, organization, agentUsage, library]) {
   assert.ok(!source.includes('团队空间'));
   assert.ok(!source.toLowerCase().includes('team space'));
 }
@@ -135,6 +148,8 @@ for (const key of [
   'skill_organization_marker_failed',
   'skill_organization_marker_resolved',
   'skill_organization_move_failed',
+  'skill_library_loaded_agents',
+  'skill_library_no_loaded_agents',
 ]) {
   assert.equal(typeof en[key], 'string', `missing English locale key ${key}`);
   assert.equal(typeof zh[key], 'string', `missing Chinese locale key ${key}`);

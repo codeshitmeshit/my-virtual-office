@@ -161,6 +161,7 @@ async function applySkillToSelectedAgents(skillName, button) {
     }
     if (button) button.disabled = false;
     if (failed.length) {
+        refreshSkillsList();
         _sklToast('⚠️ ' + _tr('skill_apply_batch_partial', {
             success: succeeded.length,
             failed: failed.length
@@ -172,6 +173,7 @@ async function applySkillToSelectedAgents(skillName, button) {
         count: succeeded.length
     }) + (warnings.length ? ' · ⚠️ ' + warnings.join('; ') : ''));
     dropdown.style.display = 'none';
+    refreshSkillsList();
 }
 
 async function applySkillToAgent(skillName) {
