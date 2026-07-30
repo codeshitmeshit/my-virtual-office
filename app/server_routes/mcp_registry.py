@@ -58,6 +58,9 @@ def handle_post(handler, parsed_url):
     if path.startswith("/api/mcp-registry/") and path.endswith("/assign-agent"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_assign_agent(_server_name(path, "/assign-agent"), body))
+    if path.startswith("/api/mcp-registry/") and path.endswith("/assign-agents"):
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_mcp_registry_assign_agents(_server_name(path, "/assign-agents"), body))
     if path.startswith("/api/mcp-registry/") and path.endswith("/guide"):
         body, error = _body(handler)
         return send_json(handler, error or service._handle_mcp_registry_save_guide(_server_name(path, "/guide"), body))

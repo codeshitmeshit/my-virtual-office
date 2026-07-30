@@ -14,5 +14,8 @@ def test_global_skill_reads_optional_guide_without_treating_it_as_permission():
 
     assert "VirtualOffice-MCP-Guidance" in content
     assert "/api/mcp-registry/URL_ENCODED_MCP_NAME/guide" in content
+    assert "assignedAgentIds" in content
+    assert "single source of truth for Agent ACL" in content
+    assert "Client registration status is not authorization" in content
     assert "not a separately installed Skill" in content
     assert "does not grant permission" in content

@@ -27,6 +27,12 @@ def test_registered_clients_are_states_instead_of_duplicate_actions():
 
 def test_agent_assignment_does_not_install_a_generated_skill():
     assert "/assign-agent" in SCRIPT
+    assert "data-mcp-assignment-toggle" in SCRIPT
+    assert "data-mcp-branch-toggle" in SCRIPT
+    assert "setMcpAgentAccess" in SCRIPT
+    assert "setMcpBranchAccess" in SCRIPT
+    assert "/assign-agents" in SCRIPT
+    assert "toggleMcpAssignment" not in SCRIPT
     assert "/skill'" not in SCRIPT
     assert "toggleMcpGuide" in SCRIPT
     assert "saveMcpGuide" in SCRIPT
@@ -36,3 +42,5 @@ def test_registry_card_has_responsive_layout_and_safe_overflow():
     assert "grid-template-columns: repeat(3, minmax(0, 1fr))" in STYLES
     assert "text-overflow: ellipsis" in STYLES
     assert "@media (max-width: 560px)" in STYLES
+    assert "mcp-agent-acl-option" in STYLES
+    assert "mcp-agent-acl-branch" in STYLES

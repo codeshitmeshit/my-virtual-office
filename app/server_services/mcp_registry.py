@@ -399,6 +399,18 @@ def _handle_mcp_registry_assign_agent(name: str, body: dict[str, Any]) -> dict[s
     )
 
 
+def _handle_mcp_registry_assign_agents(name: str, body: dict[str, Any]) -> dict[str, Any]:
+    from server_services import agents, mcp_assignment
+
+    return mcp_assignment.assign_to_agents(
+        name,
+        body,
+        list_agents=agents._handle_agents_list,
+        register_client=_register_mcp_for_client,
+        assign_registry=_handle_mcp_registry_assign,
+    )
+
+
 def _handle_mcp_registry_vibe_template() -> dict[str, Any]:
     body = {
         "name": "vibe-trading",

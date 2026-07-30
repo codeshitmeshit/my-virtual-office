@@ -175,7 +175,6 @@
 .mcp-copy-button,
 .mcp-client-connect,
 .mcp-card-actions button,
-.mcp-assignment-row button,
 .mcp-guide-row button {
     min-height: 30px;
     border-radius: 6px;
@@ -325,26 +324,82 @@
     font-size: 8px;
 }
 
-.mcp-assignment-summary div {
+.mcp-assignment-summary > div {
     min-width: 0;
 }
 
-.mcp-assignment-summary span {
+.mcp-agent-acl-copy > span {
     display: block;
     color: #747187;
     font-size: 7px;
 }
 
-.mcp-assignment-summary strong {
-    display: block;
-    max-width: 260px;
-    margin-top: 3px;
-    overflow: hidden;
-    color: #c8c5d8;
-    font-size: 8px;
-    font-weight: 500;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+.mcp-agent-acl {
+    margin-top: 5px;
+    display: grid;
+    gap: 6px;
+}
+
+.mcp-agent-acl-branch {
+    min-width: 220px;
+    padding: 6px 7px;
+    background: rgba(17, 17, 30, 0.72);
+    border: 1px solid #2d2b49;
+    border-radius: 7px;
+}
+
+.mcp-agent-acl-branch-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #b8b4cb;
+    font-size: 7px;
+    cursor: pointer;
+}
+
+.mcp-agent-acl-branch-header small {
+    margin-left: auto;
+    color: #77748f;
+    font-size: 7px;
+}
+
+.mcp-agent-acl-branch-header input,
+.mcp-agent-acl-option input {
+    width: 11px;
+    height: 11px;
+    margin: 0;
+    accent-color: #70d388;
+}
+
+.mcp-agent-acl-options {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+
+.mcp-agent-acl-option {
+    padding: 4px 7px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: #aaa6c1;
+    background: #141321;
+    border: 1px solid #34314f;
+    border-radius: 6px;
+    font-size: 7px;
+    cursor: pointer;
+}
+
+.mcp-agent-acl-option.is-checked {
+    color: #cfe8d5;
+    background: rgba(81, 162, 105, 0.09);
+    border-color: rgba(99, 190, 126, 0.42);
+}
+
+.mcp-agent-acl-empty {
+    color: #77748f;
+    font-size: 7px;
 }
 
 .mcp-card-actions {
@@ -377,18 +432,8 @@
     border-color: rgba(255, 103, 103, 0.55);
 }
 
-.mcp-assignment-row,
 .mcp-guide-row {
     padding: 0 16px 14px;
-}
-
-.mcp-assignment-row {
-    gap: 8px;
-}
-
-.mcp-assignment-row select {
-    flex: 1;
-    min-width: 0;
 }
 
 .mcp-guide-row {

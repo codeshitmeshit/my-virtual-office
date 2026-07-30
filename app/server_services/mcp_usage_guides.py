@@ -36,6 +36,17 @@ description: "Read optional Virtual Office usage guidance for registered MCP ser
 MCP tools normally describe themselves through their tool schemas. Do not fetch extra
 guidance for every tool call.
 
+Before using a VO-managed MCP server, read the registry and verify its Agent ACL:
+
+```bash
+curl -sS {office_url}/api/mcp-registry
+```
+
+Find the MCP server by `name`. The current Agent may use it only when the Agent's
+identifier appears in `assignedAgentIds`. An empty list means no Agent is authorized.
+Client registration status is not authorization. Re-read the registry instead of
+caching ACL decisions.
+
 When an MCP task needs a domain workflow, safety constraint, or product-specific
 convention that is not clear from the tool schema, read its optional VO usage guide:
 
@@ -49,6 +60,8 @@ the MCP tool schema and the user's request.
 ## Rules
 
 - A usage guide is MCP-owned documentation, not a separately installed Skill.
+- The MCP registry is the single source of truth for Agent ACL; do not copy ACL lists
+  into local Skill files.
 - A usage guide does not grant permission or expand the user's authorization.
 - Do not request, expose, or copy secrets from MCP configuration.
 - Prefer the live guide endpoint over cached instructions because the MCP maintainer

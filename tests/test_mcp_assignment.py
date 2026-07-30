@@ -112,3 +112,30 @@ def test_registry_assignment_wires_agent_provider_to_native_registration(monkeyp
         ("register", "echo", "claude"),
         ("assign", "echo", "claude-main"),
     ]
+
+
+def test_branch_assignment_registers_each_native_client_once_before_acl_update():
+    calls = []
+
+    result = mcp_assignment.assign_to_agents(
+        "echo",
+        {"agentIds": ["codex-a", "codex-b", "claude-a"]},
+        list_agents=lambda: {
+            "agents": [
+                {"id": "codex-a", "providerKind": "codex"},
+                {"id": "codex-b", "providerKind": "codex"},
+                {"id": "claude-a", "providerKind": "claude-code"},
+            ]
+        },
+        register_client=lambda name, client, body: calls.append(("register", client, body["agentId"])) or {"ok": True},
+        assign_registry=lambda name, body: calls.append(("assign", body["agentIds"]))
+        or {"ok": True, "assignedAgentIds": body["agentIds"]},
+    )
+
+    assert result["ok"] is True
+    assert result["clients"] == ["codex", "claude"]
+    assert calls == [
+        ("register", "codex", "codex-a"),
+        ("register", "claude", "claude-a"),
+        ("assign", ["codex-a", "codex-b", "claude-a"]),
+    ]

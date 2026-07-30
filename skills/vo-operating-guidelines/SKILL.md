@@ -72,7 +72,7 @@ echo $VO_GATEWAY_HTTP
 - 用户明确调用 `$vo-project-authoring`，或自然语言要求创建、复用、周期化 VO 项目，或维护已有 VO 项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；以 `/` 开头的控制命令或 slash-like 消息（例如 `/new`、`/compact`、`/help`、`/new now`）不得仅凭命令文本触发项目创作，除非同一消息明确调用 `$vo-project-authoring`。该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建或修改真实项目。不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”。
 - 需要读取或推进已创建项目/任务的 Project Execution、review、验收、阻塞、取消或项目 artifact：使用 本地 `/skills/vo-project-workflow/SKILL.md`。不要用项目创作 skill 绕过这些执行门禁。
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
-- 使用已注册 MCP 时，优先依据客户端暴露的工具定义；只有工具定义不足以说明领域流程、安全约束或产品约定时，才按需读取 `GET /api/mcp-registry/URL_ENCODED_MCP_NAME/guide`。该使用说明属于 MCP 注册记录，不是按 Agent 安装的 Skill，也不扩展用户授权；返回 `hasGuide=false` 时直接依据工具定义继续。
+- 使用已注册 MCP 前，读取 `GET /api/mcp-registry`，仅当当前 Agent ID 存在于目标 MCP 的 `assignedAgentIds` 中时才可使用；空列表表示没有 Agent 获得授权，客户端已连接不等于已授权。ACL 以注册表为唯一数据源，不复制进本地 Skill 文件。工具定义不足以说明领域流程、安全约束或产品约定时，再按需读取 `GET /api/mcp-registry/URL_ENCODED_MCP_NAME/guide`。该使用说明属于 MCP 注册记录，不是按 Agent 安装的 Skill，也不扩展用户授权；返回 `hasGuide=false` 时直接依据工具定义继续。
 - 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。
 - 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 [references/meeting-requests.md](references/meeting-requests.md)。
 - 需要操作已确认的 executable meeting，包括 run/transition、事件跟踪、干预、冲突处理或 action item 草稿：使用 本地 `/skills/vo-meeting-execution/SKILL.md`。
