@@ -62,6 +62,12 @@ def test_claude_registration_uses_user_scoped_native_json(monkeypatch):
         "env": {"MODE": "test"},
     }
     assert result["warnings"] == ["Claude CLI does not persist the configured working directory"]
+    assert result["warningCodes"] == [
+        {
+            "code": "mcp_client_cwd_not_persisted",
+            "params": {"client": "Claude"},
+        }
+    ]
 
 
 def test_codex_rejects_legacy_sse_transport(monkeypatch):

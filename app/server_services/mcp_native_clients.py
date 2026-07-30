@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from server_services import mcp_registration_warnings
+
 _CLIENTS = {"codex", "claude"}
 _CODEX_APP_BINARY = Path("/Applications/ChatGPT.app/Contents/Resources/codex")
 
@@ -41,7 +43,7 @@ def _run_client(client: str, args: list[str], timeout: int = 30) -> dict[str, An
     return {"ok": True, "stdout": result.stdout, "stderr": result.stderr}
 
 
-def _codex_args(server: dict[str, Any]) -> tuple[list[str], list[str]]:
+def _codex_args(server: dict[str, Any]) -> tuple[list[str], list[dict[str, Any]]]:
     transport = server.get("transport")
     if transport == "sse":
         raise ValueError("Codex does not support registering legacy SSE MCP servers")
@@ -50,12 +52,16 @@ def _codex_args(server: dict[str, Any]) -> tuple[list[str], list[str]]:
         for key, value in (server.get("env") or {}).items():
             args.extend(["--env", f"{key}={value}"])
         args.extend([server["name"], "--", server["command"], *server.get("args", [])])
-        warnings = ["Codex CLI does not persist the configured working directory"] if server.get("cwd") else []
+        warnings = (
+            [mcp_registration_warnings.working_directory_not_persisted("Codex")]
+            if server.get("cwd")
+            else []
+        )
         return args, warnings
     return ["mcp", "add", server["name"], "--url", server["url"]], []
 
 
-def _claude_args(server: dict[str, Any], scope: str) -> tuple[list[str], list[str]]:
+def _claude_args(server: dict[str, Any], scope: str) -> tuple[list[str], list[dict[str, Any]]]:
     if scope not in {"local", "project", "user"}:
         raise ValueError("Claude scope must be local, project, or user")
     transport = server.get("transport")
@@ -72,7 +78,11 @@ def _claude_args(server: dict[str, Any], scope: str) -> tuple[list[str], list[st
             "type": "http" if transport == "streamable-http" else "sse",
             "url": server["url"],
         }
-    warnings = ["Claude CLI does not persist the configured working directory"] if server.get("cwd") else []
+    warnings = (
+        [mcp_registration_warnings.working_directory_not_persisted("Claude")]
+        if server.get("cwd")
+        else []
+    )
     return [
         "mcp",
         "add-json",
@@ -126,5 +136,9 @@ def register_native_client(
             return _redact_env_values(remove_result, server)
         result = _redact_env_values(_run_client("claude", args), server)
     if result.get("ok") and warnings:
-        result["warnings"] = warnings
+        result["warnings"] = [warning["message"] for warning in warnings]
+        result["warningCodes"] = [
+            {"code": warning["code"], "params": warning["params"]}
+            for warning in warnings
+        ]
     return result

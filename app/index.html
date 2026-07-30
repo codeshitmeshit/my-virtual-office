@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
     <link rel="stylesheet" href="skills-library-organization.css?v=20260730c">
+    <link rel="stylesheet" href="mcp-registry.css?v=20260730a">
     <link rel="stylesheet" href="fonts.css?v=1785328545.05.07">
     <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
     <!-- i18n: inline locale data for immediate init -->
@@ -814,7 +815,16 @@
                         <button class="mtg-btn mtg-btn-primary" onclick="saveMcpServer()" data-i18n="mcp_save_to_vo">保存到 VO</button>
                     </div>
                 </div>
-                <div id="mcp-registry-list" class="mcp-registry-list"></div>
+                <section class="mcp-registry-section" aria-label="Registered MCP servers" data-i18n-aria-label="mcp_registered_servers">
+                    <div class="mcp-registry-section-heading">
+                        <div>
+                            <div class="mcp-registry-eyebrow" data-i18n="mcp_registered_servers">已注册 MCP</div>
+                            <div class="mcp-registry-section-copy" data-i18n="mcp_registered_servers_hint">管理连接、客户端注册与 Agent 分配</div>
+                        </div>
+                        <span id="mcp-registry-count" class="mcp-registry-count">0</span>
+                    </div>
+                    <div id="mcp-registry-list" class="mcp-registry-list"></div>
+                </section>
             </div>
         </div>
     </div>
@@ -1215,7 +1225,7 @@
     <script src="game.js?v=1785328545-intervention-auto-continue"></script>
     <script src="skills-library-organization-ui.js?v=20260730c"></script>
     <script src="skills-library-ui.js?v=20260730"></script>
-    <script src="mcp-registry-ui.js?v=20260730-mcp-guide-wording"></script>
+    <script src="mcp-registry-ui.js?v=20260730-mcp-card-ui-localized"></script>
     <script src="meeting-center.js?v=1785328545-status-list-colors"></script>
     <script src="agent-guide.js?v=1785328545-agent-guide-skill-md"></script>
     <script src="dashboard-realtime.js?v=1785328545-startup-poll-delay"></script>

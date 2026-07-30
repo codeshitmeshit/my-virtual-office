@@ -78,9 +78,50 @@ function _mcpAgentLabel(agentId) {
     return ((agent.emoji || '') + ' ' + (agent.name || agentId)).trim();
 }
 
+function _mcpWarningText(warning) {
+    var code = warning && typeof warning === 'object' ? warning.code : '';
+    var params = warning && typeof warning === 'object' ? (warning.params || {}) : {};
+    var raw = typeof warning === 'string' ? warning : '';
+    var legacyMatch = raw.match(/^(Codex|Claude) CLI does not persist the configured working directory$/);
+    if (code === 'mcp_client_cwd_not_persisted' || legacyMatch) {
+        var client = params.client || (legacyMatch && legacyMatch[1]) || '';
+        return _mcpTr(
+            'mcp_warning_cwd_not_persisted',
+            { client: client },
+            '{{client}} CLI 不会保存已配置的工作目录，启动时可能需要重新指定。'
+        );
+    }
+    return raw || String((warning && warning.message) || '');
+}
+
+function _mcpClientWarnings(server, client) {
+    var status = server[client] || {};
+    var warningCodes = Array.isArray(status.warningCodes) ? status.warningCodes : [];
+    var warnings = warningCodes.length ? warningCodes : (Array.isArray(status.warnings) ? status.warnings : []);
+    return warnings.map(_mcpWarningText).filter(Boolean);
+}
+
+function _mcpClientMarkup(server, client, label) {
+    var registered = Boolean(server[client] && server[client].registered);
+    var name = _mcpEsc(server.name);
+    return '<div class="mcp-client-item' + (registered ? ' is-connected' : '') + '">' +
+        '<div class="mcp-client-identity">' +
+            '<span class="mcp-client-dot" aria-hidden="true"></span>' +
+            '<span>' + _mcpEsc(label) + '</span>' +
+        '</div>' +
+        (registered
+            ? '<span class="mcp-client-state">' + _mcpEsc(_mcpTr('mcp_connected', null, '已连接')) + '</span>'
+            : '<button type="button" class="mcp-client-connect" data-mcp-action="' + client + '" data-mcp-name="' + name + '">' +
+                _mcpEsc(_mcpTr('mcp_connect', null, '连接')) +
+              '</button>') +
+    '</div>';
+}
+
 function renderMcpRegistry() {
     var list = document.getElementById('mcp-registry-list');
+    var count = document.getElementById('mcp-registry-count');
     if (!list) return;
+    if (count) count.textContent = String(_mcpServers.length);
     if (!_mcpServers.length) {
         list.innerHTML = '<div class="mcp-empty">' + _mcpEsc(_mcpTr('mcp_empty', null, 'VO 中暂无 MCP server。')) + '</div>';
         return;
@@ -91,40 +132,68 @@ function renderMcpRegistry() {
             server.codex && server.codex.registered ? 'Codex' : '',
             server.claude && server.claude.registered ? 'Claude' : ''
         ].filter(Boolean);
-        var status = registeredClients.length
-            ? _mcpTr('mcp_status_registered_clients', { clients: registeredClients.join(', ') }, '已注册到：{{clients}}')
-            : _mcpTr('mcp_status_vo_only', null, '仅在 VO 中保存');
         var registrationWarnings = ['codex', 'claude'].reduce(function(items, client) {
-            var warnings = server[client] && server[client].warnings;
-            return items.concat(Array.isArray(warnings) ? warnings : []);
+            return items.concat(_mcpClientWarnings(server, client));
         }, []);
         var detail = server.transport === 'stdio'
             ? [server.command || '', (server.args || []).join(' ')].join(' ').trim()
             : [server.transport || '', server.url || ''].join(' ').trim();
-        var env = server.envKeys && server.envKeys.length ? ' ' + _mcpTr('mcp_env_keys', null, '环境变量') + ': ' + server.envKeys.join(', ') : '';
+        var env = server.envKeys && server.envKeys.length ? ' · ' + _mcpTr('mcp_env_keys', null, '环境变量') + ': ' + server.envKeys.join(', ') : '';
         var assigned = Array.isArray(server.assignedAgentIds) ? server.assignedAgentIds : [];
         var assignedText = assigned.length
             ? assigned.map(_mcpAgentLabel).join(', ')
             : _mcpTr('mcp_unassigned', null, '暂未分配');
-        return '<div class="mcp-card">' +
-            '<div class="mcp-card-main">' +
-                '<div class="mcp-card-title">' + _mcpEsc(server.name) + '</div>' +
-                '<div class="mcp-card-desc">' + _mcpEsc(server.description || '') + '</div>' +
-                '<code class="mcp-card-command">' + _mcpEsc(detail + env) + '</code>' +
-                '<div class="mcp-card-status">' + _mcpEsc(status) + '</div>' +
-                (registrationWarnings.length ? '<div class="mcp-card-warning">' + _mcpEsc(_mcpTr('mcp_registration_warning', { warning: registrationWarnings.join('; ') }, '注意：{{warning}}')) + '</div>' : '') +
-                '<div class="mcp-card-assigned">' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '已安装指引 Skill')) + ': ' + _mcpEsc(assignedText) + '</div>' +
+        return '<article class="mcp-card">' +
+            '<header class="mcp-card-header">' +
+                '<div class="mcp-card-icon" aria-hidden="true">M</div>' +
+                '<div class="mcp-card-heading">' +
+                    '<div class="mcp-card-title-row">' +
+                        '<div class="mcp-card-title">' + _mcpEsc(server.name) + '</div>' +
+                        '<span class="mcp-transport-badge">' + _mcpEsc(String(server.transport || 'stdio').toUpperCase()) + '</span>' +
+                    '</div>' +
+                    '<div class="mcp-card-desc">' + _mcpEsc(server.description || _mcpTr('mcp_no_description', null, '暂无描述')) + '</div>' +
+                '</div>' +
+            '</header>' +
+            '<div class="mcp-card-connection">' +
+                '<div class="mcp-card-section-label">' + _mcpEsc(_mcpTr('mcp_connection', null, '连接信息')) + '</div>' +
+                '<div class="mcp-command-row">' +
+                    '<code class="mcp-card-command" title="' + _mcpEsc(detail + env) + '">' + _mcpEsc(detail + env) + '</code>' +
+                    '<button type="button" class="mcp-copy-button" data-mcp-action="copy-command" data-mcp-detail="' + _mcpEsc(detail + env) + '" title="' + _mcpEsc(_mcpTr('mcp_copy_connection', null, '复制连接信息')) + '">' +
+                        _mcpEsc(_mcpTr('copy', null, '复制')) +
+                    '</button>' +
+                '</div>' +
             '</div>' +
-            '<div class="mcp-card-actions">' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_openclaw_title', null, '注册到 OpenClaw')) + '" data-mcp-action="openclaw" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_openclaw', null, '注册 OpenClaw')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_codex_title', null, '注册到 Codex')) + '" data-mcp-action="codex" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_codex', null, '注册 Codex')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_register_claude_title', null, '注册到 Claude')) + '" data-mcp-action="claude" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_register_claude', null, '注册 Claude')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '注册到 Agent 所属客户端，并为该 Agent 安装 MCP 使用指引 Skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '安装指引')) + '</button>' +
-                '<button type="button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('delete', null, '删除')) + '</button>' +
+            '<div class="mcp-card-clients">' +
+                '<div class="mcp-card-section-label">' + _mcpEsc(_mcpTr('mcp_clients', null, '客户端')) + '<span>' + registeredClients.length + '/3</span></div>' +
+                '<div class="mcp-client-grid">' +
+                    _mcpClientMarkup(server, 'openclaw', 'OpenClaw') +
+                    _mcpClientMarkup(server, 'codex', 'Codex') +
+                    _mcpClientMarkup(server, 'claude', 'Claude') +
+                '</div>' +
+            '</div>' +
+            (registrationWarnings.length ? '<div class="mcp-card-warning"><span aria-hidden="true">!</span><div><strong>' + _mcpEsc(_mcpTr('mcp_attention', null, '需要注意')) + '</strong><p>' + _mcpEsc(registrationWarnings.join('; ')) + '</p></div></div>' : '') +
+            '<div class="mcp-card-footer">' +
+                '<div class="mcp-assignment-summary">' +
+                    '<span class="mcp-assignment-icon" aria-hidden="true">A</span>' +
+                    '<div><span>' + _mcpEsc(_mcpTr('mcp_assigned_to', null, '已安装指引 Skill')) + '</span><strong>' + _mcpEsc(assignedText) + '</strong></div>' +
+                '</div>' +
+                '<div class="mcp-card-actions">' +
+                    '<button type="button" class="mcp-assign-button" title="' + _mcpEsc(_mcpTr('mcp_assign_agent_title', null, '注册到 Agent 所属客户端，并为该 Agent 安装 MCP 使用指引 Skill')) + '" data-mcp-action="toggle-skill" data-mcp-name="' + _mcpEsc(server.name) + '">' + _mcpEsc(_mcpTr('mcp_assign_agent', null, '安装指引')) + '</button>' +
+                    '<button type="button" class="mcp-delete-button" title="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" aria-label="' + _mcpEsc(_mcpTr('delete', null, '删除')) + '" data-mcp-action="delete" data-mcp-name="' + _mcpEsc(server.name) + '">×</button>' +
+                '</div>' +
             '</div>' +
             '<div class="mcp-install-row" id="mcp-install-' + _mcpEsc(server.name) + '" style="display:none"></div>' +
-        '</div>';
+        '</article>';
     }).join('');
+}
+
+async function copyMcpConnection(detail) {
+    try {
+        await navigator.clipboard.writeText(detail || '');
+        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_connection_copied', null, '连接信息已复制'));
+    } catch (e) {
+        if (typeof _acpShowToast === 'function') _acpShowToast(_mcpTr('mcp_copy_failed', null, '复制失败'));
+    }
 }
 
 function _mcpFormPayload() {
@@ -200,8 +269,8 @@ async function registerMcpInNativeClient(name, client) {
         }
         if (typeof _acpShowToast === 'function') {
             var message = _mcpTr('mcp_client_registered', { client: label, name: name }, '已注册到 {{client}}：{{name}}');
-            var warnings = data[client] && data[client].warnings;
-            if (Array.isArray(warnings) && warnings.length) {
+            var warnings = _mcpClientWarnings(data, client);
+            if (warnings.length) {
                 message += ' · ' + _mcpTr('mcp_registration_warning', { warning: warnings.join('; ') }, '注意：{{warning}}');
             }
             _acpShowToast(message);
@@ -281,6 +350,7 @@ document.addEventListener('click', function(e) {
     if (!actionButton) return;
     var action = actionButton.getAttribute('data-mcp-action');
     var name = actionButton.getAttribute('data-mcp-name') || '';
+    if (action === 'copy-command') copyMcpConnection(actionButton.getAttribute('data-mcp-detail') || '');
     if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
     if (action === 'toggle-skill') toggleMcpSkillInstall(name);
     if (action === 'install-skill') installMcpSkill(name);
@@ -301,5 +371,6 @@ Object.assign(window, {
     registerMcpInNativeClient,
     toggleMcpSkillInstall,
     installMcpSkill,
+    copyMcpConnection,
     deleteMcpServer
 });

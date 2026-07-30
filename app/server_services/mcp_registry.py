@@ -332,6 +332,8 @@ def _handle_mcp_registry_register_native(name: str, client: str, body: dict[str,
     }
     if result.get("warnings"):
         status["warnings"] = result["warnings"]
+    if result.get("warningCodes"):
+        status["warningCodes"] = result["warningCodes"]
     server[client] = status
     registry.setdefault("servers", {})[server["name"]] = server
     _save_registry(registry)
