@@ -359,24 +359,33 @@
 }
 
 .mcp-guide-row {
-    padding: 0 16px 14px;
-}
-
-.mcp-guide-row {
-    gap: 8px;
+    width: 100%;
+    min-width: 0;
+    padding: 14px 16px 16px;
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    background: rgba(10, 10, 18, 0.14);
     border-top: 1px solid rgba(115, 104, 180, 0.12);
-    padding-top: 14px;
 }
 
-.mcp-guide-row label {
+.mcp-guide-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.mcp-guide-header label {
     color: #aaa6c1;
     font-size: 8px;
 }
 
 .mcp-guide-row textarea {
     width: 100%;
-    min-height: 96px;
-    padding: 10px;
+    min-width: 0;
+    min-height: 112px;
+    padding: 11px 12px;
     box-sizing: border-box;
     resize: vertical;
     color: #d5d2e1;
@@ -388,14 +397,21 @@
     line-height: 1.55;
 }
 
-.mcp-guide-actions {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
+.mcp-guide-row .mcp-guide-save {
+    flex: 0 0 auto;
+    padding: 0 13px;
+    color: #f6d64a;
+    background: rgba(246, 214, 74, 0.08);
+    border: 1px solid rgba(246, 214, 74, 0.45);
+    cursor: pointer;
 }
 
-.mcp-guide-actions span,
+.mcp-guide-row .mcp-guide-save:hover {
+    background: rgba(246, 214, 74, 0.14);
+    border-color: rgba(246, 214, 74, 0.72);
+}
+
+.mcp-guide-hint,
 .mcp-guide-loading {
     color: #77748f;
     font-size: 7px;

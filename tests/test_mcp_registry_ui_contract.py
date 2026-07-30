@@ -47,3 +47,12 @@ def test_registry_card_has_responsive_layout_and_safe_overflow():
     assert "text-overflow: ellipsis" in STYLES
     assert "@media (max-width: 560px)" in STYLES
     assert "mcp-agent-acl" in STYLES
+
+
+def test_usage_guide_expands_as_a_full_width_card_section():
+    assert "mcp-guide-header" in SCRIPT
+    assert "mcp-guide-save" in SCRIPT
+    assert "mcp-guide-hint" in SCRIPT
+    assert "mcp-guide-actions" not in SCRIPT
+    assert "grid-template-columns: minmax(0, 1fr)" in STYLES
+    assert ".mcp-guide-row textarea" in STYLES

@@ -366,9 +366,12 @@ async function toggleMcpGuide(name) {
         var res = await fetch('/api/mcp-registry/' + encodeURIComponent(name) + '/guide');
         var data = await res.json();
         if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_usage_guide_load_failed_plain', null, '使用说明加载失败'));
-        row.innerHTML = '<label for="mcp-guide-input-' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide_title', null, '可选使用说明')) + '</label>' +
+        row.innerHTML = '<div class="mcp-guide-header">' +
+                '<label for="mcp-guide-input-' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide_title', null, '可选使用说明')) + '</label>' +
+                '<button type="button" class="mcp-guide-save" data-mcp-action="save-guide" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('save', null, '保存')) + '</button>' +
+            '</div>' +
             '<textarea id="mcp-guide-input-' + _mcpEsc(name) + '" maxlength="20000" placeholder="' + _mcpEsc(_mcpTr('mcp_usage_guide_placeholder', null, '仅填写工具定义之外的流程、约束或注意事项。')) + '">' + _mcpEsc(data.guide || '') + '</textarea>' +
-            '<div class="mcp-guide-actions"><span>' + _mcpEsc(_mcpTr('mcp_usage_guide_hint', null, 'VO Agent 会在工具定义不足时按需读取。')) + '</span><button type="button" data-mcp-action="save-guide" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('save', null, '保存')) + '</button></div>';
+            '<div class="mcp-guide-hint">' + _mcpEsc(_mcpTr('mcp_usage_guide_hint', null, 'VO Agent 会在工具定义不足时按需读取。')) + '</div>';
     } catch (e) {
         row.innerHTML = '<span class="mcp-guide-error">' + _mcpEsc(_mcpTr('mcp_usage_guide_load_failed', { error: e.message }, '使用说明加载失败：{{error}}')) + '</span>';
     }
