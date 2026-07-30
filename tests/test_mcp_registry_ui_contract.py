@@ -56,3 +56,11 @@ def test_usage_guide_expands_as_a_full_width_card_section():
     assert "mcp-guide-actions" not in SCRIPT
     assert "grid-template-columns: minmax(0, 1fr)" in STYLES
     assert ".mcp-guide-row textarea" in STYLES
+
+
+def test_usage_guide_supports_archive_manager_ai_drafting():
+    assert 'data-mcp-action="ai-organize-guide"' in SCRIPT
+    assert "organizeMcpGuide" in SCRIPT
+    assert "/guide/ai-organize" in SCRIPT
+    assert "mcp_usage_guide_ai_organizing" in SCRIPT
+    assert "mcp-guide-ai:disabled" in STYLES

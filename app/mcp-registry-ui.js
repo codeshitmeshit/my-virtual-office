@@ -368,12 +368,44 @@ async function toggleMcpGuide(name) {
         if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_usage_guide_load_failed_plain', null, '使用说明加载失败'));
         row.innerHTML = '<div class="mcp-guide-header">' +
                 '<label for="mcp-guide-input-' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('mcp_usage_guide_title', null, '可选使用说明')) + '</label>' +
-                '<button type="button" class="mcp-guide-save" data-mcp-action="save-guide" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('save', null, '保存')) + '</button>' +
+                '<div class="mcp-guide-header-actions">' +
+                    '<button type="button" class="mcp-guide-ai" data-mcp-action="ai-organize-guide" data-mcp-name="' + _mcpEsc(name) + '">✦ ' + _mcpEsc(_mcpTr('mcp_usage_guide_ai_organize', null, 'AI 整理')) + '</button>' +
+                    '<button type="button" class="mcp-guide-save" data-mcp-action="save-guide" data-mcp-name="' + _mcpEsc(name) + '">' + _mcpEsc(_mcpTr('save', null, '保存')) + '</button>' +
+                '</div>' +
             '</div>' +
             '<textarea id="mcp-guide-input-' + _mcpEsc(name) + '" maxlength="20000" placeholder="' + _mcpEsc(_mcpTr('mcp_usage_guide_placeholder', null, '仅填写工具定义之外的流程、约束或注意事项。')) + '">' + _mcpEsc(data.guide || '') + '</textarea>' +
             '<div class="mcp-guide-hint">' + _mcpEsc(_mcpTr('mcp_usage_guide_hint', null, 'VO Agent 会在工具定义不足时按需读取。')) + '</div>';
     } catch (e) {
         row.innerHTML = '<span class="mcp-guide-error">' + _mcpEsc(_mcpTr('mcp_usage_guide_load_failed', { error: e.message }, '使用说明加载失败：{{error}}')) + '</span>';
+    }
+}
+
+async function organizeMcpGuide(name, button) {
+    var input = document.getElementById('mcp-guide-input-' + name);
+    if (!input || !button || button.disabled) return;
+    var idleText = button.textContent;
+    button.disabled = true;
+    button.setAttribute('aria-busy', 'true');
+    button.textContent = _mcpTr('mcp_usage_guide_ai_organizing', null, '整理中…');
+    try {
+        var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name) + '/guide/ai-organize', {
+            method: 'POST'
+        });
+        var data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || _mcpTr('mcp_usage_guide_ai_failed_plain', null, 'AI 整理失败'));
+        input.value = data.guide || '';
+        input.focus();
+        if (typeof _acpShowToast === 'function') {
+            _acpShowToast(_mcpTr('mcp_usage_guide_ai_ready', null, 'AI 已生成使用说明，请确认后保存'));
+        }
+    } catch (e) {
+        if (typeof _acpShowToast === 'function') {
+            _acpShowToast(_mcpTr('mcp_usage_guide_ai_failed', { error: e.message }, 'AI 整理失败：{{error}}'));
+        }
+    } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.textContent = idleText;
     }
 }
 
@@ -418,6 +450,7 @@ document.addEventListener('click', function(e) {
     if (action === 'openclaw' || action === 'codex' || action === 'claude') registerMcpInNativeClient(name, action);
     if (action === 'save-access') saveMcpAgentAccess(name, actionButton);
     if (action === 'toggle-guide') toggleMcpGuide(name);
+    if (action === 'ai-organize-guide') organizeMcpGuide(name, actionButton);
     if (action === 'save-guide') saveMcpGuide(name);
     if (action === 'delete') deleteMcpServer(name);
 });
@@ -459,6 +492,7 @@ Object.assign(window, {
     setMcpBranchAccess,
     saveMcpAgentAccess,
     toggleMcpGuide,
+    organizeMcpGuide,
     saveMcpGuide,
     copyMcpConnection,
     deleteMcpServer

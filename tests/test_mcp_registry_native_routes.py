@@ -76,15 +76,23 @@ def test_assignment_and_guide_routes(monkeypatch):
         "_handle_mcp_registry_save_guide",
         lambda name, body: calls.append(("save-guide", name, body)) or {"ok": True},
     )
+    monkeypatch.setattr(
+        mcp_registry,
+        "_handle_mcp_registry_organize_guide",
+        lambda name: calls.append(("organize-guide", name))
+        or {"ok": True, "guide": "draft"},
+    )
 
     assert _post("/api/mcp-registry/echo/assign-agent")[:2] == (True, 200)
     assert _post("/api/mcp-registry/echo/assign-agents")[:2] == (True, 200)
     assert _post("/api/mcp-registry/echo/skill")[0] is False
     assert _get("/api/mcp-registry/echo/guide")[:2] == (True, 200)
     assert _post("/api/mcp-registry/echo/guide")[:2] == (True, 200)
+    assert _post("/api/mcp-registry/echo/guide/ai-organize")[:2] == (True, 200)
     assert [call[:2] for call in calls] == [
         ("assign-agent", "echo"),
         ("assign-agents", "echo"),
         ("get-guide", "echo"),
         ("save-guide", "echo"),
+        ("organize-guide", "echo"),
     ]

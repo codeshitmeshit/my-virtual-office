@@ -10,12 +10,20 @@ import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 SCHEMA_VERSION = 1
 REGISTRY_FILENAME = "mcp-registry.json"
 _SAFE_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9_.-]{0,62}[a-z0-9])?$")
 _SAFE_AGENT_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9_.:-]{0,126}[A-Za-z0-9])?$")
+_usage_guide_organizer_provider: Callable[[], Any] | None = None
+
+
+def configure_usage_guide_organizer(provider: Callable[[], Any]) -> None:
+    """Inject the archive-manager guide organizer from the server composition root."""
+
+    global _usage_guide_organizer_provider
+    _usage_guide_organizer_provider = provider
 
 
 def _server_module():
@@ -269,6 +277,37 @@ def _handle_mcp_registry_save_guide(name: str, body: dict[str, Any]) -> dict[str
     registry.setdefault("servers", {})[server["name"]] = server
     _save_registry(registry)
     return mcp_usage_guides.guide_payload(server)
+
+
+def _handle_mcp_registry_organize_guide(name: str) -> dict[str, Any]:
+    _, server = _get_server(name)
+    if not server:
+        return {"ok": False, "error": f"MCP server '{name}' not found", "_status": 404}
+    if _usage_guide_organizer_provider is None:
+        return {
+            "ok": False,
+            "code": "archive_manager_unavailable",
+            "error": "未找到可用的档案管理员",
+            "_status": 503,
+        }
+    from services.mcp_usage_guide_organization import McpGuideOrganizationError
+
+    try:
+        return _usage_guide_organizer_provider().organize(server)
+    except McpGuideOrganizationError as exc:
+        return {
+            "ok": False,
+            "code": exc.code,
+            "error": str(exc),
+            "_status": exc.status,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "code": "mcp_guide_organization_failed",
+            "error": str(exc),
+            "_status": 502,
+        }
 
 
 def _handle_mcp_registry_save(body: dict[str, Any]) -> dict[str, Any]:

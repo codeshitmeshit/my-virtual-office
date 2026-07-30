@@ -381,6 +381,12 @@
     font-size: 8px;
 }
 
+.mcp-guide-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
 .mcp-guide-row textarea {
     width: 100%;
     min-width: 0;
@@ -404,6 +410,26 @@
     background: rgba(246, 214, 74, 0.08);
     border: 1px solid rgba(246, 214, 74, 0.45);
     cursor: pointer;
+}
+
+.mcp-guide-row .mcp-guide-ai {
+    flex: 0 0 auto;
+    padding: 0 13px;
+    color: #d8c6ff;
+    background: rgba(139, 112, 214, 0.1);
+    border: 1px solid rgba(151, 124, 225, 0.4);
+    cursor: pointer;
+}
+
+.mcp-guide-row .mcp-guide-ai:hover {
+    color: #f1eaff;
+    background: rgba(139, 112, 214, 0.18);
+    border-color: rgba(171, 145, 239, 0.68);
+}
+
+.mcp-guide-row .mcp-guide-ai:disabled {
+    cursor: wait;
+    opacity: 0.55;
 }
 
 .mcp-guide-row .mcp-guide-save:hover {
@@ -447,5 +473,10 @@
 
     .mcp-card-actions {
         justify-content: flex-end;
+    }
+
+    .mcp-guide-header {
+        align-items: flex-start;
+        flex-direction: column;
     }
 }

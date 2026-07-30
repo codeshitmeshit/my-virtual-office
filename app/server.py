@@ -81,6 +81,7 @@ from services import archive_manager_lifecycle as archive_manager_lifecycle_serv
 from server_services.agents import _handle_agents_list
 from server_services.browser_runtime import _handle_browser_status
 from server_services.config_runtime import _handle_health
+from server_services import mcp_registry as mcp_registry_service
 from services.weather_config import resolve_weather_location
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
@@ -109,6 +110,10 @@ from services.skill_library_organization_admin import SkillLibraryOrganizationAd
 from services.skill_library_organization_runs import SkillLibraryOrganizationService
 from services.skill_library_organization_runtime import SkillLibraryOrganizationRuntime
 from services import skill_library_organization_config
+from services.mcp_tool_introspection import inspect_stdio_tools
+from services.mcp_usage_guide_organization import (
+    McpUsageGuideOrganizationService,
+)
 from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import is_marked_project, orchestration_state, project_projection
 from services.chat_history_jsonl_cache import JsonlSnapshotCache
@@ -37207,8 +37212,48 @@ def _skill_library_organization_runtime():
     )
 
 
+def _mcp_usage_guide_organization_runtime():
+    archive_adapter = _skill_library_archive_manager_adapter()
+
+    def record_result(name, successful, error):
+        state = _archive_manager_load_state()
+        _archive_manager_append_activity(
+            state,
+            "mcp_usage_guide_organization",
+            "ok" if successful else "error",
+            f"MCP 使用说明整理完成：{name}"
+            if successful
+            else f"MCP 使用说明整理失败：{name}",
+            error=error,
+        )
+        _archive_manager_save_state(state)
+
+    return McpUsageGuideOrganizationService(
+        coordinator=ARCHIVE_MANAGER_WORK_COORDINATOR,
+        manager_state=archive_adapter.manager_state,
+        call_archive_manager=lambda agent_id, prompt, timeout: _wf_call_agent(
+            agent_id,
+            prompt,
+            timeout=timeout,
+            project_id="",
+            task_id="mcp-usage-guide-organization",
+        ),
+        inspect_tools=lambda server: inspect_stdio_tools(server),
+        documentation_roots=(
+            Path(APP_DIR).parent / ".codex" / "skills",
+            Path(_get_skills_library_dir()),
+        ),
+        mark_manager_working=archive_adapter.mark_working,
+        finalize_manager=archive_adapter.finalize,
+        record_result=record_result,
+    )
+
+
 server_routes.skill_library_organization.configure_runtime(
     _skill_library_organization_runtime
+)
+mcp_registry_service.configure_usage_guide_organizer(
+    _mcp_usage_guide_organization_runtime
 )
 
 
