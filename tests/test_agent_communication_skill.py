@@ -31,6 +31,32 @@ def test_canonical_loader_matches_repository_skill():
     assert "直接调用 OpenClaw 私有 session" in content
 
 
+def test_skill_requires_original_channel_progress_notice_for_any_agent_interaction():
+    content = server._agent_platform_comm_skill_content()
+    assert "## 原通道进度告知" in content
+    assert "无论这次沟通是否很快，都必须先沿原始交互通道发送一条简短进度告知" in content
+    assert "用户必须能看出最终结论是在 Agent 交互之后得到的" in content
+    assert "需要询问其他 VO Agent “之前做了什么”" in content
+    assert "即使预计很快拿到结果" in content
+    assert "sourceSurface=feishu-dm/feishu-group" in content
+    assert "POST /api/feishu-chat/original-channel-notice" in content
+    assert "该 endpoint 是 Virtual Office 通用能力，不属于 Codex 私有工具" in content
+    assert "missing_feishu_chat_id" in content
+    assert "只有完全不涉及其他 Agent 交互的本地快速回复，才不需要发送这条进度告知" in content
+
+
+def test_skill_examples_forbid_collapsing_notice_into_final_answer():
+    content = server._agent_platform_comm_skill_content()
+    assert "### 必须拆成两条消息的示例" in content
+    assert "问问分析师他现在有哪些 skill" in content
+    assert "先在用户原来的聊天通道发送" in content
+    assert "先调用 `/api/feishu-chat/original-channel-notice`" in content
+    assert "再调用 `/api/agent-platform-communications/send` 联系分析师" in content
+    assert "直接调用目标 Agent 后，只发送一条最终回复" in content
+    assert "在最终回复开头补一句“问到了”或“已询问”，但没有提前发送独立的原通道进度告知" in content
+    assert "最终答案不能替代进度告知" in content
+
+
 def test_canonical_loader_rejects_wrong_identity():
     old_path = server.CANONICAL_AGENT_COMM_SKILL_PATH
     with tempfile.TemporaryDirectory() as tmp:

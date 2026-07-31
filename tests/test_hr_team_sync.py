@@ -102,11 +102,13 @@ def test_team_sync_command_exposes_processing_then_terminal_state(tmp_path):
             )
 
     callbacks = []
+    published = []
     commands = HRTeamSyncCommands(
         HRTeamSyncService(Coordinator(), lambda _force: []),
         HRCommandStatusTracker(repository),
         submit=lambda callback: callbacks.append(callback) or True,
         new_id=iter(("sync-1", "sync-2")).__next__,
+        publish_directory=lambda: published.append("entry-skill"),
     )
 
     assert commands.sync().accepted is True
@@ -117,3 +119,4 @@ def test_team_sync_command_exposes_processing_then_terminal_state(tmp_path):
     activity = repository.list_hr_activity().items[0]
     assert activity.action == "sync"
     assert activity.status == "complete"
+    assert published == ["entry-skill"]

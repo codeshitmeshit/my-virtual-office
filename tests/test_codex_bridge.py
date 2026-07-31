@@ -224,6 +224,27 @@ def make_fake_codex(tmp):
     return path
 
 
+def test_app_server_client_resolves_command_name_binary_from_path():
+    with tempfile.TemporaryDirectory() as tmp:
+        fake = make_fake_codex(tmp)
+        old_path = os.environ.get("PATH")
+        old_bin = os.environ.pop("VO_CODEX_BIN", None)
+        os.environ["PATH"] = tmp
+        try:
+            client = CodexAppServerClient(tmp, binary="codex")
+            try:
+                assert client.binary == fake
+            finally:
+                client.close()
+        finally:
+            if old_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = old_path
+            if old_bin is not None:
+                os.environ["VO_CODEX_BIN"] = old_bin
+
+
 def wait_for_file(path, timeout=1.0):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:

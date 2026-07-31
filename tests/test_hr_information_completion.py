@@ -155,11 +155,13 @@ def test_command_is_async_single_flight_and_records_bounded_activity(tmp_path):
         new_id=iter([f"service-{index}" for index in range(30)]).__next__,
     )
     queued = []
+    published = []
     commands = HRInformationCompletionCommands(
         service,
         tracker=HRCommandStatusTracker(repo),
         submit=lambda callback: queued.append(callback) or True,
         new_id=iter(("command-1", "command-2", "command-3")).__next__,
+        publish_directory=lambda: published.append("entry-skill"),
     )
 
     first = commands.complete()
@@ -178,6 +180,7 @@ def test_command_is_async_single_flight_and_records_bounded_activity(tmp_path):
     assert activity.action == "complete_information"
     assert activity.status == "complete"
     assert activity.context["published"] == 2
+    assert published == ["entry-skill"]
 
 
 def test_failed_summary_records_agent_diagnostics_in_command_context(tmp_path):

@@ -151,6 +151,7 @@ class HRTeamSyncCommands:
         *,
         submit: Callable[[Callable[[], None]], bool] | None = None,
         new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+        publish_directory: Callable[[], object] | None = None,
     ):
         if not isinstance(service, HRTeamSyncService):
             raise HRTeamSyncValidationError("team sync service is invalid")
@@ -160,6 +161,7 @@ class HRTeamSyncCommands:
         self._tracker = tracker
         self._submit = submit or self._thread_submit
         self._new_id = new_id
+        self._publish_directory = publish_directory
         self._lock = threading.Lock()
         self._running = False
 
@@ -185,6 +187,12 @@ class HRTeamSyncCommands:
             try:
                 self._tracker.running(command_id)
                 result = self._service.sync()
+                publish_error = ""
+                if self._publish_directory is not None:
+                    try:
+                        self._publish_directory()
+                    except Exception as exc:
+                        publish_error = str(getattr(exc, "code", "hr_directory_skill_publish_failed"))
                 context = {
                     "discovered": result.discovered,
                     "created": len(result.created),
@@ -192,6 +200,7 @@ class HRTeamSyncCommands:
                     "reactivated": len(result.reactivated),
                     "inactivated": len(result.inactivated),
                     "failed": len(result.failed),
+                    **({"skillPublishError": publish_error} if publish_error else {}),
                 }
                 if result.failed:
                     self._tracker.failed(
@@ -232,6 +241,11 @@ def build_hr_team_sync(
     repository: HRRepository,
     *,
     roster_provider: Callable[[bool], Sequence[Mapping[str, object]]],
+    publish_directory: Callable[[], object] | None = None,
 ) -> HRTeamSyncCommands:
     service = HRTeamSyncService(HRDirectoryService(repository), roster_provider)
-    return HRTeamSyncCommands(service, HRCommandStatusTracker(repository))
+    return HRTeamSyncCommands(
+        service,
+        HRCommandStatusTracker(repository),
+        publish_directory=publish_directory,
+    )

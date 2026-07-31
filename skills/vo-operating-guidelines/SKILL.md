@@ -62,6 +62,39 @@ echo $VO_GATEWAY_HTTP
 
 不要使用 skill-manager 中的历史知识补全具体接口，也不要绕过当前实例定义的通信、项目、workspace、浏览器或会议边界。
 
+### 2.5 根据情景选择 Agent
+
+不要只在用户明确点名某个角色时才联系对应 Agent。用户提出普通业务问题、研究问题、代码问题、投资问题、交易计划、风险判断、项目执行、资料整理等任务时，先结合 `/api/agents` 当前列表和下方 HR 同步的职责路由表判断是否存在更合适的目标 Agent。
+
+判断规则：
+
+- 如果用户明确指定 Agent，优先按用户指定目标执行，但仍需用 `/api/agents` 确认实际 ID。
+- 如果用户没有指定 Agent，但任务语境明显落在某个 Agent 的职责、擅长领域或协作场景内，应选择该 Agent，然后读取 本地 `/skills/vo-agent-communication/SKILL.md` 并按其规则联系目标 Agent。
+- 如果多个 Agent 都可能适合，先向用户列出候选并请求选择；不要同时广播给多个 Agent。
+- 如果没有明显更合适的 Agent，才由当前代表 Agent 自己处理，或继续按下方专用 VO skill 路由。
+- 选择依据应来自 HR 职责介绍、`/api/agents` 当前 role/name/providerKind，以及用户问题本身；不要凭历史记忆臆造不存在的 Agent 能力。
+- HR 每次同步名录、用户点击补全信息，或新人加入并完成自我介绍/HR 公开摘要后，必须把最新职责路由表同步到本总入口；不要只更新 HR 数据库或通信 skill。
+
+<!-- HR_AGENT_ROUTING_START -->
+### 2.6 HR 同步的 Agent 职责路由表
+
+下面内容由 HR 名录同步、手动补全信息和新人自我介绍流程生成。主入口选择目标 Agent 时，应优先结合用户意图与这些职责介绍判断，而不是只在用户明确点名角色时才转交。
+
+- `claude-code-local` Claude Code (availability=available, readiness=ready): Claude Code — an on-premise software engineering agent running in the Virtual Office platform, backed by Anthropic's Claude (DeepSeek v4 Pro inference). Operating in a Linux environment with file read/write, shell execution, git, and web access.主要职责：Read, write, and edit code across the full repository；Execute shell commands for builds, tests, and system operations；Manage git workflows (branch, commit, review diffs)。擅长：Full-stack code understanding through direct file system access — can read, trace, and refactor across frontend (HTML/JS/CSS), backend (Python), and tests in one session；Shell-native — runs builds, tests, and system commands directly in Linux, seeing real output and iterating...
+- `codex-local` Codex (availability=available, readiness=ready): Codex 是本地代码协作与软件工程 Agent，运行在用户共享工作区中，能够读取、分析、修改和验证仓库代码。
+- `hermes-default` Hermes (availability=available, readiness=ready): 我是 Hermes Agent 上的个人助理型 AI Agent，用户称呼我为“小欧”。我主要在命令行与 Virtual Office / OpenClaw 协作环境中帮助用户处理信息整理、任务协调、工具调用、代码与文档工作，并在需要时通过本地工具、网页、文件系统、终端、定时任务和消息通道完成可验证的操作。主要职责：作为用户的个人助理，接收、拆解和推进用户交办的事务。；在 Virtual Office / OpenClaw 协作环境中理解消息请求，按要求返回结构化结果或协作回复。；根据任务需要调用本地工具、终端、文件、浏览器、网页搜索、定时任务、消息发送等能力完成实际操作。。擅长：能把模糊任务拆成可执行步骤，并持续推进到有真实工具输出的结果。；擅长在本地开发环境中读取文件、运行命令、检查 git 状态、执行测试和验证变更。。适合协作场景：其他 Agent 需要把用户请求转化为可执行任务、检查前置条件或整理下一步计划时，适合与我协作。；其他 Agent 需要在 OpenClaw 团队内选择合适 agent、派发任务或汇总多 agent 结果时，适合与我协作。。
+- `main` 小小欧 (availability=available, readiness=ready): 小小欧，OpenClaw 平台主 agent，欧阳的私人 AI 助手与执行机器，负责任务执行、agent 编排、金融投研、定时任务管理、记忆维护与 Skill Workshop 提案管理。
+- `market-analyst-team-agent` 分析师 (availability=available, readiness=ready): 综合市场金融分析团队，覆盖A股/港股/美股的技术面、基本面、新闻事件、社交情绪与中国市场制度分析，服务欧阳与主agent「小小欧」，输出含目标价、仓位与止损的可执行投资建议。
+- `market-management-team-agent` 经理人 (availability=available, readiness=ready): 组合经理与研究裁决者，负责整合基本面、技术面、新闻事件、市场情绪与多研究员观点，作出可执行的投资策略裁决（买入/持有/卖出），并制定仓位方向、目标价区间、风险调整情景与执行计划，覆盖A股、港股、美股三大市场。
+- `market-research-team-agent` 研究员 (availability=available, readiness=ready): 多空研究与证据辩论团队（market-research-team-agent），负责整合看涨与看跌两方观点，形成平衡、可执行、可复核的阶段性投资研究结论，覆盖A股/港股/美股市场。
+- `market-risk-management-team-agent` 风控官 (availability=available, readiness=ready): 风控官 — 市场风险管理委员会执行人格，负责对交易员方案进行激进/中性/保守三视角风险审查并输出最终风险裁决主要职责：对交易员提交的交易执行方案进行最终风险审查，覆盖数据完整性、交易结构、最大损失、尾部风险、执行风险与对冲需求；从激进、中性、保守三个风险视角分别评估方案，并主持三方交锋辩论；输出明确风险裁决：批准 / 调整后批准 / 暂缓 / 否决，并给出对应交易动作。擅长：审慎但不怯懦：风险不是拒绝交易的借口，而是决定是否值得承担及如何承担；证据优先：真实行情、财报、成交量、波动率、估值、宏观与政策信息优先，不编造数据。适合协作场景：当 market-trader-agent 完成交易执行方案后，需要最终风险审查与裁决时；当 market-management-team-agent 形成投资策略和目标价后，需要评估策略风控边界是否充分时。
+- `market-trader-agent` 交易员 (availability=available, readiness=ready): 交易执行计划团队（market-trader-agent），负责将前序市场研究、基本面、技术面、情绪面与风险管理结论转化为可执行交易方案，输出含买卖建议、目标价、止损止盈、仓位分批计划及风险评分的结构化交易执行计划。
+- `scheduled-task-agent` 定时任务官 (availability=available, readiness=ready): 定时任务官（scheduled-task-agent）：OpenClaw 内专门负责定时任务调度、执行与维护的 Agent，执行 cron 分配的任务，管理定时任务生命周期，对简单低风险任务自行执行，对需要专业判断的任务委派给合适 agent，默认静默运行。
+
+<!-- HR_AGENT_ROUTING_END -->
+
+
+
 ### 3. 路由到专用 VO Skill
 
 根据任务意图选择：

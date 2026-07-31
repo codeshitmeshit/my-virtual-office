@@ -29,6 +29,64 @@ POST /api/agent-platform-communications/send
 - 猜测、补全或复用未确认的 Agent ID。
 - 传输凭据、密钥或敏感配置。
 
+## 原通道进度告知
+
+当你是从用户交互通道收到请求，并且需要通过本技能联系其他 VO Agent 时，无论这次沟通是否很快，都必须先沿原始交互通道发送一条简短进度告知，再继续调用 VO 通信 API。用户必须能看出最终结论是在 Agent 交互之后得到的。
+
+- 需要询问其他 VO Agent “之前做了什么”、查询对方状态、读取对方历史或等待对方回复。
+- 需要长时间调控、分阶段协调、跨 VO 通信或可能超过一次普通短问答的处理时间。
+- 已经决定把消息发送给另一个 Agent，即使预计很快拿到结果。
+
+告知内容要短，只说明“我会去问/已发送给目标 Agent，请稍等”或同等意思；不要提前编造目标 Agent 的结果。只有完全不涉及其他 Agent 交互的本地快速回复，才不需要发送这条进度告知。
+
+如果运行环境提供了原始来源信息，例如 `sourceApp=feishu`、`sourceSurface=feishu-dm/feishu-group`、`sourceMessageId`、`conversationId`、`feishuChatId` 或当前聊天窗口上下文，应优先使用同一个来源通道回复这条进度告知；不要改发到无关会话、默认群或 provider 私有通道。
+
+当 `sourceApp=feishu` 且 `feishuChatId` 存在时，这不是可选文字规则，而是可执行步骤：必须先调用 `POST /api/feishu-chat/original-channel-notice` 发送进度告知，再继续调用 `/api/agent-platform-communications/send` 联系其他 Agent。该 endpoint 是 Virtual Office 通用能力，不属于 Codex 私有工具；OpenClaw、Hermes、Claude Code、Codex 等 provider 只要能访问当前 VO HTTP 地址，都按同一规则使用。
+
+请求体：
+
+```json
+{
+  "sourceApp": "feishu",
+  "sourceSurface": "feishu-dm",
+  "sourceMessageId": "<来自 prompt/source context 的原飞书消息 id>",
+  "conversationId": "<来自 prompt/source context 的 VO 会话 id>",
+  "feishuChatId": "<来自 prompt/source context 的原飞书 chat id>",
+  "chatType": "p2p",
+  "text": "我去问分析师，请稍等。"
+}
+```
+
+群聊时 `sourceSurface` 应为 `feishu-group`，`chatType` 应为 `group`，并且必须带 `sourceMessageId`，这样 VO 会回复到原群消息。不要猜测或手填 `feishuChatId` 或 `conversationId`；如果 prompt/source context 没有 `feishuChatId`，不要假装已通知飞书，应报告或记录 `missing_feishu_chat_id`，然后再按任务需要继续或停止。
+
+没有可用原通道发送能力时，跳过进度告知，并在最终回复中说明已完成或遇到的阻塞。
+
+### 必须拆成两条消息的示例
+
+用户问：“问问分析师他现在有哪些 skill?”
+
+正确行为：
+
+1. 先在用户原来的聊天通道发送：“我去问分析师他当前有哪些 skill，请稍等。”
+2. 如果原通道是飞书，并且 source context 含有 `feishuChatId`，先调用 `/api/feishu-chat/original-channel-notice` 发送上面的进度告知。
+3. 再调用 `/api/agent-platform-communications/send` 联系分析师。
+4. 收到分析师回复后，再在原来的聊天通道发送最终结果：“分析师回复了，他现在有这些 skills: ...”
+
+错误行为：
+
+- 直接调用目标 Agent 后，只发送一条最终回复：“问到了。分析师当前可用的 skills 有: ...”
+- 在最终回复开头补一句“问到了”或“已询问”，但没有提前发送独立的原通道进度告知。
+- 因为目标 Agent 回复很快，就省略进度告知。
+
+更多必须先告知的场景：
+
+- 用户说：“问问 Hermes 对这个方案怎么看。”
+- 用户说：“让 Claude Code 看一下这个错误原因。”
+- 用户说：“问问 main 之前做了什么。”
+- 用户说：“把这段信息转给 analyst，然后告诉我他的回复。”
+
+这些场景即使可以很快完成，也必须先发送独立的进度告知消息；最终答案不能替代进度告知。
+
 ## 通信工作流
 
 ### 1. 确定 Virtual Office 地址
@@ -71,6 +129,29 @@ curl -sS "${VO_BASE_URL:-http://127.0.0.1:8090}/api/agents"
 - 目标不存在：报告不可用并停止，不自动转交给 `main` 或其他替代 Agent。
 - 目标为 `codex-local` 或 `providerKind=codex`：继续使用本流程和同一 VO 通信 endpoint，不启动私人 Codex CLI 或 OpenClaw session。
 - 无法确认发送方身份：报告缺失信息并停止。
+
+### 2.1 查询目标 Agent 的 skill 清单
+
+当用户要求“问某个 Agent 现在有哪些 skill”、“系统侧能看到哪些 skill”、“已安装和当前会话可用 skill 是否一致”时，必须把问题写成可验证的系统自检任务，而不是让目标 Agent 凭当前提示上下文自由自报。
+
+消息必须要求目标 Agent：
+
+- 区分“provider 原生已安装/可发现的 skill”与“当前会话 prompt 中显式出现的指令片段”。
+- 以实际 skill 目录、provider 自带 skill 列表命令、或 VO 暴露的 workspace/skills API 返回为准；不要仅凭模型记忆、当前上下文里出现过的 skill 名称、或历史会话结论回答。
+- 如果只能看到部分 skill，必须说明这是“当前上下文可见范围”，不能说成“系统只安装了这些”。
+- 如果发现数量不一致，必须列出核验来源、完整已安装列表、当前上下文可见列表和缺失项。
+- 不要使用或传播 `vo_synced_skills`、`MAX_PROMPT_SKILLS`、`当前注入 12 个` 这类已废弃 VO prompt 注入模型作为事实依据，除非它能在当前运行代码或当前 provider 日志中被重新验证。
+
+推荐消息模板：
+
+```text
+请自检你当前系统侧能看到哪些 skill。请不要只按当前对话上下文自报。
+请分别返回：
+1. provider 原生已安装/可发现的 skill 清单及核验来源；
+2. 当前会话 prompt 中显式可见的 skill/指令片段，如果无法直接核验请说明；
+3. 两者是否一致，若不一致列出缺失项；
+4. 不要把旧的 VO synced prompt 注入上限或历史会话结论当作当前事实。
+```
 
 ### 3. 选择 Conversation ID
 

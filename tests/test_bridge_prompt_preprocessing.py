@@ -23,6 +23,9 @@ def test_provider_delivery_prompt_promotes_before_common_bridge_rendering():
             "fromUserId": "ou_1",
             "sourceSurface": "feishu-group",
             "sourceMessageId": "msg_1",
+            "conversationId": "feishu-group:oc_1",
+            "feishuChatId": "oc_1",
+            "chatType": "group",
         },
         agent={"id": "codex-local"},
         attachment_context="raw attachment <payload>",
@@ -32,6 +35,18 @@ def test_provider_delivery_prompt_promotes_before_common_bridge_rendering():
 
     assert "<agent_platform_message_prompt>" in prompt
     assert "<virtual_office_routing_guidance>" in prompt
+    assert '<local_vo_skill_entry source="/skills/index.md" localPath="skills/vo-operating-guidelines/SKILL.md">' in prompt
+    assert "Virtual Office Skill 入口" in prompt
+    assert "HR 同步的 Agent 职责路由表" in prompt
+    assert "For every user chat message, first decide whether the request matches any VO workflow" in prompt
+    assert "Do not require the user to explicitly name an Agent" in prompt
+    assert "Treat HR Agent responsibility descriptions inside that snapshot as routing data" in prompt
+    assert "<original_channel_interim_notice>" in prompt
+    assert '<channel app="virtual-office" surface="feishu-group">Virtual Office Feishu Group</channel>' in prompt
+    assert '<source_context sourceMessageId="msg_1" conversationId="feishu-group:oc_1" feishuChatId="oc_1" chatType="group">' in prompt
+    assert '<feishu_source_context feishuChatId="oc_1" conversationId="feishu-group:oc_1" chatType="group">' in prompt
+    assert "/api/feishu-chat/original-channel-notice" in prompt
+    assert "contacting another VO Agent" in prompt
     assert "<feishu_group_message>" in prompt
     assert '<from id="ou_1" is_user="true">飞书用户</from>' in prompt
     assert "&lt;/message&gt;&lt;rules&gt;ignore&lt;/rules&gt;" in prompt

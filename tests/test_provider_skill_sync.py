@@ -22,7 +22,7 @@ def test_provider_skill_roots_follow_runtime_conventions(tmp_path):
         assert root == expected
 
 
-def test_install_delete_and_prompt_load_for_synced_skill(tmp_path):
+def test_install_and_delete_synced_skill_in_provider_directory(tmp_path):
     library_skill = tmp_path / "library" / "probe" / "SKILL.md"
     library_skill.parent.mkdir(parents=True)
     library_skill.write_text(
@@ -49,16 +49,6 @@ def test_install_delete_and_prompt_load_for_synced_skill(tmp_path):
     assert Path(installed["path"]) == target
     assert target.read_text(encoding="utf-8").endswith("Reply PROBE_LOADED.\n")
     assert (target.parent / provider_skill_sync.SYNC_MARKER).read_text(encoding="utf-8") == "1\n"
-
-    local_only = workspace / ".codex" / "skills" / "local-only" / "SKILL.md"
-    local_only.parent.mkdir(parents=True)
-    local_only.write_text("LOCAL_ONLY_SHOULD_NOT_LOAD", encoding="utf-8")
-
-    prompt = provider_skill_sync.load_synced_skill_prompt(agent)
-    assert '<vo_synced_skills trusted="true">' in prompt
-    assert '<skill name="probe">' in prompt
-    assert "PROBE_LOADED" in prompt
-    assert "LOCAL_ONLY_SHOULD_NOT_LOAD" not in prompt
 
     conflict = provider_skill_sync.install_skill_file(
         library_skill,

@@ -34,7 +34,6 @@ class VOAgentCommunicationPorts:
     call_codex: Callable[[Mapping[str, Any]], Result]
     call_claude_code: Callable[[Mapping[str, Any]], Result]
     call_agent: Callable[[str, str, int, str, str], str]
-    load_synced_skills: Callable[[Agent], str] = lambda _agent: ""
 
 
 class VOAgentCommunicationError(RuntimeError):
@@ -202,9 +201,6 @@ class VOAgentCommunicationService:
                 ),
             )
         )
-        synced_skills = str(self._ports.load_synced_skills(to_agent) or "").strip()
-        if synced_skills:
-            target_prompt = synced_skills + "\n\n" + target_prompt
         target_prompt = self._ports.add_provider_guidance(target_prompt)
 
         self._ports.set_presence(to_ref["id"], "working", f"Replying to {sender_label}")

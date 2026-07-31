@@ -1,4 +1,4 @@
-"""Provider-neutral skill installation and prompt loading for VO agents."""
+"""Provider-neutral skill installation for VO agents."""
 
 from __future__ import annotations
 
@@ -8,15 +8,6 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
-try:
-    from services import business_prompt_bridge
-except ModuleNotFoundError:  # pragma: no cover - supports app.services imports in tests.
-    from app.services import business_prompt_bridge
-
-
-MAX_SKILL_BYTES = 64 * 1024
-MAX_PROMPT_BYTES = 96 * 1024
-MAX_PROMPT_SKILLS = 12
 SYNC_MARKER = ".vo-synced-skill"
 _SAFE_SKILL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$")
 
@@ -118,58 +109,3 @@ def delete_skill(skill_name: str, agent: Mapping[str, Any]) -> dict[str, Any]:
         "providerKind": agent.get("providerKind") or "",
         "path": str(target),
     }
-
-
-def load_synced_skill_prompt(agent: Mapping[str, Any]) -> str:
-    try:
-        root = skill_root_for_agent(agent)
-    except SkillSyncError:
-        return ""
-    if not root.is_dir():
-        return ""
-
-    blocks: list[str] = []
-    consumed = 0
-    for skill_dir in sorted(root.iterdir(), key=lambda item: item.name.lower()):
-        if len(blocks) >= MAX_PROMPT_SKILLS or not skill_dir.is_dir():
-            continue
-        try:
-            name = normalize_skill_name(skill_dir.name)
-        except SkillSyncError:
-            continue
-        if not (skill_dir / SYNC_MARKER).is_file():
-            continue
-        skill_file = skill_dir / "SKILL.md"
-        if not skill_file.is_file() or skill_file.is_symlink():
-            continue
-        try:
-            raw = skill_file.read_bytes()[:MAX_SKILL_BYTES]
-            content = raw.decode("utf-8", errors="replace").strip()
-        except OSError:
-            continue
-        if not content:
-            continue
-        if consumed + len(content.encode("utf-8", errors="replace")) > MAX_PROMPT_BYTES:
-            break
-        consumed += len(content.encode("utf-8", errors="replace"))
-        blocks.append({"name": "skill", "value": content, "attrs": {"name": name}})
-
-    if not blocks:
-        return ""
-    return business_prompt_bridge.render_business_prompt(
-        {
-            "domain": "provider.skill_sync",
-            "operation": "inject",
-            "locale": "en-US",
-            "root": "vo_synced_skills",
-            "attrs": {"trusted": "true"},
-            "sections": [
-                {
-                    "name": "instruction",
-                    "value": "These skills were explicitly synced to the target Virtual Office agent. Use them when their frontmatter description or instructions match the user request.",
-                    "trusted": True,
-                },
-                *blocks,
-            ],
-        }
-    )

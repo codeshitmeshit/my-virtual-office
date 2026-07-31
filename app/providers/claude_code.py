@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import threading
 import time
+import glob
 from dataclasses import dataclass
 from typing import Any
 
@@ -484,6 +485,7 @@ class ClaudeCodeProvider:
             os.environ.get("VO_CLAUDE_CODE_BIN"),
             os.environ.get("VO_CLAUDE_BIN"),
             shutil.which("claude"),
+            *sorted(glob.glob(os.path.expanduser("~/.nvm/versions/node/*/bin/claude")), reverse=True),
             os.path.expanduser("~/.npm-global/bin/claude"),
             os.path.expanduser("~/.local/bin/claude"),
             "/usr/local/bin/claude",

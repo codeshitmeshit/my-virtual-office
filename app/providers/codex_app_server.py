@@ -21,6 +21,24 @@ from provider_app_server import AppServerResponseError, JsonlAppServerRuntime
 from providers.codex_launch_policy import build_codex_app_server_command
 
 
+def _resolve_codex_binary(value: str | None) -> str:
+    """Resolve command names like ``codex`` before spawning app-server."""
+    candidates = [
+        value,
+        os.environ.get("VO_CODEX_BIN"),
+        shutil.which("codex"),
+        os.path.expanduser("~/.local/bin/codex"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        expanded = os.path.expanduser(str(candidate))
+        resolved = shutil.which(expanded) if os.path.basename(expanded) == expanded else expanded
+        if resolved and os.path.isfile(resolved):
+            return resolved
+    return os.path.expanduser(str(value or os.environ.get("VO_CODEX_BIN") or "codex"))
+
+
 APPROVAL_METHODS = {
     "item/commandExecution/requestApproval",
     "item/fileChange/requestApproval",
@@ -690,7 +708,7 @@ class CodexAppServerClient:
     ):
         self.workspace = os.path.abspath(workspace)
         self.model = model or ""
-        self.binary = binary or os.environ.get("VO_CODEX_BIN") or shutil.which("codex") or "codex"
+        self.binary = _resolve_codex_binary(binary)
         self.profile = str(os.environ.get("VO_CODEX_PROFILE") or "").strip()
         self.route_approvals_through_vo = bool(route_approvals_through_vo)
         self.sandbox = self._normalize_sandbox(sandbox or os.environ.get("VO_CODEX_SANDBOX"))

@@ -277,6 +277,7 @@ class HRInformationCompletionCommands:
         tracker: HRCommandStatusTracker | None = None,
         submit: Callable[[Callable[[], None]], bool] | None = None,
         new_id: Callable[[], str] = lambda: uuid.uuid4().hex,
+        publish_directory: Callable[[], object] | None = None,
     ):
         if not isinstance(service, HRInformationCompletionService):
             raise HRInformationCompletionValidationError("completion service is invalid")
@@ -284,6 +285,7 @@ class HRInformationCompletionCommands:
         self._tracker = tracker
         self._submit = submit or self._thread_submit
         self._new_id = new_id
+        self._publish_directory = publish_directory
         self._lock = threading.Lock()
         self._running = False
 
@@ -315,6 +317,12 @@ class HRInformationCompletionCommands:
                 if self._tracker is not None:
                     self._tracker.running(command_id)
                 result = self._service.complete_missing()
+                publish_error = ""
+                if self._publish_directory is not None:
+                    try:
+                        self._publish_directory()
+                    except Exception as exc:
+                        publish_error = str(getattr(exc, "code", "hr_directory_skill_publish_failed"))
                 if self._tracker is not None:
                     context = {
                         "available": result.available,
@@ -323,6 +331,7 @@ class HRInformationCompletionCommands:
                         "noResponse": result.no_response,
                         "failed": result.failed,
                         "failures": _failure_context_items(result.items),
+                        **({"skillPublishError": publish_error} if publish_error else {}),
                     }
                     if result.failed:
                         self._tracker.failed(

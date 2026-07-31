@@ -74,6 +74,9 @@ from services import meeting_requests as meeting_requests_service
 from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
+from services import feishu_original_channel_notice as feishu_original_channel_notice_service
+from services import agent_followup_delivery
+from services.feishu_rich_text import extract_feishu_rich_text
 from services.meeting_priority_policy import (
     coerce_moderator_outcome_for_priority,
     default_ai_request_resolution_policy,
@@ -2874,12 +2877,6 @@ def _skill_sync_agent_context(agent_key):
     item["providerKind"] = provider
     item["workspace"] = os.path.abspath(os.path.expanduser(workspace)) if workspace else ""
     return item
-
-
-def _load_synced_skills_for_agent(agent):
-    key = str((agent or {}).get("id") or (agent or {}).get("statusKey") or "")
-    context = _skill_sync_agent_context(key) or dict(agent or {})
-    return provider_skill_sync.load_synced_skill_prompt(context)
 
 
 _WORKSPACE_TEXT_EXTS = {
@@ -7235,8 +7232,36 @@ def _handle_codex_chat(body):
         source_metadata = _comm_metadata(inbound_event)
         source_metadata = {
             k: v for k, v in source_metadata.items()
-            if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType"}
+            if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType", "chatType"}
         }
+        if (
+            str(source_metadata.get("sourceApp") or body.get("sourceApp") or "").strip().lower() == "feishu"
+            and not (body.get("_hostSideVoSkillContinuation") or body.get("_hostSideVoReadContinuation"))
+        ):
+            source_message_id = str(source_metadata.get("sourceMessageId") or body.get("sourceMessageId") or "").strip()
+            source_index = feishu_chat_channel.load_source_index(STATUS_DIR, source_message_id) if source_message_id else None
+            if isinstance(source_index, dict) and source_index.get("state") == "completed":
+                try:
+                    _deliver_feishu_agent_followup_notification(
+                        agent_id=agent_id,
+                        conversation_id=conversation_id,
+                        prompt_text=body.get("message") or "",
+                        reply=text,
+                        source_context={
+                            **body,
+                            **source_metadata,
+                            "sourceMessageId": source_message_id,
+                        },
+                        result={
+                            "ok": bool(ok),
+                            "status": "completed" if ok else "failed",
+                            "threadId": meta.get("threadId") or "",
+                            "turnId": meta.get("turnId") or "",
+                        },
+                        late=True,
+                    )
+                except Exception:
+                    pass
         if _find_comm_reply_for_request(inbound_event):
             with reply_event_lock:
                 reply_event_appended["done"] = True
@@ -8448,6 +8473,48 @@ def _codex_host_side_vo_read_continuation(read_result):
 
 def _codex_host_side_vo_skill_continuation(read_result):
     return _codex_host_side_vo_read_continuation(read_result)
+
+
+def _deliver_feishu_agent_followup_notification(
+    *,
+    agent_id,
+    conversation_id,
+    prompt_text,
+    reply,
+    source_context,
+    result=None,
+    late=False,
+    elapsed_ms=None,
+):
+    delivery = agent_followup_delivery.prepare_followup_delivery(
+        agent_id=agent_id or "",
+        conversation_id=conversation_id or "",
+        prompt_text=prompt_text or "",
+        reply=reply or "",
+        source_meta=source_context if isinstance(source_context, dict) else {},
+        result=result if isinstance(result, dict) else {},
+        late=late,
+        elapsed_ms=elapsed_ms,
+    )
+    if not delivery.should_notify:
+        return {
+            "ok": True,
+            "status": "not_required",
+            "reason": delivery.reason,
+            "chatReply": "",
+        }
+    send_result = send_feishu_markdown_message(
+        delivery.markdown,
+        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        timeout=20,
+    )
+    return {
+        "ok": bool(send_result.get("ok")),
+        "status": "sent" if send_result.get("ok") else "delivery_failed",
+        "reason": delivery.reason,
+        "chatReply": agent_followup_delivery.with_notification_status(delivery.chat_reply, send_result),
+        "sendResult": send_result,
+    }
 
 
 def _deliver_feishu_host_side_vo_continuation_reply(
@@ -10693,7 +10760,7 @@ def _find_comm_request_by_idempotency(idempotency_key, *, conversation_id="", ag
     return None
 
 
-def _find_comm_reply_for_request(request_event, *, limit=1000):
+def _find_comm_reply_for_request(request_event, *, limit=1000, include_interim=False):
     request_event = request_event if isinstance(request_event, dict) else {}
     request_id = request_event.get("id") or ""
     conversation_id = request_event.get("conversationId") or ""
@@ -10702,7 +10769,26 @@ def _find_comm_reply_for_request(request_event, *, limit=1000):
     for event in reversed(_load_comm_history(limit=limit, conversation_id=conversation_id or None)):
         if event.get("direction") != "reply":
             continue
+        if not include_interim and _comm_metadata(event).get("event") == "original_channel_notice":
+            continue
         if request_id and event.get("inReplyTo") == request_id:
+            return event
+    return None
+
+
+def _find_comm_original_channel_notice(source_message_id, text, *, conversation_id="", limit=1000):
+    source_message_id = str(source_message_id or "").strip()
+    text = str(text or "").strip()
+    if not source_message_id or not text:
+        return None
+    for event in reversed(_load_comm_history(limit=limit, conversation_id=conversation_id or None)):
+        metadata = _comm_metadata(event)
+        if (
+            event.get("direction") == "reply"
+            and metadata.get("event") == "original_channel_notice"
+            and metadata.get("sourceMessageId") == source_message_id
+            and str(event.get("text") or "").strip() == text
+        ):
             return event
     return None
 
@@ -10712,16 +10798,22 @@ def _append_feishu_delivery_comm_event(record):
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     if not source_message_id:
         return None
+    source_event = str(record.get("event") or "").strip()
     is_group = str(record.get("chatType") or "").lower() == "group" or str(record.get("sourceSurface") or "").lower() == "feishu-group"
     source_surface = "feishu-group" if is_group else "feishu-dm"
     source_label = "Feishu Group" if is_group else "Feishu DM"
     send_result = record.get("sendResult") if isinstance(record.get("sendResult"), dict) else {}
     for event in reversed(_load_comm_history(limit=1000, conversation_id=record.get("conversationId") or None)):
         metadata = _comm_metadata(event)
+        existing_event = str(metadata.get("event") or "").strip()
         if (
             event.get("type") == "operation"
             and event.get("operation") == "feishu_delivery"
             and metadata.get("sourceMessageId") == source_message_id
+            and (
+                existing_event == source_event
+                or (not existing_event and source_event != "original_channel_notice")
+            )
         ):
             return event
     return _append_comm_event({
@@ -10744,6 +10836,7 @@ def _append_feishu_delivery_comm_event(record):
             "sourceSurface": source_surface,
             "sourceLabel": source_label,
             "channel": "feishu",
+            "event": source_event,
             "sourceMessageId": source_message_id,
             "feishuChatId": record.get("feishuChatId") or "",
             "representativeAgentId": record.get("representativeAgentId") or "",
@@ -11538,7 +11631,6 @@ def _vo_agent_communication_service():
                 project_id=project_id,
                 task_id=task_id,
             ),
-            load_synced_skills=_load_synced_skills_for_agent,
         )
     )
 
@@ -14005,6 +14097,21 @@ def _start_feishu_chat_long_connection():
         return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER.start()
 
 
+def _handle_feishu_original_channel_notice(body):
+    receiver = _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
+
+    def send_command(operation, payload):
+        if not receiver:
+            return {"ok": False, "status": "command_unavailable", "category": "not_connected"}
+        return receiver.command(operation, payload, timeout=30)
+
+    return feishu_original_channel_notice_service.send_original_channel_notice(
+        body,
+        command_sender=send_command,
+        record_event=_record_feishu_channel_event,
+    )
+
+
 def _feishu_channel_record_path():
     return feishu_chat_channel.channel_record_path(STATUS_DIR)
 
@@ -14069,6 +14176,12 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
     event_name = str(record.get("event") or "").strip()
     source_message_id = str(record.get("sourceMessageId") or "").strip()
     conversation_id = str(record.get("conversationId") or "").strip()
+    request_event = None
+    if source_message_id and not conversation_id and event_name == "original_channel_notice":
+        request_event = _find_comm_request_by_source_message(source_message_id)
+        conversation_id = str((request_event or {}).get("conversationId") or "").strip()
+        if conversation_id:
+            record = {**record, "conversationId": conversation_id}
     if not source_message_id or not conversation_id:
         return None
     representative_agent_id = str(record.get("representativeAgentId") or "").strip()
@@ -14149,6 +14262,53 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
         if delivery_event:
             _publish_feishu_chat_comm_event(delivery_event, "delivery")
         return reply_event
+    if event_name == "original_channel_notice":
+        notice_text = str(record.get("text") or "").strip()
+        if not notice_text:
+            return None
+        request_event = request_event or _find_comm_request_by_source_message(source_message_id)
+        notice_event = _find_comm_original_channel_notice(
+            source_message_id,
+            notice_text,
+            conversation_id=conversation_id,
+        )
+        if not notice_event:
+            from_ref = (request_event or {}).get("to") if isinstance(request_event, dict) else None
+            if not isinstance(from_ref, dict) or not from_ref.get("id"):
+                from_ref = _office_agent_ref(representative_agent_id)
+            to_ref = (request_event or {}).get("from") if isinstance(request_event, dict) else None
+            if not isinstance(to_ref, dict) or not to_ref.get("id"):
+                to_ref = {
+                    "id": "user",
+                    "providerKind": "human",
+                    "name": "Feishu User",
+                    "sourceApp": "feishu",
+                    "sourceSurface": source_surface,
+                    "sourceLabel": source_label,
+                }
+            send_result = record.get("sendResult") if isinstance(record.get("sendResult"), dict) else {}
+            notice_event = _append_comm_event({
+                "type": "message",
+                "direction": "reply",
+                "conversationId": conversation_id,
+                "from": from_ref,
+                "to": to_ref,
+                "text": notice_text,
+                "inReplyTo": (request_event or {}).get("id") or "",
+                "metadata": {
+                    **metadata,
+                    "event": "original_channel_notice",
+                    "feishuNoticeMessageId": send_result.get("messageId") or "",
+                    "feishuSendResult": send_result,
+                },
+                "visibleInOffice": visible_in_office,
+                "ok": bool(send_result.get("ok", True)),
+            })
+            _publish_feishu_chat_comm_event(notice_event, "message")
+        delivery_event = _append_feishu_delivery_comm_event(record)
+        if delivery_event:
+            _publish_feishu_chat_comm_event(delivery_event, "delivery")
+        return notice_event
     if event_name == "command_completed":
         delivery_event = _append_feishu_delivery_comm_event(record)
         if delivery_event:
@@ -14521,12 +14681,41 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
     }
     if attachments:
         body["attachments"] = attachments
+    def route_followup_if_needed(result, *, elapsed_ms=0):
+        result = result if isinstance(result, dict) else {"ok": False, "status": "invalid_agent_result", "error": "Agent returned an invalid result"}
+        reply_text = str(result.get("reply") or result.get("error") or "").strip()
+        followup = _deliver_feishu_agent_followup_notification(
+            agent_id=agent_id,
+            conversation_id=conversation_id,
+            prompt_text=message,
+            reply=reply_text,
+            source_context=body,
+            result=result,
+            late=False,
+            elapsed_ms=elapsed_ms,
+        )
+        if followup.get("status") == "not_required":
+            return result
+        routed = {**result}
+        routed["feishuChatReply"] = followup.get("chatReply") or ""
+        routed["longTaskFollowup"] = {
+            "status": followup.get("status"),
+            "reason": followup.get("reason"),
+            "sendResult": followup.get("sendResult") or {},
+        }
+        return routed
     if provider_kind == "hermes":
-        return _handle_hermes_chat(body)
+        started_at = time.monotonic()
+        result = _handle_hermes_chat(body)
+        return route_followup_if_needed(result, elapsed_ms=int((time.monotonic() - started_at) * 1000))
     if provider_kind == "codex":
-        return _handle_codex_chat(body)
+        started_at = time.monotonic()
+        result = _handle_codex_chat(body)
+        return route_followup_if_needed(result, elapsed_ms=int((time.monotonic() - started_at) * 1000))
     if provider_kind == "claude-code":
-        return _handle_claude_code_chat(body)
+        started_at = time.monotonic()
+        result = _handle_claude_code_chat(body)
+        return route_followup_if_needed(result, elapsed_ms=int((time.monotonic() - started_at) * 1000))
     try:
         validated_attachments = _validated_provider_attachments(attachments)
     except (TypeError, ValueError, OSError) as exc:
@@ -14543,6 +14732,7 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
     key = _provider_conversation_key("openclaw", agent_id, conversation_id, agent_id=agent_id)
     native_id = _openclaw_conversation_session_key(agent_id, conversation_id)
     gateway_presence.set_manual_override(agent_id, "working", f"Replying to {sender_name}")
+    started_at = time.monotonic()
     try:
         reply = PROVIDER_CONVERSATION_SERVICE.deliver_queued(
             key,
@@ -14554,13 +14744,13 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
     finally:
         gateway_presence.set_manual_override(agent_id, "idle", "")
     ok = not str(reply or "").startswith("[ERROR]")
-    return {
+    return route_followup_if_needed({
         "ok": ok,
         "reply": reply,
         "error": "" if ok else reply,
         "conversationId": conversation_id,
         "agent": {"id": agent.get("id"), "name": agent.get("name"), "providerKind": provider_kind},
-    }
+    }, elapsed_ms=int((time.monotonic() - started_at) * 1000))
 
 
 def _handle_provider_chat_entry(body, handler):
@@ -14597,8 +14787,9 @@ def _adapt_feishu_chat_inbound_envelope(body):
         and str(item.get("type") or item.get("resourceType") or "").strip().lower() == "image"
         and (item.get("fileKey") or item.get("file_key"))
     ), {})
-    message_type = "image" if raw_type == "post" and image_resource else raw_type
-    content = {"text": str(message.get("content") or "")}
+    message_text = extract_feishu_rich_text(message.get("content"))
+    message_type = "image" if raw_type == "post" and image_resource else ("text" if raw_type == "post" and message_text else raw_type)
+    content = {"text": message_text}
     if message_type == "image":
         resource = image_resource or next((item for item in resources if isinstance(item, dict) and (item.get("fileKey") or item.get("file_key"))), {})
         content["image_key"] = resource.get("fileKey") or resource.get("file_key") or ""
@@ -14623,7 +14814,7 @@ def _adapt_feishu_chat_inbound_envelope(body):
                 "chat_id": chat_id,
                 "chat_type": str(message.get("chatType") or ""),
                 "message_type": message_type,
-                "text": str(message.get("content") or ""),
+                "text": message_text,
                 "content": content,
                 "createTime": message.get("createTime") or 0,
                 "rootId": message.get("rootId") or "",
@@ -31611,6 +31802,23 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result.pop("_status", None)
             self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-chat/original-channel-notice":
+            length = int(self.headers.get('Content-Length', 0))
+            if length > 64 * 1024:
+                result = {"ok": False, "error": "Feishu notice payload exceeds 65536 bytes", "_status": 413}
+            else:
+                try:
+                    body = json.loads(self.rfile.read(length)) if length else {}
+                    result = _handle_feishu_original_channel_notice(body)
+                except json.JSONDecodeError as e:
+                    result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result, ensure_ascii=False).encode())
             return
         elif self.path == "/api/feishu-chat/inbound-test":
             length = int(self.headers.get('Content-Length', 0))

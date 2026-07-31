@@ -11,9 +11,11 @@ from datetime import datetime
 try:
     from services.chat_commands import parse_chat_command
     from services.chat_slash_guard import classify_slash_message, feishu_block_reply
+    from services.feishu_rich_text import extract_feishu_rich_text
 except ModuleNotFoundError:  # Package import in direct unit tests.
     from .services.chat_commands import parse_chat_command
     from .services.chat_slash_guard import classify_slash_message, feishu_block_reply
+    from .services.feishu_rich_text import extract_feishu_rich_text
 
 ACK_EMOJIS = ("LGTM",)
 ACK_REACTION_EMOJI_TYPE = "LGTM"
@@ -637,7 +639,9 @@ def chat_app_configured(cfg):
 def _message_text(message):
     text = str(message.get("text") or "").strip()
     if not text and isinstance(message.get("content"), dict):
-        text = str(message["content"].get("text") or "").strip()
+        text = extract_feishu_rich_text(message["content"])
+    if not text:
+        text = extract_feishu_rich_text(message.get("content"))
     return text
 
 
@@ -798,7 +802,7 @@ def handle_message_event(
     if not source_message_id:
         record = record_event({**base_record, "event": "rejected", "reason": "missing_message_id"})
         return {"ok": False, "status": "missing_message_id", "record": record, "_status": 400}
-    if message_type and message_type not in {"text", "image"}:
+    if message_type and message_type not in {"text", "image", "post"}:
         record = record_event({**base_record, "event": "ignored", "reason": "unsupported_message_type"})
         return {"ok": True, "status": "ignored_unsupported_message_type", "record": record}
     attachments = []
@@ -1064,7 +1068,9 @@ def handle_message_event(
             result = {"ok": False, "status": "agent_exception", "error": str(exc)}
         result = result if isinstance(result, dict) else {"ok": False, "status": "invalid_agent_result", "error": "Agent returned an invalid result"}
         reply = str(result.get("reply") or result.get("error") or "").strip() or "处理完成，但没有可发送的文本回复。"
-        feishu_reply = representative_display_reply(representative_agent_id, reply, find_agent=find_agent)
+        feishu_reply = str(result.get("feishuChatReply") or "").strip()
+        if not feishu_reply:
+            feishu_reply = representative_display_reply(representative_agent_id, reply, find_agent=find_agent)
         send_result = deliver(feishu_reply)
         turn_finished.set()
         if not async_acknowledgement:

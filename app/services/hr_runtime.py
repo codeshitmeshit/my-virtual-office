@@ -33,6 +33,7 @@ from services.hr_http import HRHTTPRoutes
 from services.hr_observability import HRObservability
 from services.hr_reporting import HRReportingProjection, HRReportingService
 from services.hr_repository import HRRepository
+from services.hr_agent_routing_skill import publish_agent_routing_skill
 from services.hr_scheduler import HRCommandReceipt, HRManualCommands, HRReconciliationLoop
 from services.hr_schedule_settings import HRScheduleSettingsService
 from services.hr_team_sync import (
@@ -116,6 +117,19 @@ def build_hr_application_runtime(
         install_tracker(command_tracker)
     observability = HRObservability()
     schedule_settings = HRScheduleSettingsService(repository)
+    entry_skill_path = (
+        Path(__file__).resolve().parents[2]
+        / "skills"
+        / "vo-operating-guidelines"
+        / "SKILL.md"
+    )
+
+    def publish_directory_skill() -> object:
+        return publish_agent_routing_skill(
+            repository,
+            skill_path=entry_skill_path,
+        )
+
     directory_sync = None
     scheduler_loop = None
     automatic_reporting = None
@@ -131,6 +145,7 @@ def build_hr_application_runtime(
         directory_sync = HRTeamSyncCommands(
             automatic_reporting.team_sync,
             command_tracker,
+            publish_directory=publish_directory_skill,
         )
         scheduler_loop = automatic_reporting.loop
         install_loop = getattr(commands, "install_loop", None)
@@ -140,6 +155,7 @@ def build_hr_application_runtime(
         directory_sync = build_hr_team_sync(
             repository,
             roster_provider=roster_provider,
+            publish_directory=publish_directory_skill,
         )
     information_completion = None
     if information_conversation is not None:
@@ -151,6 +167,7 @@ def build_hr_application_runtime(
                 timeout_seconds=config.agent_timeout_seconds,
             ),
             tracker=command_tracker,
+            publish_directory=publish_directory_skill,
         )
     manual_daily_sync = None
     if daily_conversation is not None:

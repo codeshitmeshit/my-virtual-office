@@ -5,6 +5,7 @@ import os
 import sys
 import tempfile
 import subprocess
+from pathlib import Path
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 APP_DIR = os.path.join(ROOT, "app")
@@ -20,6 +21,37 @@ def test_disabled_provider_is_invisible():
     provider = ClaudeCodeProvider(enabled=False)
     assert provider.discover_agents() == []
     assert provider.test()["ok"] is False
+
+
+def test_enabled_provider_resolves_claude_from_nvm_when_path_is_minimal():
+    with tempfile.TemporaryDirectory() as tmp:
+        home = Path(tmp)
+        binary = home / ".nvm" / "versions" / "node" / "v22.22.3" / "bin" / "claude"
+        binary.parent.mkdir(parents=True)
+        binary.write_text("#!/bin/sh\n", encoding="utf-8")
+        binary.chmod(0o755)
+        old_home = os.environ.get("HOME")
+        old_path = os.environ.get("PATH")
+        old_code_bin = os.environ.pop("VO_CLAUDE_CODE_BIN", None)
+        old_bin = os.environ.pop("VO_CLAUDE_BIN", None)
+        os.environ["HOME"] = str(home)
+        os.environ["PATH"] = tmp
+        try:
+            provider = ClaudeCodeProvider(enabled=True, binary="claude")
+            assert provider.binary == str(binary)
+        finally:
+            if old_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = old_home
+            if old_path is None:
+                os.environ.pop("PATH", None)
+            else:
+                os.environ["PATH"] = old_path
+            if old_code_bin is not None:
+                os.environ["VO_CLAUDE_CODE_BIN"] = old_code_bin
+            if old_bin is not None:
+                os.environ["VO_CLAUDE_BIN"] = old_bin
 
 
 def test_enabled_provider_discovers_collaborator_and_demo_reply():

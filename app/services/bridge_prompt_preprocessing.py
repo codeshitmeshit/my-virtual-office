@@ -80,6 +80,9 @@ def promote_bridge_prompt_input(
             "source_surface": surface,
             "source_label": label,
             "source_message_id": body.get("sourceMessageId") or source_message_id or "",
+            "conversation_id": body.get("conversationId") or "",
+            "feishu_chat_id": body.get("feishuChatId") or "",
+            "chat_type": body.get("chatType") or "",
         },
         "message": message,
         "reply_instruction": str(reply_instruction or "").strip()

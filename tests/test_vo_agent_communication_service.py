@@ -40,7 +40,7 @@ OPENCLAW_TARGET = {
 }
 
 
-def _service(*, agents=None, codex_result=None, load_synced_skills=None):
+def _service(*, agents=None, codex_result=None):
     agents = agents or {"hr": SENDER, "codex-local": TARGET}
     events = []
     provider_calls = []
@@ -90,7 +90,6 @@ def _service(*, agents=None, codex_result=None, load_synced_skills=None):
         call_codex=call_codex,
         call_claude_code=call_claude_code,
         call_agent=call_agent,
-        load_synced_skills=load_synced_skills or (lambda _agent: ""),
     )
     return VOAgentCommunicationService(ports), events, provider_calls, presence
 
@@ -114,55 +113,13 @@ def test_hr_message_uses_visible_vo_events_and_provider_routing():
     assert calls[0]["conversationId"] == "hr:daily:codex-local"
     assert "<agent_platform_message_prompt>" in calls[0]["message"]
     assert '<from id="hr"' in calls[0]["message"]
+    assert "<original_channel_interim_notice>" in calls[0]["message"]
+    assert "cross-VO communication" in calls[0]["message"]
     assert "VO-GUIDANCE" in calls[0]["message"]
     assert presence == [
         ("codex-local", "working", "Replying to OpenClaw: HR 👩‍💼"),
         ("codex-local", "idle", ""),
     ]
-
-
-def test_synced_skills_are_injected_before_provider_guidance():
-    marker = "<vo_synced_skills trusted=\"true\">PROBE_LOADED</vo_synced_skills>"
-    service, _events, calls, _presence = _service(
-        load_synced_skills=lambda agent: marker if agent["id"] == "codex-local" else ""
-    )
-
-    result = service.send({
-        "fromAgentId": "hr",
-        "toAgentId": "codex-local",
-        "message": "PROBE_ACTIVATE",
-        "conversationId": "hr:probe:codex-local",
-    })
-
-    assert result["ok"] is True
-    assert calls[0]["message"].startswith(marker)
-    assert calls[0]["message"].index(marker) < calls[0]["message"].index("VO-GUIDANCE")
-
-
-@pytest.mark.parametrize(
-    ("target", "agents"),
-    [
-        ("claude-code-local", {"hr": SENDER, "claude-code-local": CLAUDE_TARGET}),
-        ("main", {"hr": SENDER, "main": OPENCLAW_TARGET}),
-    ],
-)
-def test_synced_skills_are_injected_for_other_provider_families(target, agents):
-    marker = f"<vo_synced_skills trusted=\"true\">{target}-PROBE</vo_synced_skills>"
-    service, _events, calls, _presence = _service(
-        agents=agents,
-        load_synced_skills=lambda agent: marker if agent["id"] == target else "",
-    )
-
-    result = service.send({
-        "fromAgentId": "hr",
-        "toAgentId": target,
-        "message": "PROBE_ACTIVATE",
-        "conversationId": f"hr:probe:{target}",
-    })
-
-    assert result["ok"] is True
-    assert calls[0]["message"].startswith(marker)
-    assert calls[0]["message"].index(marker) < calls[0]["message"].index("VO-GUIDANCE")
 
 
 def test_non_ready_openclaw_sender_fails_before_history_and_provider():
