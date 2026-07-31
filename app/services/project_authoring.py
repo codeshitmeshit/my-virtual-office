@@ -223,8 +223,13 @@ class ProjectAuthoringService:
                 "created": False,
                 "request": agent_request_view(existing, requesting_agent_id=agent_id),
             }
+        draft_for_validation = copy.deepcopy(draft)
+        if isinstance(draft_for_validation, dict):
+            tasks = draft_for_validation.get("tasks")
+            if isinstance(tasks, list) and len(tasks) == 1 and isinstance(tasks[0], dict):
+                tasks[0].setdefault("executionStage", 1)
         normalized = validate_project_draft(
-            draft,
+            draft_for_validation,
             idempotency_key=key,
             lookup_agent=self.lookup_agent,
             is_excluded_agent=self.is_excluded_agent,

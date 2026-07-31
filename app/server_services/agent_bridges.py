@@ -17,6 +17,7 @@ import time
 import urllib.parse
 import uuid
 from datetime import datetime, timezone
+from services.agent_platform_prompt_formatting import render_provider_delivery_prompt
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATUS_DIR = os.environ.get("VO_STATUS_DIR") or os.path.join(APP_DIR, "status")
@@ -1112,22 +1113,14 @@ def _build_hermes_delivery_message(agent, agent_key, message, body):
     source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
     source_label = str(body.get("sourceLabel") or "").strip()
     sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
-    delivery_message = message
-    if is_human_source:
-        pretty_surface = source_label or ("Virtual Office Chat" if source_app == "virtual-office" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
-        delivery_message = (
-            "<agent_platform_message_prompt>\n"
-            "  <metadata trusted=\"false\">\n"
-            f"    <from id=\"user\" is_user=\"true\">{json.dumps(sender_name)}</from>\n"
-            f"    <to id=\"{agent.get('id') or agent_key}\" />\n"
-            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{json.dumps(pretty_surface)}</source>\n"
-            "  </metadata>\n"
-            f"  <message>{message}</message>\n"
-            "  <reply_instruction>Reply directly to the user. Do not assume the user's name unless they identify themselves.</reply_instruction>\n"
-            "</agent_platform_message_prompt>"
-        )
-    if attachment_context:
-        delivery_message = f"{delivery_message}\n\n{attachment_context}"
+    delivery_message = render_provider_delivery_prompt(
+        "hermes",
+        message,
+        body,
+        agent=agent,
+        agent_key=agent_key,
+        attachment_context=attachment_context,
+    )
     return {
         "deliveryMessage": delivery_message,
         "fromType": from_type,
@@ -1333,17 +1326,12 @@ def _handle_hermes_chat(body):
     delivery_message = message
     yolo_once = bool(body.get("yoloOnce") or body.get("approvalApprovedOnce"))
     if is_human_source:
-        pretty_surface = source_label or ("Virtual Office Chat" if source_app == "virtual-office" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
-        delivery_message = (
-            "<agent_platform_message_prompt>\n"
-            "  <metadata trusted=\"false\">\n"
-            f"    <from id=\"user\" is_user=\"true\">{json.dumps(sender_name)}</from>\n"
-            f"    <to id=\"{agent.get('id') or agent_key}\" />\n"
-            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{json.dumps(pretty_surface)}</source>\n"
-            "  </metadata>\n"
-            f"  <message>{message}</message>\n"
-            "  <reply_instruction>Reply directly to the user. Do not assume the user's name unless they identify themselves.</reply_instruction>\n"
-            "</agent_platform_message_prompt>"
+        delivery_message = render_provider_delivery_prompt(
+            "hermes",
+            message,
+            body,
+            agent=agent,
+            agent_key=agent_key,
         )
     if attachment_context:
         delivery_message = f"{delivery_message}\n\n{attachment_context}"
@@ -2061,7 +2049,13 @@ def _handle_codex_chat(body):
 
     try:
         result = provider.send_message(
-            message,
+            render_provider_delivery_prompt(
+                "codex",
+                message,
+                body,
+                agent=agent,
+                agent_key=agent_key,
+            ),
             conversation_id=conversation_id,
             timeout_sec=int(body.get("timeoutSec") or 600),
             thread_id=_get_codex_thread_id(agent_id, conversation_id),
@@ -3038,7 +3032,13 @@ def _handle_claude_code_chat(body):
     gateway_presence.set_manual_override(agent.get("statusKey") or agent.get("id"), "working", "Claude Code task")
     session_id = _get_claude_code_session_id(profile, conversation_id)
     result = provider.send_chat_message(
-        message,
+        render_provider_delivery_prompt(
+            "claude-code",
+            message,
+            body,
+            agent=agent,
+            agent_key=agent_key,
+        ),
         conversation_id=conversation_id,
         timeout_sec=int(body.get("timeoutSec") or cfg.get("timeoutSec") or 900),
         session_id=session_id,

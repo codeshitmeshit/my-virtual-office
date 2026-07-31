@@ -26,6 +26,8 @@ from dataclasses import dataclass
 from urllib.parse import quote, urljoin
 from typing import Any
 
+from services.hermes_profile_documents import hermes_profile_template_files
+
 
 @dataclass
 class HermesProvider:
@@ -473,40 +475,12 @@ class HermesProvider:
         return (safe or f"agent-{int(time.time())}")[:63]
 
     def _write_profile_bootstrap(self, profile_home: str, *, name: str, role: str, emoji: str, profile: str) -> None:
-        files = {
-            "IDENTITY.md": f"""<hermes_profile_identity>
-  <name>{name}</name>
-  <profile>{profile}</profile>
-  <role>{role}</role>
-  <vibe>Helpful, direct, ready to work</vibe>
-  <emoji>{emoji}</emoji>
-</hermes_profile_identity>
-""",
-            "SOUL.md": f"""<hermes_profile_soul>
-  <name>{name}</name>
-  <emoji>{emoji}</emoji>
-  <role>{role}</role>
-  <style>
-    <rule>Be helpful and direct.</rule>
-    <rule>Keep work visible through Virtual Office when possible.</rule>
-    <rule>Use your Hermes profile `{profile}` for isolated context.</rule>
-  </style>
-</hermes_profile_soul>
-""",
-            "AGENTS.md": f"""<hermes_profile_instructions>
-  <identity name="{name}" emoji="{emoji}" role="{role}" profile="{profile}" />
-  <role>{role}</role>
-  <core_rules>
-    <rule>Follow instructions carefully.</rule>
-    <rule>Keep replies concise and useful.</rule>
-    <rule>Do not expose secrets from your Hermes profile.</rule>
-  </core_rules>
-  <memory>Use Hermes profile memory and sessions normally.</memory>
-</hermes_profile_instructions>
-""",
-            "MEMORY.md": f"<hermes_profile_memory name=\"{name}\"><note>No memories yet.</note></hermes_profile_memory>\n",
-            "TOOLS.md": f"<hermes_profile_tools name=\"{name}\"><note>Add tool-specific notes here.</note></hermes_profile_tools>\n",
-        }
+        files = hermes_profile_template_files(
+            name=name,
+            role=role,
+            emoji=emoji,
+            profile=profile,
+        )
         for filename, content in files.items():
             with open(os.path.join(profile_home, filename), "w", encoding="utf-8") as f:
                 f.write(content)

@@ -105,7 +105,7 @@
 
   browserBtn.addEventListener('click', () => {
     if (browserBtn.getAttribute('aria-disabled') === 'true') {
-      alert(browserBtn.title || _t('browser_unavailable_hint'));
+      voAlert(browserBtn.title || _t('browser_unavailable_hint'));
       return;
     }
     toggleBrowserPanel();

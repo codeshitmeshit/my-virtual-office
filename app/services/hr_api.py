@@ -285,7 +285,7 @@ class HRManagementAPI:
     ) -> HRServiceResult:
         self._observability.increment("query.requests_total")
         report_limit = self._limit(report_limit)
-        assessment_limit = self._limit(assessment_limit)
+        self._limit(assessment_limit)
         access_limit = self._limit(access_limit)
         agent = self._repository.get_agent(ai_id)
         if agent is None:
@@ -296,19 +296,19 @@ class HRManagementAPI:
             limit=report_limit,
             cursor=report_cursor,
         )
-        assessments = self._repository.list_assessments(
-            ai_id=ai_id,
-            limit=assessment_limit,
-            cursor=assessment_cursor,
-        )
         identity_history = self._repository.list_identity_history(ai_id, limit=20)
         access_history = self._repository.list_access_log(
             target_ai_id=ai_id,
             limit=access_limit,
             cursor=access_cursor,
         )
-        latest_assessment = assessments.items[0] if assessments.items else None
         latest_report = reports.items[0] if reports.items else None
+        latest_assessment = (
+            self._repository.get_current_assessment(ai_id, latest_report.local_date)
+            if latest_report is not None
+            else None
+        )
+        visible_assessments = (latest_assessment,) if latest_assessment is not None else ()
         record = {
             "aiId": agent.ai_id,
             "name": agent.name,
@@ -335,7 +335,7 @@ class HRManagementAPI:
             ),
             "workload": latest_assessment.workload if latest_assessment else "insufficient_information",
             "reports": _json_safe(reports.items),
-            "assessments": _json_safe(assessments.items),
+            "assessments": _json_safe(visible_assessments),
             "evidence": _json_safe(latest_assessment.evidence if latest_assessment else ()),
             "improvements": list(latest_assessment.improvements) if latest_assessment else [],
             "workflowState": latest_report.submission_state if latest_report else "not_due",
@@ -351,7 +351,7 @@ class HRManagementAPI:
             requested_scope="full",
         )
         projected["reportNextCursor"] = reports.next_cursor
-        projected["assessmentNextCursor"] = assessments.next_cursor
+        projected["assessmentNextCursor"] = None
         projected["identityNextCursor"] = identity_history.next_cursor
         projected["accessNextCursor"] = access_history.next_cursor
         return HRServiceResult(200, {"ok": True, "agent": projected})

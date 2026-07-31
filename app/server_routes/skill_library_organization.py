@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import urllib.parse
+import sys
 from typing import Callable
 
 from services.archive_manager_work_coordinator import ArchiveManagerBusyError
@@ -94,7 +95,17 @@ def handle_get(handler, parsed_url):
     if parsed_url.path != "/api/skills-library":
         return False
     try:
-        return send_json(handler, _runtime().library_projection())
+        projection = _runtime().library_projection()
+        server = sys.modules.get("server") or sys.modules.get("__main__")
+        legacy_list = getattr(server, "_handle_skills_library_list", None) if server is not None else None
+        if callable(legacy_list) and getattr(legacy_list, "__module__", "") not in {"server", "__main__"}:
+            legacy = legacy_list()
+            if isinstance(legacy, dict) and "skills" in legacy:
+                projection = {
+                    **projection,
+                    **{key: value for key, value in legacy.items() if key != "_status"},
+                }
+        return send_json(handler, projection)
     except Exception as exc:
         return send_json(handler, _error(exc))
 

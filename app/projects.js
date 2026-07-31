@@ -27,7 +27,7 @@
         dragState: null,       // {taskId, projectId, sourceColId, ghost}
         touchDrag: null,
         filters: { status: '', priority: '', tag: '', search: '', sort: 'updatedAt' },
-        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null, chatSignature: '', chatScopeKey: '' },
+        workflow: { active: false, autoMode: false, phase: 'idle', currentTaskId: null, pollTimer: null, startMode: 'continuous', flowStopReason: null, chatSignature: '', chatScopeKey: '', chatScopeVersion: '', chatSnapshot: null, chatLiveMessages: [], chatEventSource: null, chatStreamScopeKey: '', chatStreamHealthy: false, chatStreamRetryTimer: null, chatStreamRefreshTimer: null, chatLastEventId: 0 },
         acceptanceDialog: null,
         pendingActions: new Map(),
         duplicateActionToastAt: {},
@@ -1076,6 +1076,11 @@
         return !!scopeKey && (!state.workflow.chatScopeKey || state.workflow.chatScopeKey === scopeKey);
     }
 
+    function hasWorkflowChatHistoryDom() {
+        const container = document.getElementById('proj-wf-chat-messages');
+        return !!(state.workflow.chatSignature || (container && container.querySelector('.proj-chat-msg')));
+    }
+
     function workflowChatShouldBeLive(project) {
         return !!(project && (state.workflow.active || projectExecutionHasRunningTask(project)));
     }
@@ -1090,8 +1095,11 @@
     }
 
     function clearWorkflowChat() {
+        closeWorkflowChatStream();
         state.workflow.chatSignature = '';
         state.workflow.chatScopeKey = '';
+        state.workflow.chatSnapshot = null;
+        state.workflow.chatLiveMessages = [];
         const container = document.getElementById('proj-wf-chat-messages');
         if (container) {
             container.dataset.workflowChatTaskId = '';
@@ -1100,6 +1108,141 @@
         }
         const liveDot = document.getElementById('proj-chat-live-dot');
         if (liveDot) liveDot.className = 'proj-wf-chat-live';
+    }
+
+    function closeWorkflowChatStream() {
+        if (state.workflow.chatStreamRetryTimer) {
+            clearTimeout(state.workflow.chatStreamRetryTimer);
+            state.workflow.chatStreamRetryTimer = null;
+        }
+        if (state.workflow.chatStreamRefreshTimer) {
+            clearTimeout(state.workflow.chatStreamRefreshTimer);
+            state.workflow.chatStreamRefreshTimer = null;
+        }
+        if (state.workflow.chatEventSource) {
+            try { state.workflow.chatEventSource.close(); } catch (_) {}
+            state.workflow.chatEventSource = null;
+        }
+        state.workflow.chatStreamScopeKey = '';
+        state.workflow.chatStreamHealthy = false;
+        state.workflow.chatScopeVersion = '';
+        state.workflow.chatLastEventId = 0;
+    }
+
+    function scheduleWorkflowChatSnapshotRefresh(delayMs = 100) {
+        if (state.workflow.chatStreamRefreshTimer) return;
+        state.workflow.chatStreamRefreshTimer = setTimeout(() => {
+            state.workflow.chatStreamRefreshTimer = null;
+            pollWorkflowChat({ fromStream: true });
+        }, delayMs);
+    }
+
+    function workflowTimelineItemToMessage(item) {
+        if (!item || typeof item !== 'object' || !item.id) return null;
+        return {
+            id: String(item.id),
+            role: item.role || (item.itemKind === 'tool' ? 'tool' : 'assistant'),
+            text: item.text || '',
+            thinking: item.thinking || '',
+            reasoningStatus: item.reasoningStatus || item.status || '',
+            timestamp: item.timestamp || item.createdAt || '',
+            epochMs: item.epochMs || item.ts || 0,
+            sequence: item.sequence || 0,
+            status: item.status || '',
+            providerRunId: item.providerRunId || '',
+            tools: Array.isArray(item.tools) ? item.tools : [],
+        };
+    }
+
+    function mergeWorkflowChatLiveMessage(message) {
+        if (!message || !message.id) return false;
+        const byId = new Map((state.workflow.chatLiveMessages || []).map(item => [String(item.id || ''), item]));
+        byId.set(String(message.id), message);
+        state.workflow.chatLiveMessages = Array.from(byId.values())
+            .sort((a, b) => (Number(a.epochMs) || 0) - (Number(b.epochMs) || 0) || (Number(a.sequence) || 0) - (Number(b.sequence) || 0) || String(a.id).localeCompare(String(b.id)))
+            .slice(-80);
+        return true;
+    }
+
+    function applyWorkflowChatTimelineItem(data) {
+        if (!data || data.eventName === 'message.delta') return false;
+        const item = data.timelineItem && typeof data.timelineItem === 'object' ? data.timelineItem : null;
+        const message = workflowTimelineItemToMessage(item);
+        if (!mergeWorkflowChatLiveMessage(message)) return false;
+        if (state.workflow.chatSnapshot) renderWorkflowChat(state.workflow.chatSnapshot, { includeLive: true });
+        return true;
+    }
+
+    function handleWorkflowChatStreamPayload(event) {
+        let data = {};
+        try {
+            data = JSON.parse(String(event && event.data || '{}'));
+        } catch (_) {
+            return;
+        }
+        if (!data || data.ok === false) return;
+        const p = state.currentProject;
+        const expectedScope = workflowChatScopeKey(p);
+        if (!p || !expectedScope || state.workflow.chatStreamScopeKey !== expectedScope) return;
+        if (data.eventId) state.workflow.chatLastEventId = Math.max(state.workflow.chatLastEventId || 0, Number(data.eventId) || 0);
+        if (data.scopeVersion && state.workflow.chatScopeVersion && data.scopeVersion !== state.workflow.chatScopeVersion) {
+            closeWorkflowChatStream();
+            scheduleWorkflowChatSnapshotRefresh(20);
+            return;
+        }
+        if (data.scopeVersion) state.workflow.chatScopeVersion = data.scopeVersion;
+        const applied = applyWorkflowChatTimelineItem(data);
+        if (applied && !data.terminal) return;
+        scheduleWorkflowChatSnapshotRefresh(data.terminal ? 80 : 120);
+    }
+
+    function startWorkflowChatStream() {
+        const p = state.currentProject;
+        if (!p || !workflowChatShouldBeLive(p) || typeof EventSource === 'undefined') return false;
+        const scopeKey = workflowChatScopeKey(p);
+        if (!scopeKey) return false;
+        if (state.workflow.chatEventSource && state.workflow.chatStreamScopeKey === scopeKey) return true;
+        closeWorkflowChatStream();
+        const taskId = workflowChatTaskScope(p);
+        const qs = new URLSearchParams();
+        if (taskId) qs.set('taskId', taskId);
+        if (state.workflow.chatLastEventId) qs.set('after', String(state.workflow.chatLastEventId));
+        const source = new EventSource(`/api/projects/${encodeURIComponent(p.id)}/workflow/chat/events?${qs.toString()}`);
+        state.workflow.chatEventSource = source;
+        state.workflow.chatStreamScopeKey = scopeKey;
+        source.addEventListener('workflow.snapshot', event => {
+            if (state.workflow.chatEventSource !== source) return;
+            state.workflow.chatStreamHealthy = true;
+            handleWorkflowChatStreamPayload(event);
+        });
+        source.addEventListener('workflow.timeline', event => {
+            if (state.workflow.chatEventSource !== source) return;
+            state.workflow.chatStreamHealthy = true;
+            handleWorkflowChatStreamPayload(event);
+        });
+        source.addEventListener('workflow.scope.changed', () => {
+            if (state.workflow.chatEventSource !== source) return;
+            closeWorkflowChatStream();
+            scheduleWorkflowChatSnapshotRefresh(20);
+        });
+        source.addEventListener('workflow.heartbeat', event => {
+            if (state.workflow.chatEventSource !== source) return;
+            state.workflow.chatStreamHealthy = true;
+            handleWorkflowChatStreamPayload(event);
+        });
+        source.onerror = () => {
+            if (state.workflow.chatEventSource !== source) return;
+            try { source.close(); } catch (_) {}
+            state.workflow.chatEventSource = null;
+            state.workflow.chatStreamHealthy = false;
+            if (!state.workflow.chatStreamRetryTimer && state.view === 'board') {
+                state.workflow.chatStreamRetryTimer = setTimeout(() => {
+                    state.workflow.chatStreamRetryTimer = null;
+                    startWorkflowChatStream();
+                }, 2500);
+            }
+        };
+        return true;
     }
 
     function snapshotWorkflowChatDom() {
@@ -1135,7 +1278,10 @@
         bindBoardEvents();
         populateBoardScoreboard();
         restoreWorkflowChatDom(chatSnapshot);
-        if (!workflowChatShouldBeLive(state.currentProject)) clearWorkflowChat();
+        if (!workflowChatShouldBeLive(state.currentProject)) {
+            closeWorkflowChatStream();
+            if (!hasWorkflowChatHistoryDom()) clearWorkflowChat();
+        }
         if (selectedTaskId) {
             state.currentTask = (state.currentProject.tasks || []).find(t => t.id === selectedTaskId) || null;
         }
@@ -1858,7 +2004,7 @@
     async function addColumn() {
         const p = state.currentProject;
         if (!p) return;
-        const title = prompt(_t('proj_column_title_prompt'));
+        const title = await voPrompt(_t('proj_column_title_prompt'));
         if (!title) return;
         const colors = ['#6c757d', '#0d6efd', '#ffc107', '#fd7e14', '#198754', '#17a2b8', '#dc3545'];
         const color = colors[p.columns.length % colors.length];
@@ -2960,7 +3106,7 @@
         const p = state.currentProject;
         if (!task || !p) return;
         const confirmMsg = _t('proj_delete_task_confirm').replace('{title}', task.title);
-        if (!confirm(confirmMsg)) return;
+        if (!await voConfirm(confirmMsg, { tone: 'danger' })) return;
         try {
             closeDetailPanel();
             // Animate the deletion first
@@ -3719,7 +3865,7 @@
     // ── PROJECT CRUD ──────────────────────────────────────────────
     async function archiveProject(id, e) {
         if (e) e.stopPropagation();
-        if (!confirm(_t('proj_archive_confirm'))) return;
+        if (!await voConfirm(_t('proj_archive_confirm'))) return;
         try {
             await api.updateProject(id, { status: 'archived' });
             toast(_t('proj_archived'), 'success');
@@ -3729,11 +3875,11 @@
 
     async function deleteProject(id, e) {
         if (e) e.stopPropagation();
-        if (!confirm(_t('proj_delete_confirm'))) return;
+        if (!await voConfirm(_t('proj_delete_confirm'), { tone: 'danger' })) return;
         const project = (state.projects || []).find(p => p.id === id) || (state.currentProject && state.currentProject.id === id ? state.currentProject : null);
         let deleteWorkspace = false;
         if (project && project.workspaceManagedBy === 'system' && project.workspacePath) {
-            deleteWorkspace = confirm(`是否一并删除自动创建的项目工作区？\n${project.workspacePath}`);
+            deleteWorkspace = await voConfirm(`是否一并删除自动创建的项目工作区？\n${project.workspacePath}`, { tone: 'danger' });
         }
         try {
             const d = await api.deleteProject(id, { deleteWorkspace });
@@ -3802,7 +3948,7 @@
     }
 
     async function deleteTemplate(id) {
-        if (!confirm(_t('proj_delete_template_confirm'))) return;
+        if (!await voConfirm(_t('proj_delete_template_confirm'), { tone: 'danger' })) return;
         try {
             await api.deleteTemplate(id);
             state.templates = state.templates.filter(t => t.id !== id);
@@ -5112,7 +5258,7 @@
         if (!opts.skipAuxiliary) {
             scheduleProjectIdleWork(() => loadProjectMeetingRequests(state.currentProject.id).then(function () {
                 if (state.currentProject && state.currentProject.id === p.id && state.view === 'board') {
-                    if (workflowChatShouldBeLive(state.currentProject)) {
+                    if (state.workflow.active || projectExecutionHasRunningTask(state.currentProject)) {
                         updateWorkflowUI();
                         updateActiveColumnIndicator();
                         pollWorkflowChat();
@@ -5143,7 +5289,8 @@
                 const openTaskId = state.currentTask && state.currentTask.id;
                 await refreshProjectExecutionProject(openTaskId || null, { lightweight: true });
                 if (workflowChatShouldBeLive(state.currentProject)) {
-                    pollWorkflowChat();
+                    if (!state.workflow.chatStreamHealthy) pollWorkflowChat();
+                    else startWorkflowChatStream();
                 } else {
                     clearWorkflowChat();
                 }
@@ -5272,7 +5419,7 @@
         if (!p) return;
         const actionKey = `cron-delete:${p.id}:${cronId}`;
         return runActionOnce(actionKey, async () => {
-            if (!confirm(_t('proj_scheduled_cron_delete_confirm'))) return;
+            if (!await voConfirm(_t('proj_scheduled_cron_delete_confirm'), { tone: 'danger' })) return;
             try {
                 const d = await api.deleteScheduledCron(p.id, cronId);
                 if (!d.ok) throw new Error(d.error || 'delete failed');
@@ -5305,6 +5452,7 @@
             clearInterval(state.workflow.pollTimer);
             state.workflow.pollTimer = null;
         }
+        closeWorkflowChatStream();
     }
 
     async function pollWorkflowStatus() {
@@ -5403,9 +5551,11 @@
                 state.workflow.chatScopeKey = workflowChatScopeKey(p);
                 const retry = await api.workflowChat(p.id, state.workflow.currentTaskId);
                 renderWorkflowChat(retry);
+                startWorkflowChatStream();
                 return;
             }
             renderWorkflowChat(d);
+            startWorkflowChatStream();
         } catch (e) { /* silent */ }
     }
 
@@ -5420,11 +5570,28 @@
     }
 
     function renderWorkflowChat(data) {
+        const opts = arguments[1] || {};
         const container = document.getElementById('proj-wf-chat-messages');
         const liveDot = document.getElementById('proj-chat-live-dot');
         if (!container) return;
 
-        const msgs = data.messages || [];
+        data = data && typeof data === 'object' ? data : {};
+        state.workflow.chatSnapshot = data && typeof data === 'object' ? data : null;
+        const snapshotMessages = Array.isArray(data.messages) ? data.messages : [];
+        const liveMessages = opts.includeLive === false ? [] : (state.workflow.chatLiveMessages || []);
+        const byId = new Map();
+        snapshotMessages.forEach((message, index) => {
+            const key = String(message.providerRunId || message.id || `snapshot:${index}`);
+            byId.set(key, message);
+        });
+        liveMessages.forEach((message, index) => {
+            const key = String(message.providerRunId || message.id || `live:${index}`);
+            byId.set(key, message);
+        });
+        const msgs = Array.from(byId.values()).sort((a, b) =>
+            (Number(a.epochMs || a.ts) || 0) - (Number(b.epochMs || b.ts) || 0) ||
+            (Number(a.sequence) || 0) - (Number(b.sequence) || 0)
+        );
         const isActive = data.phase && data.phase !== 'idle' && data.phase !== 'stopped';
         const scopeKey = state.workflow.chatScopeKey || '';
         const signature = JSON.stringify({

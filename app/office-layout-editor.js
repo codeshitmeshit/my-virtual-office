@@ -762,7 +762,7 @@ function _isValidPlacement(type, x, y) {
 var _placementValid = true; // updated each frame for ghost preview color
 
 // --- EDIT MODE CLICK HANDLING ---
-function handleEditClick(worldX, worldY, screenX, screenY, event) {
+async function handleEditClick(worldX, worldY, screenX, screenY, event) {
     // 1. If in placement mode → place item
     if (placingType === 'wall') {
         var _clickTx = Math.floor(worldX / TILE);
@@ -867,7 +867,7 @@ function handleEditClick(worldX, worldY, screenX, screenY, event) {
         var newItem = { id: _generateFurnitureId(), type: placingType, x: sx, y: sy };
         // Custom text label — prompt for text on placement
         if (placingType === 'textLabel') {
-    var labelText = prompt(_tr('enter_label_text'), _tr('label_default'));
+            var labelText = await voPrompt(_tr('enter_label_text'), _tr('label_default'));
             if (!labelText) return true; // cancelled
             newItem.text = labelText;
             newItem.labelColor = '#ffffff';
@@ -1285,7 +1285,7 @@ canvas.addEventListener('mousemove', function(e) {
 // --- EDIT MODE TOGGLE (called from toolbar button) ---
 function toggleEditMode() {
     if (window._voLicense && window._voLicense.demo) {
-        alert(_tr('premium_edit_office'));
+        voAlert(_tr('premium_edit_office'));
         return;
     }
     editMode = !editMode;

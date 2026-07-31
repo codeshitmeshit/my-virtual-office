@@ -2696,7 +2696,7 @@
         clickEvent.stopPropagation();
         let answers = {};
         if (action === 'answer') {
-          const value = prompt(_ct('answer_codex'));
+          const value = await voPrompt(_ct('answer_codex'));
           if (value === null) return;
           const questions = event.input?.questions || [];
           if (questions.length) {

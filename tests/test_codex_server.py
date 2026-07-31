@@ -19,6 +19,7 @@ os.environ["VO_CODEX_ENABLED"] = "0"
 os.environ["VO_CODEX_CHAT_FAST_PATH_ENABLED"] = "0"
 
 import server
+from services.agent_platform_prompt_formatting import with_vo_provider_guidance
 
 
 AGENT = {
@@ -32,9 +33,9 @@ AGENT = {
 
 
 def test_vo_provider_guidance_prefix_is_idempotent():
-    message = server._with_vo_provider_guidance("请创建一个 VO 项目")
-    assert "http://127.0.0.1:<port>/skills/index.md" in message
-    assert "use known VO_PORT/.env; default 8090" in message
+    message = with_vo_provider_guidance("请创建一个 VO 项目")
+    assert "http://127.0.0.1:&lt;port&gt;/skills/index.md" in message
+    assert "using known VO_PORT/.env; default 8090" in message
     assert "follow that entry to the specific VO skill" in message
     assert "no explicit escalated/sandbox_permissions parameter" in message
     assert "provider-runtime localhost connection failure before user approval is not the final VO result" in message
@@ -48,7 +49,7 @@ def test_vo_provider_guidance_prefix_is_idempotent():
     assert "directly operate VO data stores" in message
     assert message.endswith("请创建一个 VO 项目")
 
-    repeated = server._with_vo_provider_guidance(message)
+    repeated = with_vo_provider_guidance(message)
     assert repeated == message
     assert repeated.count("<virtual_office_routing_guidance>") == 1
 

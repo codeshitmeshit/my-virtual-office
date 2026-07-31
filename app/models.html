@@ -21,6 +21,7 @@ window.addEventListener('i18n:changed', updateModelSettingsTitle);
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
+    <script src="vo-dialogs.js?v=20260731"></script>
     <script>
     (function(){
         var lang='en';
@@ -767,7 +768,7 @@ async function saveKey(provider) {
 
 async function deleteKey(provider, profileId='') {
     const baseProvider = normalizeProvider(provider);
-    if (!confirm(i18n.t('confirm_delete_key').replace('{provider}', profileId || baseProvider))) return;
+    if (!await voConfirm(i18n.t('confirm_delete_key').replace('{provider}', profileId || baseProvider), { tone: 'danger' })) return;
     const status = document.getElementById('key-status-' + provider);
     status.textContent = i18n.t('deleting');
     try {
@@ -850,7 +851,7 @@ async function saveOllamaModel(modelId) {
 }
 
 async function removeOllamaModel(modelId) {
-    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
+    if (!await voConfirm(i18n.t('confirm_remove_model').replace('{model}', modelId), { tone: 'danger' })) return;
     const ollama = providersData.customProviders.ollama;
     const models = (ollama.models || []).filter(m => m.id !== modelId);
     try {
@@ -862,7 +863,7 @@ async function removeOllamaModel(modelId) {
         if (data.ok) {
             providersData = null; loadProviders();
         }
-    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
+    } catch(e) { voAlert(i18n.t('error') + ': ' + e.message); }
 }
 
 async function addOllamaModel() {
@@ -959,7 +960,7 @@ function renderLMStudio() {
 }
 
 async function deleteOpenClawProviderById(provider, statusId = 'oc-delete-status') {
-    if (!provider || !confirm('Delete OpenClaw provider ' + provider + '?')) return;
+    if (!provider || !await voConfirm('Delete OpenClaw provider ' + provider + '?', { tone: 'danger' })) return;
     const data = await postNativeJson('/api/native-models/openclaw/provider/delete', { provider });
     setStatus(statusId, data, 'Deleted ' + provider);
     if (data.ok) setTimeout(reloadNative, 800);
@@ -1009,7 +1010,7 @@ async function deleteHermesLocalProvider(index) {
 }
 
 async function deleteHermesProviderByValues(profile, provider, statusId = 'hm-delete-status') {
-    if (!provider || !confirm('Delete Hermes custom aliases/cache for ' + provider + '?')) return;
+    if (!provider || !await voConfirm('Delete Hermes custom aliases/cache for ' + provider + '?', { tone: 'danger' })) return;
     const data = await postNativeJson('/api/native-models/hermes/provider/delete', { profile: profile || 'default', provider });
     setStatus(statusId, data, 'Deleted ' + provider);
     if (data.ok) setTimeout(reloadNative, 800);
@@ -1057,7 +1058,7 @@ function reloadNative() {
 }
 
 async function removeLMStudioModel(modelId) {
-    if (!confirm(i18n.t('confirm_remove_model').replace('{model}', modelId))) return;
+    if (!await voConfirm(i18n.t('confirm_remove_model').replace('{model}', modelId), { tone: 'danger' })) return;
     const lms = providersData.customProviders.lmstudio;
     const models = (lms.models || []).filter(m => m.id !== modelId);
     try {
@@ -1069,7 +1070,7 @@ async function removeLMStudioModel(modelId) {
         if (data.ok) {
             providersData = null; loadProviders();
         }
-    } catch(e) { alert(i18n.t('error') + ': ' + e.message); }
+    } catch(e) { voAlert(i18n.t('error') + ': ' + e.message); }
 }
 
 async function addLMStudioModel() {

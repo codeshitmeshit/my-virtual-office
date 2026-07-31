@@ -815,6 +815,7 @@
     font-size: 9px;
 }
 
+.hr-report-grid,
 .hr-assessment-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -822,6 +823,7 @@
     margin: 9px 0;
 }
 
+.hr-report-grid > div,
 .hr-assessment-grid > div {
     min-width: 0;
     padding: 8px;
@@ -829,10 +831,18 @@
     border-radius: 6px;
 }
 
+.hr-report-grid h5,
 .hr-assessment-grid h5 {
     margin: 0 0 7px;
     color: #98a9ba;
     font-size: 9px;
+}
+
+.hr-report-grid p {
+    margin: 0;
+    color: #c4ced8;
+    font-size: 9px;
+    line-height: 1.5;
 }
 
 .hr-detail-list {
@@ -915,6 +925,7 @@
     }
 
     .hr-detail-metadata,
+    .hr-report-grid,
     .hr-assessment-grid {
         grid-template-columns: 1fr;
     }

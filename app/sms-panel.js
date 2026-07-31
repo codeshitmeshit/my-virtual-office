@@ -73,7 +73,7 @@
 
     toggle.addEventListener('click', () => {
         if (toggle.getAttribute('aria-disabled') === 'true') {
-            alert(toggle.title || _t('sms_unavailable_hint'));
+            voAlert(toggle.title || _t('sms_unavailable_hint'));
             return;
         }
         isOpen = !isOpen;
@@ -148,7 +148,7 @@
             }
             updateComposerState();
         } catch (e) {
-            alert(_t('failed_update_thread_mode') + ': ' + e.message);
+            voAlert(_t('failed_update_thread_mode') + ': ' + e.message);
             const revertMode = mode === 'user' ? 'agent' : 'user';
             applyMode(revertMode);
         }
@@ -556,7 +556,7 @@
             await Promise.all([loadContacts(), loadThreads()]);
             await loadThread(selectedPhone);
         } catch (e) {
-            alert(_t('sms_failed') + ': ' + e.message);
+            voAlert(_t('sms_failed') + ': ' + e.message);
         } finally {
             sendBtn.textContent = '▶';
             updateComposerState();

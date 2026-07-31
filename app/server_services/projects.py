@@ -8,7 +8,21 @@ configuration while removing domain business bodies from server.py.
 import re
 import sys
 
+from services.project_execution_prompt_formatting import (
+    render_artifact_run_instruction,
+    render_meeting_action_phase,
+    render_project_execution_prompt,
+    render_project_execution_review_prompt,
+    render_task_final_result_fallback,
+    render_unfinished_checklist_focus,
+)
+from services.project_execution_ordering import first_incomplete_task
 from services.project_orchestration import active_task_ids, is_marked_project, orchestration_state
+
+_SERVICE_OWNED_PROMPT_HELPERS = {
+    "_project_execution_build_prompt",
+    "_project_execution_build_review_prompt",
+}
 
 __all__ = ['_project_execution_related', '_project_execution_notification_container', '_project_execution_open_url', '_project_execution_completed_task_count', '_scores_file', '_load_scores', '_save_scores', '_award_points', '_handle_scores_leaderboard', '_handle_score_award', '_project_execution_repair_acceptance_state', '_load_projects', '_save_projects', '_proj_uuid', '_proj_now', '_log_activity', '_project_cron_bindings_file', '_project_find', '_project_cron_reason_label', '_project_cron_target_snapshot', '_project_cron_normalize_history_status', '_project_cron_append_history', '_project_cron_alerts', '_project_agent_fields', '_project_cron_validate_project', '_project_cron_validate_schedule', '_project_cron_validate_target', '_project_cron_default_agent', '_project_cron_gateway_job_from_body', '_project_cron_extract_jobs', '_project_cron_extract_job_id', '_project_cron_task_title', '_project_cron_job_state', '_project_cron_enrich_item', '_handle_project_scheduled_cron_list', '_handle_project_scheduled_cron_all', '_handle_project_scheduled_cron_create', '_handle_project_scheduled_cron_update', '_handle_project_scheduled_cron_delete', '_project_cron_update_binding_status', '_project_execution_reopen_completed_task', '_handle_project_scheduled_cron_dispatch', '_handle_project_scheduled_cron_run', '_handle_projects_list', '_handle_project_get', '_handle_projects_templates', '_handle_project_report', '_project_workspace_slug', '_project_auto_workspace_root', '_project_create_auto_workspace', '_project_prepare_workspace', '_handle_project_create', '_handle_task_create', '_handle_task_comment', '_handle_project_from_template', '_handle_save_as_template', '_handle_project_update', '_handle_task_update', '_handle_columns_update', '_handle_tasks_reorder', '_handle_project_delete', '_handle_task_delete', '_project_execution_enabled', '_project_execution_redact', '_project_execution_compact_evidence_line', '_project_execution_allowed_roots', '_project_execution_validate_workspace', '_project_execution_git_snapshot', '_project_execution_resolve_roles', '_project_execution_resolve_start_roles', '_project_execution_find', '_project_execution_attempt', '_project_execution_active_task', '_project_execution_done_column_ids', '_project_execution_requires_user_acceptance', '_project_execution_attempt_requires_user_acceptance', '_project_execution_acceptance_checklist_complete', '_project_execution_column_locked', '_project_execution_can_complete_after_checklist_update', '_project_execution_start_mode', '_project_execution_is_startable_task', '_project_execution_next_task', '_project_execution_all_tasks_repeatable', '_project_execution_reset_project_tasks_for_restart', '_project_execution_clear_restart_bindings', '_project_execution_mark_done', '_project_execution_incomplete_checklist_feedback', '_project_execution_transient_failure_reason', '_project_execution_attempt_retry_count', '_project_execution_schedule_transient_retry', '_project_execution_continue_for_incomplete_checklist', '_project_execution_column_for_state', '_project_execution_sync_task_column', '_project_execution_move_task_to_column', '_project_execution_transition', '_project_execution_meeting_blocker_unresolved', '_project_execution_block_for_meeting_request', '_project_execution_update_meeting_blocker', '_project_execution_action_item_text', '_project_execution_action_item_description', '_project_execution_action_item_owner', '_project_execution_normalize_meeting_risks', '_project_execution_task_executor_id', '_project_execution_owner_matches', '_project_execution_meeting_action_key', '_project_execution_find_checklist_item', '_project_execution_acceptance_checklist', '_project_execution_seed_acceptance_checklist', '_project_execution_checklist_key', '_project_execution_reset_checklist_completion', '_project_execution_checklist_compact_key', '_project_execution_checklist_prefix', '_project_execution_checklist_ascii_tokens', '_project_execution_checklist_match_score', '_project_execution_find_checklist_update_target', '_project_execution_checklist_done_value', '_project_execution_result_checklist_updates', '_project_execution_checklist_update_key', '_project_execution_apply_checklist_updates', '_project_execution_result_meeting_discussion_points', '_project_execution_apply_meeting_discussion_points', '_project_execution_meeting_discussion_key', '_project_execution_meeting_record_key', '_project_execution_meeting_action_summaries', '_project_execution_upsert_meeting_record', '_project_execution_all_required_meeting_actions_done', '_project_execution_mark_meeting_actions_completed', '_project_execution_has_pending_meeting_actions', '_project_execution_apply_meeting_output_to_task', '_project_execution_apply_meeting_result', '_handle_project_execution_workspace_validate', '_artifact_kind_for_ext', '_artifact_normalize_relpath', '_artifact_safe_path', '_artifact_source_relpath', '_artifact_context_list', '_artifact_context_read', '_artifact_context_file_response', '_artifact_context_delete', '_artifact_context_delete_dir', '_project_artifact_source_records', '_project_artifact_context', '_handle_project_artifacts_list', '_handle_project_artifact_read', '_handle_project_artifact_file', '_handle_project_artifact_delete', '_project_execution_build_prompt', '_project_execution_test_evidence', '_project_execution_call_executor', '_project_execution_latest_attempt', '_project_execution_build_review_prompt', '_project_execution_call_reviewer', '_project_execution_review_feedback', '_project_execution_extract_json', '_project_execution_normalize_review', '_project_execution_run_review', '_project_execution_run_attempt', '_handle_project_execution_start', '_handle_project_execution_project_start', '_project_execution_schedule_continue', '_handle_project_execution_status', '_handle_project_execution_cancel', '_handle_project_execution_review_start', '_handle_project_execution_acceptance', '_handle_project_execution_meeting_blocker_action', '_handle_workflow_chat', '_handle_workflow_start', '_handle_workflow_stop', '_handle_workflow_auto_mode', '_handle_workflow_status', '_handle_review_check_update', '_handle_template_delete']
 
@@ -34,6 +48,8 @@ def _hydrate():
         return
     exported = set(__all__)
     for key, value in vars(srv).items():
+        if key in _SERVICE_OWNED_PROMPT_HELPERS:
+            continue
         if key in {"_server_module", "_hydrate"}:
             continue
         if key in exported:
@@ -299,12 +315,12 @@ def _project_execution_repair_acceptance_state(data):
 
 def _load_projects():
     """Load projects from the markdown-backed store."""
-    return _project_execution_repair_acceptance_state(PROJECT_STORE.load_all())
+    return _project_execution_repair_acceptance_state(_PROJECT_REPOSITORY.load_all())
 
 def _save_projects(data):
     """Persist projects to the markdown-backed store."""
     try:
-        existing = PROJECT_STORE.load_all()
+        existing = _PROJECT_REPOSITORY.load_all()
         existing_by_id = {p.get("id"): p for p in existing.get("projects", []) if isinstance(p, dict)}
         for project in data.get("projects", []) if isinstance(data, dict) else []:
             if not isinstance(project, dict):
@@ -318,7 +334,14 @@ def _save_projects(data):
                 project["tasks"] = previous.get("tasks")
     except Exception:
         pass
-    PROJECT_STORE.save_all(data)
+    baseline = data.get("__vo_repository_base__") if isinstance(data, dict) else None
+    if baseline is None:
+        baseline = _PROJECT_REPOSITORY.load_all()
+    committed = _PROJECT_REPOSITORY.commit_snapshot(data, baseline)
+    if isinstance(data, dict):
+        data.clear()
+        data.update(committed)
+        data["__vo_repository_base__"] = copy.deepcopy(committed)
 
 def _proj_uuid():
     """Generate a UUID4 string."""
@@ -1005,7 +1028,12 @@ def _handle_projects_list(query_string=""):
 
 def _handle_project_get(project_id):
     """GET /api/projects/{id} — return full project."""
-    project = PROJECT_STORE.get_project(project_id)
+    project = _PROJECT_REPOSITORY.get(project_id)
+    if project is None:
+        project = next(
+            (p for p in (_load_projects().get("projects") or []) if isinstance(p, dict) and p.get("id") == project_id),
+            None,
+        )
     if project is not None:
         repaired = _project_execution_repair_acceptance_state({"projects": [project], "templates": []})
         project = (repaired.get("projects") or [project])[0]
@@ -1783,9 +1811,7 @@ def _handle_project_delete(project_id, delete_workspace=False):
             workspace_delete_error = str(exc)
     elif delete_workspace and project and workspace_managed_by != "system":
         workspace_delete_error = "Workspace was not automatically created by this project"
-    # Delete through the store so both markdown-backed projects and legacy
-    # JSON-only projects are removed correctly.
-    deleted = PROJECT_STORE.delete_project(project_id)
+    deleted = _PROJECT_REPOSITORY.delete(project_id)
     if not deleted:
         return {"error": "Project not found", "_status": 404}
     result = {"ok": True, "id": project_id, "workspaceDeleted": bool(delete_workspace and workspace_managed_by == "system" and not workspace_delete_error)}
@@ -1957,17 +1983,10 @@ def _project_execution_is_startable_task(task):
     return state in ("", "backlog", "blocked")
 
 def _project_execution_next_task(project):
-    done_cols = _project_execution_done_column_ids(project)
-    col_order = {c.get("id"): idx for idx, c in enumerate(sorted(project.get("columns", []), key=lambda c: c.get("order", 0)))}
-    candidates = []
-    for idx, task in enumerate(project.get("tasks", [])):
-        if task.get("columnId") in done_cols:
-            continue
-        if not _project_execution_is_startable_task(task):
-            continue
-        candidates.append((col_order.get(task.get("columnId"), 9999), task.get("order", idx), idx, task))
-    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-    return candidates[0][3] if candidates else None
+    task = first_incomplete_task(project)
+    if task is None or not _project_execution_is_startable_task(task):
+        return None
+    return task
 
 def _project_execution_all_tasks_repeatable(project):
     tasks = project.get("tasks", []) or []
@@ -2206,6 +2225,47 @@ def _project_execution_unfinished_checklist_details(task, done_result):
         return "- No unfinished checklist details were available; inspect the task checklist and complete every item."
     return "\n".join(details[:20])
 
+def _project_execution_unfinished_checklist_summary(task, done_result=None, *, limit=8):
+    checklist = _project_execution_acceptance_checklist(task)
+    by_id = {str(item.get("id") or "").strip(): item for item in checklist if isinstance(item, dict)}
+    raw_items = []
+    if isinstance(done_result, dict) and isinstance(done_result.get("unfinishedChecklist"), list):
+        raw_items = [item for item in done_result.get("unfinishedChecklist") or [] if isinstance(item, dict)]
+    if not raw_items:
+        raw_items = [item for item in checklist if isinstance(item, dict) and item.get("done") is not True]
+    summary = []
+    seen = set()
+    for raw in raw_items:
+        item_id = str(raw.get("id") or "").strip()
+        item = by_id.get(item_id) or raw
+        text = str(item.get("text") or raw.get("text") or "").strip()
+        if not text:
+            continue
+        key = item_id or text
+        if key in seen:
+            continue
+        seen.add(key)
+        summary.append({
+            "id": item_id,
+            "text": _project_execution_redact(text),
+            "evidence": _project_execution_redact(str(item.get("evidence") or raw.get("evidence") or "").strip()),
+        })
+        if len(summary) >= limit:
+            break
+    return summary
+
+def _project_execution_blocked_checklist_reason(task, done_result=None):
+    items = _project_execution_unfinished_checklist_summary(task, done_result)
+    base = "Acceptance checklist is still incomplete after three automatic rework cycles."
+    if not items:
+        return base + " Missing checklist items were not available; inspect the task checklist and complete every unchecked item."
+    lines = []
+    for item in items:
+        label = f"id={item.get('id') or '(missing)'} text={item.get('text') or ''}"
+        evidence = item.get("evidence") or ""
+        lines.append("- " + label + (f" evidence={evidence}" if evidence else " evidence=empty"))
+    return base + "\nMissing checklist items:\n" + "\n".join(lines)
+
 def _project_execution_incomplete_checklist_rework_feedback(project, task, attempt_id, done_result):
     feedback = _project_execution_incomplete_checklist_feedback(done_result)
     attempt = _project_execution_attempt(task, attempt_id) if attempt_id else None
@@ -2271,6 +2331,29 @@ def _project_execution_attempt_retry_count(attempt):
     except Exception:
         return 0
 
+def _project_execution_automatic_snapshot(project, workspace):
+    snapshot = _project_execution_git_snapshot(workspace)
+    if snapshot.get("error"):
+        return {
+            "ok": False,
+            "error": "Unable to verify the Git workspace state",
+            "code": "workspace_git_snapshot_failed",
+            "snapshot": snapshot,
+        }
+    fingerprint = str(snapshot.get("fingerprint") or "")
+    confirmations = project.get("executionDirtyConfirmations") or []
+    if snapshot.get("dirty") and fingerprint not in confirmations:
+        return {
+            "ok": False,
+            "error": "The workspace changed and requires a new dirty-worktree confirmation",
+            "code": "dirty_worktree_confirmation_required",
+            "confirmationRequired": True,
+            "dirtyFingerprint": fingerprint,
+            "dirtyFiles": snapshot.get("files", [])[:50],
+            "snapshot": snapshot,
+        }
+    return {"ok": True, "snapshot": snapshot}
+
 def _project_execution_schedule_transient_retry(data, project_id, task_id, project, task, attempt, evidence, reason):
     if _project_execution_attempt_retry_count(attempt) >= 1:
         return False
@@ -2282,6 +2365,7 @@ def _project_execution_schedule_transient_retry(data, project_id, task_id, proje
         **attempt,
         "id": retry_attempt_id,
         "status": "retrying",
+        "runnerClaimedAt": None,
         "startedAt": _proj_now(),
         "finishedAt": None,
         "evidence": {},
@@ -2345,11 +2429,20 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
         _save_projects(data)
         return {**roles, "continued": False}
+    automatic_snapshot = _project_execution_automatic_snapshot(project, workspace["path"])
+    if not automatic_snapshot.get("ok"):
+        task["blockedReason"] = automatic_snapshot.get("error")
+        task["lastError"] = automatic_snapshot.get("code")
+        _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
+        project.update({"workflowActive": False, "workflowPhase": "blocked", "activeTaskId": None, "activeAgent": None, "updatedAt": _proj_now()})
+        _save_projects(data)
+        return {**automatic_snapshot, "continued": False}
     feedback = _project_execution_incomplete_checklist_rework_feedback(project, task, attempt_id, done_result)
     prior_reworks = int(task.get("reworkCount") or 0)
     if prior_reworks >= 3:
         task["reworkCount"] = prior_reworks
-        task["blockedReason"] = "Acceptance checklist is still incomplete after three automatic rework cycles."
+        task["blockedChecklistItems"] = _project_execution_unfinished_checklist_summary(task, done_result)
+        task["blockedReason"] = _project_execution_blocked_checklist_reason(task, done_result)
         task["lastError"] = "checklist_incomplete_rework_limit"
         task["reworkFeedback"] = feedback
         _project_execution_transition(project, task, "blocked", actor or "system", task["blockedReason"], attempt_id)
@@ -2383,7 +2476,7 @@ def _project_execution_continue_for_incomplete_checklist(data, project_id, task_
         "reviewer": roles.get("reviewer"),
         "skipReview": bool(roles.get("skipReview")),
         "skipReviewReason": roles.get("skipReviewReason"),
-        "baseline": _project_execution_git_snapshot(workspace["path"]),
+        "baseline": automatic_snapshot["snapshot"],
         "startMode": project.get("projectExecutionStartMode") or "continuous",
         "projectFlow": bool(project.get("projectExecutionFlowActive")),
         "requiresUserAcceptance": _project_execution_requires_user_acceptance(task),
@@ -2824,7 +2917,12 @@ def _project_execution_apply_checklist_updates(task, result):
     now = _proj_now()
     for update in _project_execution_result_checklist_updates(result):
         item = _project_execution_find_checklist_update_target(checklist, update)
-        if not item and allow_create and update.get("text"):
+        suppress_done_create = (
+            task.get("_suppressExecutorChecklistCreateOnce") is True
+            and bool(generated_seed_items)
+            and update.get("done") is True
+        )
+        if not item and allow_create and update.get("text") and not suppress_done_create:
             item = {
                 "id": _project_execution_checklist_update_key(update),
                 "text": update.get("text"),
@@ -2856,6 +2954,7 @@ def _project_execution_apply_checklist_updates(task, result):
             )
         ]
         changed = True
+    task.pop("_suppressExecutorChecklistCreateOnce", None)
     if not changed:
         changed = _project_execution_apply_inferred_checklist_updates(checklist, result, now)
     return changed
@@ -3639,23 +3738,32 @@ def _handle_project_artifact_delete(project_id, query_string=""):
 
 def _project_execution_build_prompt(project, task, attempt, workspace):
     checklist = _project_execution_acceptance_checklist(task)
-    checklist_text = "\n".join(f"- [{'x' if item.get('done') else ' '}] {item.get('text', '')}" for item in checklist) or "- No checklist supplied"
+    checklist_text = "\n".join(
+        f"- [{'x' if item.get('done') else ' '}] id={item.get('id', '')} text={item.get('text', '')}"
+        for item in checklist
+    ) or "- No checklist supplied"
     rework_feedback = task.get("reworkFeedback") or attempt.get("reworkFeedback") or ""
-    archive_context = _archive_context_prompt_block(project, task)
+    from server_services import archive_room as archive_room_service
+
+    archive_room_service._hydrate()
+    archive_context = archive_room_service._archive_context_prompt_block(project, task)
     try:
         from services.project_artifact_paths import artifact_prompt_run_directory
 
         artifact_run_dir = artifact_prompt_run_directory(project, {**task, "finalResult": {"sourceAttemptId": attempt.get("id")}, "attempts": [attempt]})
     except Exception:
         artifact_run_dir = ""
-    artifact_run_instruction = (
-        "<artifact_run_instruction>\n"
-        f"  <run_directory>{artifact_run_dir}/</run_directory>\n"
-        "  <rule>This is a reusable/re-entrant project run. Write new Markdown artifacts under the run directory; do not overwrite artifacts from earlier runs.</rule>\n"
-        "</artifact_run_instruction>\n"
-        if artifact_run_dir
-        else ""
-    )
+    artifact_run_instruction = render_artifact_run_instruction(run_directory=artifact_run_dir) if artifact_run_dir else ""
+    unfinished_checklist_focus = ""
+    if attempt.get("rework") or attempt.get("checklistCompletionRetry") or rework_feedback:
+        unfinished_items = _project_execution_unfinished_checklist_summary(task, limit=20)
+        if unfinished_items:
+            unfinished_lines = "\n".join(
+                f"- id={item.get('id') or '(missing)'} text={item.get('text') or ''}"
+                + (f" currentEvidence={item.get('evidence')}" if item.get("evidence") else " currentEvidence=empty")
+                for item in unfinished_items
+            )
+            unfinished_checklist_focus = "\n" + render_unfinished_checklist_focus(unfinished_lines) + "\n"
     try:
         from services.project_task_final_result import prior_stage_result_prompt_block, task_final_result_prompt_instructions
 
@@ -3663,11 +3771,7 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         final_result_instructions = task_final_result_prompt_instructions()
     except Exception:
         prior_stage_context = ""
-        final_result_instructions = (
-            "<task_final_result_requirement>\n"
-            "  <rule>Include a concise final conclusion, changed files/artifacts, tests, risks, and notes for later stages.</rule>\n"
-            "</task_final_result_requirement>\n"
-        )
+        final_result_instructions = render_task_final_result_fallback()
     meeting_action_block = ""
     if attempt.get("meetingActionPhase"):
         pending_actions = [
@@ -3683,48 +3787,23 @@ def _project_execution_build_prompt(project, task, attempt, workspace):
         for decision in (task.get("meetingDecisionHistory") or [])[-3:]:
             if isinstance(decision, dict) and decision.get("decision"):
                 decision_lines.append(f"- {decision.get('decision')}")
-        meeting_action_block = (
-            "\n<meeting_action_item_phase>\n"
-            "  <rule>Complete ONLY the meeting-created action items listed below. Do not continue the original task yet.</rule>\n"
-            "  <rule>After completing them, return a concise summary of what was done and any remaining risk.</rule>\n"
-            "  <pending_items>\n"
-            + ("\n".join(action_lines) if action_lines else "- No pending meeting action items")
-            + "\n  </pending_items>\n"
-            + "  <meeting_decision_context>\n"
-            + ("\n".join(decision_lines) if decision_lines else "- No meeting decision context")
-            + "\n  </meeting_decision_context>\n"
-            + "</meeting_action_item_phase>\n"
-        )
-    return (
-        "<project_execution_prompt>\n"
-        "  <role>You are the execution agent for a Virtual Office project task.</role>\n"
-        f"  <workspace>{workspace}</workspace>\n"
-        "  <boundary>Work only inside this workspace. Do not review or mark the task complete.</boundary>\n"
-        "<workflow>\n"
-        "  <step id=\"read-checklist\">Read the task and follow the acceptance checklist shown below. Write the task/deliverable acceptance criteria into the task checklist via checklistUpdates. Treat the checklist as the task's deliverable acceptance criteria, not a meeting action-item queue. Do not redefine the checklist unless the checklist is explicitly empty; if it is empty, include concrete acceptance criteria in checklistUpdates. The orchestration service will persist checklistUpdates from your final response; do not call the project API to persist checklist changes yourself.</step>\n"
-        f"  <step id=\"execute-task\">Execute the task. For any Virtual Office operation, first use the vo-operating-guidelines skill to detect the VO environment, choose the correct VO skill, and follow its boundaries. If you discover an issue that requires alignment, use vo-operating-guidelines to decide whether a formal AI meeting is appropriate; when it is, proactively request a meeting with POST /api/projects/{project.get('id', '')}/tasks/{task.get('id', '')}/meeting-requests. Include urgency and resolutionPolicy in the request: P0 uses urgency 5 with resolutionPolicy \"user_decision\"; every non-P0 meeting uses urgency 1-4 with resolutionPolicy \"moderator_decision\" so the AI moderator decides disagreements. Do not confirm or reject meetings yourself. Add the corresponding action items and discussion points as meeting/task context. Do not put those meeting action items or risks into the checklist or comments.</step>\n"
-        "  <step id=\"fill-back-checklist\">After executing the task, fill back the checklist in your final checklistUpdates. Inspect every checklist item, preserve its id/text, set done=true only after concrete verification, and provide non-empty evidence. If any item is unfinished, continue working until it is complete before finalizing.</step>\n"
-        "</workflow>\n"
-        f"{artifact_run_instruction}"
-        f"{final_result_instructions}"
-        "<final_response>\n"
-        "  <summary>First output a human-visible Markdown summary under 1200 characters. It may include short bullets for changed files, tests run, and remaining risks.</summary>\n"
-        "  <json_block>Then output exactly one fenced ```json block containing a single object. For a regular task, checklistUpdates is REQUIRED and must be a non-empty array; it must include every acceptance checklist item with its final status. meetingDiscussionPoints and tests are optional.</json_block>\n"
-        "  <json_rules>Do not print raw JSON outside the fenced json block. Do not put escaped JSON inside the Markdown summary. tests must be an array of short strings only, each under 180 characters. Do not put full logs, full API responses, raw tool output, source material, or nested objects in tests.</json_rules>\n"
-        "  <checklist_updates>checklistUpdates is an array of {id, text, done, evidence}; preserve the checklist IDs shown below. If no checklist was supplied, create concrete acceptance criteria with stable short IDs. Set done=true only for items you actually verified as complete, and write concrete evidence that names the delivered content, file, result, or verification.</checklist_updates>\n"
-        "  <example>{\"checklistUpdates\":[{\"id\":\"deliverable\",\"text\":\"Produce the requested deliverable\",\"done\":true,\"evidence\":\"Verified output\"}],\"tests\":[\"verification passed\"]}</example>\n"
-        "  <meeting_discussion_points>meetingDiscussionPoints is an array of {kind, title, text, meetingId, requestId} for meeting conclusions, risks, and discussion notes that belong in the task details.</meeting_discussion_points>\n"
-        "</final_response>\n\n"
-        "<task_context>\n"
-        f"  <project id=\"{project.get('id', '')}\" title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
-        f"  <task id=\"{task.get('id', '')}\" title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
-        f"  <rework_feedback>{rework_feedback}</rework_feedback>\n"
-        f"  <checklist>\n{checklist_text}\n  </checklist>\n"
-        "</task_context>\n"
-        f"{prior_stage_context}"
-        f"{meeting_action_block}"
-        f"{archive_context}\n"
-        "</project_execution_prompt>\n"
+        meeting_action_block = "\n" + render_meeting_action_phase(
+            pending_items="\n".join(action_lines) if action_lines else "- No pending meeting action items",
+            meeting_decision_context="\n".join(decision_lines) if decision_lines else "- No meeting decision context",
+        ) + "\n"
+    return render_project_execution_prompt(
+        project=project,
+        task=task,
+        attempt=attempt,
+        workspace=workspace,
+        checklist_text=checklist_text,
+        rework_feedback=rework_feedback,
+        artifact_run_instruction=artifact_run_instruction,
+        final_result_instructions=final_result_instructions,
+        prior_stage_context=prior_stage_context,
+        unfinished_checklist_focus=unfinished_checklist_focus,
+        meeting_action_block=meeting_action_block,
+        archive_context=archive_context,
     )
 
 def _project_execution_test_evidence(result):
@@ -3809,21 +3888,17 @@ def _project_execution_build_review_prompt(project, task, attempt):
     changed = "\n".join(f"- {name}" for name in (evidence.get("changedFiles") or [])[:100]) or "- No changed files reported"
     tests = "\n".join(f"- {line}" for line in (evidence.get("testResults") or [])[:50]) or "- No test evidence reported"
     feedback = task.get("reworkFeedback") or ""
-    return (
-        "<project_execution_review_prompt>\n"
-        "  <role>You are the independent read-only reviewer for a Virtual Office Project Execution task.</role>\n"
-        "  <review_rules>Review only the evidence below. Do not modify files, run tools that write files, or mark the task done. The checklist contains deliverable acceptance criteria only; meeting action items and risks are context, not acceptance checklist items.</review_rules>\n"
-        "  <output_contract>Return one JSON object with fields: status, summary, rationale, items. status must be one of: pass, needs_more_work, blocked.</output_contract>\n"
-        f"  <project title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
-        f"  <task title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
-        f"  <prior_user_feedback>{feedback}</prior_user_feedback>\n"
-        f"  <checklist>\n{checklist_text}\n  </checklist>\n"
-        f"  <executor_summary>{_project_execution_redact(evidence.get('executorSummary') or '')}</executor_summary>\n"
-        f"  <changed_files>\n{changed}\n  </changed_files>\n"
-        f"  <test_evidence>\n{tests}\n  </test_evidence>\n"
-        f"  <provider_status>{evidence.get('providerStatus') or ''}</provider_status>\n"
-        f"  <error>{_project_execution_redact(evidence.get('error') or '')}</error>\n"
-        "</project_execution_review_prompt>\n"
+    return render_project_execution_review_prompt(
+        project=project,
+        task=task,
+        attempt=attempt,
+        prior_user_feedback=feedback,
+        checklist_text=checklist_text,
+        executor_summary=_project_execution_redact(evidence.get("executorSummary") or ""),
+        changed_files=changed,
+        test_evidence=tests,
+        provider_status=evidence.get("providerStatus") or "",
+        error=_project_execution_redact(evidence.get("error") or ""),
     )
 
 def _project_execution_call_reviewer(reviewer, prompt, review_id, project_id=None, task_id=None, timeout=600):
@@ -3926,6 +4001,8 @@ def _project_execution_run_review(project_id, task_id, attempt_id, review_id):
                 if not done_result.get("ok"):
                     continued = _project_execution_continue_for_incomplete_checklist(data, project_id, task_id, project, task, attempt_id, reviewer.get("id") or "reviewer", done_result)
                     if continued.get("continued"):
+                        return
+                    if continued.get("status") == "blocked":
                         return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
@@ -4090,6 +4167,10 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
                         with _PROJECT_EXECUTION_LOCK:
                             _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
                         return
+                    if continued.get("status") == "blocked":
+                        with _PROJECT_EXECUTION_LOCK:
+                            _PROJECT_EXECUTION_CANCEL_FLAGS.pop(attempt_id, None)
+                        return
                     task["blockedReason"] = done_result.get("error")
                     _project_execution_transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
                     _send_project_execution_intervention_notification(project, task, task["blockedReason"], attempt_id, event="blocked", kind="warning")
@@ -4118,13 +4199,18 @@ def _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
         _handle_project_execution_review_start(project_id, task_id, {"attemptId": attempt_id})
 
 def _handle_project_execution_start(project_id, task_id, body):
-    from services.project_orchestration import is_marked_project
+    from services.project_orchestration import is_marked_project, orchestration_state
 
     body = body or {}
     data, project, task = _project_execution_find(project_id, task_id)
     if not project or not task:
         return {"error": "Project or task not found", "_status": 404}
-    if is_marked_project(project):
+    marked_draft_compat = (
+        is_marked_project(project)
+        and orchestration_state(project).get("state") == "draft"
+        and body.get("projectStart") is True
+    )
+    if is_marked_project(project) and not marked_draft_compat:
         return {
             "ok": False,
             "code": "marked_project_task_start_forbidden",
@@ -4179,6 +4265,8 @@ def _handle_project_execution_start(project_id, task_id, body):
         reopened_completed_task = _project_execution_reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
     if body.get("resetExecutionContext") is True:
         _project_execution_clear_restart_bindings(task, _proj_now(), str(body.get("by") or "user"), "manual task restart")
+        _project_execution_seed_acceptance_checklist(task, "project_execution_seed")
+        task["_suppressExecutorChecklistCreateOnce"] = True
     attempt_id = str(uuid.uuid4())
     project["projectExecutionStartMode"] = start_mode if body.get("projectStart") else project.get("projectExecutionStartMode", "continuous")
     project["projectExecutionFlowActive"] = project_flow
@@ -4278,7 +4366,11 @@ def _handle_project_execution_project_start(project_id, body=None):
 
 def _project_execution_schedule_continue(project_id, reason="continue"):
     data, project, _ = _project_execution_find(project_id)
-    if project and not _project_execution_next_task(project):
+    if not project:
+        return
+    if project.get("projectExecutionContinueScheduled"):
+        return
+    if not _project_execution_next_task(project) and not _project_execution_active_task(project):
         project["projectExecutionFlowActive"] = False
         project["projectExecutionFlowStopReason"] = "no_eligible_task"
         project["workflowActive"] = False
@@ -4289,9 +4381,27 @@ def _project_execution_schedule_continue(project_id, reason="continue"):
         _save_projects(data)
         _send_project_execution_project_complete_notification(project, "Project Execution 已完成，当前没有可继续执行的任务。")
         return
+    project["projectExecutionContinueScheduled"] = True
+    project["projectExecutionContinueReason"] = reason
+    project["updatedAt"] = _proj_now()
+    _save_projects(data)
 
     def run():
         time.sleep(0.05)
+        data, project, _ = _project_execution_find(project_id)
+        if not project:
+            return
+        active = _project_execution_active_task(project)
+        if active:
+            project["projectExecutionContinueScheduled"] = False
+            project["projectExecutionContinueReason"] = ""
+            project["updatedAt"] = _proj_now()
+            _save_projects(data)
+            return
+        project["projectExecutionContinueScheduled"] = False
+        project["projectExecutionContinueReason"] = ""
+        project["updatedAt"] = _proj_now()
+        _save_projects(data)
         result = _handle_project_execution_project_start(project_id, {"mode": "continuous", "by": "system", "flowReason": reason})
         if result.get("ok"):
             return

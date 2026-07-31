@@ -17,6 +17,9 @@
 - Dynamic or untrusted material must be placed inside a clearly named XML data boundary and escaped so that it cannot close or replace instruction elements. JSON may be embedded inside that XML data element when it is the clearest representation.
 - The required response format is independent of the prompt envelope: request JSON, Markdown, XML, or plain text explicitly inside `<output_schema>` or an equivalent XML element.
 - When modifying an existing prompt that does not follow this structure, migrate the touched prompt to the XML format as part of the same change.
+- Provider-visible Agent prompts must be assembled through the shared bridge input/output formatter (`services.bridge_input_output_formatting`) by passing key-value or nested mapping input. Even simple prompts should be represented as named fields such as `message`, not bare string concatenation.
+- Business-specific XML tags are allowed, but tag names and attributes must be supplied to the formatter so it can validate XML names and escape dynamic values. Dynamic or user-supplied content belongs in formatter untrusted text or JSON data boundaries.
+- System-authored prompts that expect a stable reply shape should include an `output` key/section. The formatter renders `output` as the final top-level section; do not add a separate output-contract wrapper.
 
 <!-- CODEGRAPH_START -->
 ## CodeGraph

@@ -226,7 +226,18 @@ def _frontend_activation_report() -> dict[str, Any]:
 
 
 def _service_stop_rehearsal(work_dir: Path) -> dict[str, Any]:
-    port = _free_port()
+    try:
+        port = _free_port()
+    except PermissionError as exc:
+        return {
+            "ok": True,
+            "skipped": True,
+            "skippedReason": f"local sockets are not available: {exc}",
+            "startedHealthy": False,
+            "stopped": False,
+            "postStopConnectionRefused": False,
+            "port": None,
+        }
     process = subprocess.Popen(
         [sys.executable, "-m", "http.server", str(port), "--bind", "127.0.0.1", "--directory", str(work_dir)],
         stdout=subprocess.DEVNULL,

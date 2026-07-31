@@ -84,7 +84,8 @@ class ClaudeCodeProvider:
             self.reply_text = os.environ.get("VO_CLAUDE_CODE_REPLY_TEXT")
         self.permission_mode = str(self.permission_mode or os.environ.get("VO_CLAUDE_CODE_PERMISSION_MODE") or "acceptEdits")
         self.include_main = _env_bool("VO_CLAUDE_CODE_INCLUDE_MAIN", self.include_main)
-        self.include_native_agents = _env_bool("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", self.include_native_agents)
+        if not self.include_native_agents:
+            self.include_native_agents = _env_bool("VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS", self.include_native_agents)
         self.register_native_agents = _env_bool("VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS", self.register_native_agents)
         try:
             self.timeout_sec = int(self.timeout_sec or os.environ.get("VO_CLAUDE_CODE_TIMEOUT_SEC") or 900)

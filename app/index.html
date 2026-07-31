@@ -13,8 +13,8 @@
     <link rel="stylesheet" href="projects.css?v=1785328545-project-board-scroll">
     <link rel="stylesheet" href="project-orchestration.css?v=1785328545-canvas-scrollbar">
     <link rel="stylesheet" href="archive-room.css?v=1785328545-phase13">
-    <link rel="stylesheet" href="human-resources.css?v=20260730-hr-settings-timezone">
-    <link rel="stylesheet" href="human-resources-figma.css?v=20260730-hr-settings-timezone">
+    <link rel="stylesheet" href="human-resources.css?v=20260731-hr-report-rendering">
+    <link rel="stylesheet" href="human-resources-figma.css?v=20260731-hr-report-rendering">
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
@@ -362,7 +362,6 @@
                 <button id="btn-edit-office" title="Edit office layout" onclick="toggleEditMode()" data-i18n="edit_office" data-i18n-title="edit_office">✏️ Edit Office</button>
                 <button id="btn-save-edits" title="Save changes" onclick="saveEdits()" style="display:none;opacity:0.4" disabled data-i18n="save" data-i18n-title="save_changes">💾 Save</button>
                 <button id="btn-undo-edit" title="Undo last change" onclick="undoEdit()" style="display:none;opacity:0.4" disabled data-i18n="undo" data-i18n-title="undo">↩️ Undo</button>
-                <button id="btn-agent-settings" title="Agent Management" onclick="openAgentManagement('configuration')" data-i18n="agent_management" data-i18n-title="agent_management">👤 Agent Management</button>
                 <div class="toolbar-divider"></div>
                 <button id="btn-expand-all" title="Expand all bubbles" onclick="expandAllBubbles()" data-i18n="expand_all" data-i18n-title="expand_all">💬 Expand All</button>
                 <button id="btn-minimize-all" title="Minimize all bubbles" onclick="minimizeAllBubbles()" data-i18n="minimize_all" data-i18n-title="minimize_all">💬 Minimize All</button>
@@ -370,6 +369,7 @@
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ Archive Room</button>
+                <button id="btn-agent-settings" title="Human Resources" onclick="openAgentManagement('humanResources')" data-i18n="agent_management" data-i18n-title="agent_management">👥 Human Resources</button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -1222,6 +1222,7 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
+    <script src="vo-dialogs.js?v=20260731"></script>
     <script src="internal-bubble.js?v=1785328545"></script>
     <script src="game.js?v=1785328545-intervention-auto-continue"></script>
     <script src="branch-agent-selector.js?v=20260730b"></script>
@@ -1238,12 +1239,12 @@
     <script src="project-orchestration.js?v=1785328545-dragend-merge"></script>
     <script src="projects.js?v=1785328545-dedupe-exec-reason"></script>
     <script src="archive-room.js?v=1785328545-phase13"></script>
-    <script src="human-resources.js?v=20260730-standard-time"></script>
+    <script src="human-resources.js?v=20260731-hr-report-rendering"></script>
     <script src="agent-appearance-preview.js?v=1785328545-pixel-preview"></script>
     <script src="agent-appearance-dropdown.js?v=1785328545-upward-dropdown"></script>
     <script src="agent-management-adapters.js?v=1785328545-eager-configuration"></script>
     <script src="agent-configuration.js?v=1785328545-unregistered-preview"></script>
-    <script src="agent-management.js?v=20260730-retired-main-filter"></script>
+    <script src="agent-management.js?v=20260731-hr-overview-default"></script>
     <script>
     // Bio sections for agent modal
     let _bioCache = {};

@@ -353,7 +353,11 @@ try {
   });
 
   await evaluate("AgentManagement.selectAgent('hermes-default'); AgentManagement.switchTab('humanResources')");
-  await waitFor("AgentManagement.state.activeTab === 'humanResources' && HumanResources.state.selectedAgentId === 'hermes-default'");
+  await waitFor("AgentManagement.state.activeTab === 'humanResources' && document.querySelector('.hr-overview')");
+  assert.equal(await evaluate("AgentManagement.state.selectedAiId"), '');
+  assert.equal(await evaluate("HumanResources.state.selectedAgentId"), '');
+  await evaluate("HumanResources.selectAgent('hermes-default')");
+  await waitFor("HumanResources.state.selectedAgentId === 'hermes-default'");
   assert.equal(await evaluate("AgentManagement.state.selectedAiId"), 'hermes-default');
   await evaluate("AgentManagement.switchTab('configuration')");
   await waitFor("document.querySelector('.agent-configuration') && AgentManagement.state.selectedAiId === 'hermes-default'");
@@ -513,6 +517,8 @@ try {
     responseContainsHidden: false,
   });
   await evaluate("AgentManagement.switchTab('humanResources')");
+  await waitFor("document.querySelector('.hr-overview') && AgentManagement.state.selectedAiId === ''");
+  await evaluate("HumanResources.selectAgent('hermes-default')");
   await waitFor("HumanResources.state.detail?.publicWorkSummary?.includes('Completed market research')");
   assert.equal(await evaluate("document.body.textContent.includes('Hermes')"), true);
   assert.equal(

@@ -74,6 +74,16 @@ def test_parses_complete_evidence_backed_assessment():
     assert result.assessed_at == "2026-07-19T10:10:00+00:00"
 
 
+def test_parses_markdown_wrapped_json_assessment():
+    raw = "```json\n" + json.dumps(payload(), ensure_ascii=False) + "\n```"
+    result = HRAssessmentParser().parse(
+        raw,
+        expected_ai_id="agent-1",
+        expected_local_date="2026-07-19",
+    )
+    assert result.workload == "appropriate"
+
+
 @pytest.mark.parametrize("workload", ("low", "appropriate", "high", "overloaded"))
 def test_all_supported_conclusive_workload_values(workload):
     assert parse(payload(workload=workload)).workload == workload
@@ -83,8 +93,10 @@ def test_insufficient_information_requires_explanation_without_invented_contribu
     result = parse(
         payload(
             workload="insufficient_information",
+            workloadScore=1,
             principalContributions=[],
             evidenceReferences=[],
+            strengths=[],
             informationSufficiency={
                 "status": "insufficient",
                 "explanation": "缺少日报和可归属的任务结果，不能推断工作量。",
@@ -119,6 +131,20 @@ def test_unsupported_score_alias_and_rank_fields_are_rejected(forbidden):
         ({"workloadScore": 0}, "workload score"),
         ({"workloadScore": 11}, "workload score"),
         ({"workloadScore": True}, "workload score"),
+        (
+            {
+                "workload": "insufficient_information",
+                "workloadScore": 5,
+                "principalContributions": [],
+                "strengths": [],
+                "evidenceReferences": [],
+                "informationSufficiency": {
+                    "status": "insufficient",
+                    "explanation": "缺少证据",
+                },
+            },
+            "must be 1",
+        ),
     ),
 )
 def test_identity_schema_workload_and_timestamp_are_enforced(overrides, message):
@@ -138,7 +164,13 @@ def test_identity_schema_workload_and_timestamp_are_enforced(overrides, message)
 )
 def test_workload_and_information_sufficiency_must_agree(workload, sufficiency):
     with pytest.raises(HRAssessmentValidationError, match="conflict"):
-        parse(payload(workload=workload, informationSufficiency=sufficiency))
+        parse(
+            payload(
+                workload=workload,
+                workloadScore=1 if workload == "insufficient_information" else 6,
+                informationSufficiency=sufficiency,
+            )
+        )
 
 
 def test_sufficient_assessment_requires_contribution_and_evidence():

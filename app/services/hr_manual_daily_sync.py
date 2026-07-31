@@ -17,13 +17,15 @@ from services.hr_reporting import (
     HRReportingService,
     daily_report_request_message,
 )
+from services.hr_daily_report_response_filter import reportable_daily_response
 from services.hr_repository import AgentRecord, HRRepository
 from services.hr_command_status import HRCommandStatusTracker
 
 
 DAILY_REPORT_REQUEST_MESSAGE = (
     "请重新提交你今天的日报。请准确说明今天完成的工作、相关项目或任务、产出物、"
-    "遇到的阻塞以及需要的协助；不要虚构或补充未发生的工作。"
+    "遇到的阻塞、需要的协助以及 AI 自评；请回顾你自己今天可访问的所有会话和任务记录，"
+    "不要只依据当前上下文；不要虚构或补充未发生的工作。"
 )
 
 
@@ -211,7 +213,8 @@ class HRManualDailySyncService:
                     timeout_seconds=self._timeout_seconds,
                 )
             )
-            if response is None or not str(response).strip():
+            response = reportable_daily_response(response)
+            if response is None:
                 return HRManualDailySyncItem(ai_id, "no_response")
             self._repository.replace_daily_report_response(
                 ai_id=ai_id,

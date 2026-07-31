@@ -98,10 +98,10 @@ def test_providers_route_uses_handler_context(monkeypatch):
 
 
 def test_meetings_route_preserves_history_shape(monkeypatch):
-    monkeypatch.setattr(server, "_meeting_history_projection", lambda: [{"id": "m1"}])
+    monkeypatch.setattr(server, "_meeting_history_projection", lambda summary=False: [{"id": "m1", "summary": summary}])
     status, payload = dispatch("GET", "/api/meetings/history")
     assert status == 200
-    assert payload == {"ok": True, "history": [{"id": "m1"}]}
+    assert payload == {"ok": True, "history": [{"id": "m1", "summary": False}]}
 
 
 def test_projects_task_delete_route_parses_task_id(monkeypatch):
@@ -178,6 +178,26 @@ def test_workflow_chat_route_passes_explicit_task_scope(monkeypatch):
     assert status == 200
     assert payload == {"ok": True, "taskId": "t2"}
     assert calls == [("p1", "t2")]
+
+
+def test_workflow_chat_events_route_passes_scope_and_cursor(monkeypatch):
+    calls = []
+
+    def handle(handler, project_id, task_scope=None, after=0):
+        calls.append((project_id, task_scope, after))
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/event-stream")
+        handler.end_headers()
+        handler.wfile.write(b"event: workflow.snapshot\ndata: {}\n\n")
+
+    monkeypatch.setattr(server, "_handle_workflow_chat_events", handle)
+    handler = FakeHandler("/api/projects/p1/workflow/chat/events?taskId=t2&after=9")
+    handled = server_routes.dispatch(handler, "GET", urllib.parse.urlparse(handler.path))
+
+    assert handled is True
+    assert handler.status == 200
+    assert ("Content-Type", "text/event-stream") in handler.response_headers
+    assert calls == [("p1", "t2", 9)]
 
 
 def test_archive_room_route_uses_archive_service_compatibility(monkeypatch):

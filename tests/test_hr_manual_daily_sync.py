@@ -37,7 +37,7 @@ class FakeConversation:
         return self.responses[ai_id]
 
     def ask_hr(self, prompt, _key, _timeout):
-        ai_id = prompt.split('<agent ai_id="', 1)[1].split('"', 1)[0]
+        ai_id = prompt.split("<ai_id>", 1)[1].split("</ai_id>", 1)[0]
         import json
         return json.dumps({
             "schemaVersion": 1, "agentAiId": ai_id, "localDate": "2026-07-20",
@@ -86,6 +86,8 @@ def test_manual_sync_replaces_report_and_versions_assessment(tmp_path):
     assert first.assessed == 1
     assert '"requestType":"vo.hr.daily_report"' in fake.agent_calls[0][1]
     assert '"agentAiId":"agent-1"' in fake.agent_calls[0][1]
+    assert "不要只依据当前上下文" in fake.agent_calls[0][1]
+    assert "今天可访问的所有会话和任务记录" in fake.agent_calls[0][1]
     report = repository.get_daily_report("agent-1", "2026-07-20")
     assessment = repository.get_current_assessment("agent-1", "2026-07-20")
     assert report.raw_response == "first corrected report"
@@ -108,6 +110,18 @@ def test_no_response_preserves_existing_report_and_assessment(tmp_path):
     before_report = repository.get_daily_report("agent-1", "2026-07-20")
     before_assessment = repository.get_current_assessment("agent-1", "2026-07-20")
     fake.responses["agent-1"] = None
+    result = service.synchronize(("agent-1",), command_id="command-2")
+    assert result.no_response == 1
+    assert repository.get_daily_report("agent-1", "2026-07-20") == before_report
+    assert repository.get_current_assessment("agent-1", "2026-07-20") == before_assessment
+
+
+def test_delivery_receipt_preserves_existing_report_and_assessment(tmp_path):
+    repository, fake, service = build(tmp_path)
+    service.synchronize(("agent-1",), command_id="command-1")
+    before_report = repository.get_daily_report("agent-1", "2026-07-20")
+    before_assessment = repository.get_current_assessment("agent-1", "2026-07-20")
+    fake.responses["agent-1"] = "[DELIVERED] Message delivered to OpenClaw agent."
     result = service.synchronize(("agent-1",), command_id="command-2")
     assert result.no_response == 1
     assert repository.get_daily_report("agent-1", "2026-07-20") == before_report

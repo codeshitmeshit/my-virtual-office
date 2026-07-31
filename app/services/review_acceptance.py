@@ -283,6 +283,8 @@ def run_review(
                     if continued.get("continued"):
                         rework_launch = str(continued.get("attemptId") or "")
                     else:
+                        if continued.get("status") == "blocked" and not task.get("blockedChecklistItems"):
+                            task["blockedChecklistItems"] = _unfinished_checklist_summary(task, done_result)
                         task["blockedReason"] = task.get("blockedReason") or done_result.get("error")
                         if task.get("executionState") != "blocked":
                             ports.transition(project, task, "blocked", "system", task["blockedReason"], attempt_id)
@@ -378,6 +380,39 @@ def run_review(
             ports.launch_rework(project_id, task_id, rework_launch)
     finally:
         ports.discard_review(review_id)
+
+
+def _unfinished_checklist_summary(task: Mapping[str, Any], done_result: Mapping[str, Any] | None, *, limit: int = 8) -> list[dict[str, str]]:
+    checklist = [
+        item for item in (task.get("checklist") or [])
+        if isinstance(item, Mapping) and item.get("source") not in {"meeting_action_item", "meeting_risk"}
+    ]
+    by_id = {str(item.get("id") or "").strip(): item for item in checklist}
+    raw_items = []
+    if isinstance(done_result, Mapping) and isinstance(done_result.get("unfinishedChecklist"), list):
+        raw_items = [item for item in done_result.get("unfinishedChecklist") or [] if isinstance(item, Mapping)]
+    if not raw_items:
+        raw_items = [item for item in checklist if item.get("done") is not True]
+    summary: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for raw in raw_items:
+        item_id = str(raw.get("id") or "").strip()
+        item = by_id.get(item_id) or raw
+        text = str(item.get("text") or raw.get("text") or "").strip()
+        if not text:
+            continue
+        key = item_id or text
+        if key in seen:
+            continue
+        seen.add(key)
+        summary.append({
+            "id": item_id,
+            "text": text,
+            "evidence": str(item.get("evidence") or raw.get("evidence") or "").strip(),
+        })
+        if len(summary) >= limit:
+            break
+    return summary
 
 
 def _deliver_review_interventions(

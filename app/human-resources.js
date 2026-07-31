@@ -689,15 +689,57 @@
             : '<span class="hr-muted">' + escHtml(emptyText || '—') + '</span>';
     }
 
+    function parseDailyReportPayload(rawResponse) {
+        if (typeof rawResponse !== 'string' || !rawResponse.trim()) return null;
+        let text = rawResponse.trim();
+        const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+        if (fenced) text = fenced[1].trim();
+        try {
+            const value = JSON.parse(text);
+            return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function renderReportObjectList(values, emptyText) {
+        return renderTextList(array(values).map(function (item) {
+            const value = object(item);
+            const parts = [];
+            if (value.type) parts.push(value.type);
+            if (value.id) parts.push(value.id);
+            if (value.name) parts.push(value.name);
+            if (value.title) parts.push(value.title);
+            return parts.length ? parts.join(' · ') : item;
+        }), emptyText);
+    }
+
+    function renderStructuredReport(rawResponse) {
+        const payload = parseDailyReportPayload(rawResponse);
+        if (!payload) {
+            return '<details open><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
+                '<pre>' + escHtml(rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>';
+        }
+        return '<div class="hr-report-grid">' +
+            '<div><h5>' + escHtml(tr('hr_completed_work', 'Completed work')) + '</h5>' + renderTextList(payload.completedWork) + '</div>' +
+            '<div><h5>' + escHtml(tr('hr_related_projects_tasks', 'Related projects or tasks')) + '</h5>' + renderReportObjectList(payload.relatedProjectsOrTasks) + '</div>' +
+            '<div><h5>' + escHtml(tr('hr_artifacts', 'Artifacts')) + '</h5>' + renderReportObjectList(payload.artifacts) + '</div>' +
+            '<div><h5>' + escHtml(tr('hr_blockers', 'Blockers')) + '</h5>' + renderTextList(payload.blockers) + '</div>' +
+            '<div><h5>' + escHtml(tr('hr_requested_help', 'Requested help')) + '</h5>' + renderTextList(payload.requestedHelp) + '</div>' +
+            '<div><h5>' + escHtml(tr('hr_ai_self_assessment', 'AI self-assessment')) + '</h5><p>' +
+            escHtml(payload.selfAssessment || tr('hr_no_self_assessment', 'No self-assessment recorded')) + '</p></div>' +
+            '</div><details><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
+            '<pre>' + escHtml(rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>';
+    }
+
     function renderReport(report) {
         const item = object(report);
         const status = reportSubmissionLabelState(item.submissionState);
         return '<article class="hr-record-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
-            '<small>' + escHtml(tr('hr_revision', 'Revision {{version}}', { version: item.revision || 1 })) + '</small></div>' +
+            '<small>' + escHtml(tr('hr_daily_report_singleton', 'Daily report')) + '</small></div>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(status)) + '">' + escHtml(semanticLabel(status)) + '</span></header>' +
-            '<details open><summary>' + escHtml(tr('hr_raw_report', 'Raw Agent report')) + '</summary>' +
-            '<pre>' + escHtml(item.rawResponse || tr('hr_no_raw_report', 'No raw response')) + '</pre></details>' +
+            renderStructuredReport(item.rawResponse) +
             '<footer>' + escHtml(formatTime(item.submittedAt || item.requestedAt)) + '</footer>' +
         '</article>';
     }
@@ -711,8 +753,8 @@
         const record = object(item);
         const date = record.localDate || '—';
         const meta = kind === 'assessments'
-            ? tr('hr_assessment_version', 'Assessment v{{version}}', { version: record.version || 1 })
-            : tr('hr_revision', 'Revision {{version}}', { version: record.revision || 1 });
+            ? tr('hr_assessment_current', 'HR assessment')
+            : tr('hr_daily_report_singleton', 'Daily report');
         return '<button type="button" class="hr-record-date-button" onclick="HumanResources.openRecordDetail(\'' +
             escHtml(kind) + '\',' + Number(index) + ')"><strong>' + escHtml(date) + '</strong><span>' +
             escHtml(meta) + '</span></button>';
@@ -767,8 +809,7 @@
             : '';
         return '<article class="hr-record-card hr-assessment-card">' +
             '<header><div><strong>' + escHtml(item.localDate || '—') + '</strong>' +
-            '<small>' + escHtml(tr('hr_assessment_version', 'Assessment v{{version}}', { version: item.version || 1 })) +
-            (item.isCurrent ? ' · ' + escHtml(tr('hr_current', 'Current')) : '') + '</small></div>' +
+            '<small>' + escHtml(tr('hr_assessment_current', 'HR assessment')) + '</small></div>' +
             '<span class="hr-state-chip hr-tone-' + escHtml(statusTone(item.status)) + '">' + escHtml(semanticLabel(item.status)) + '</span></header>' +
             '<div class="hr-workload-line"><span>' + escHtml(tr('hr_workload', 'Workload')) + '</span>' +
             '<strong class="hr-tone-' + escHtml(workloadTone(workload)) + '">' +
@@ -900,7 +941,7 @@
                 loadMoreButton('reports', agent.reportNextCursor) + '</section>' +
             '<section class="hr-detail-section hr-assessments-section"><h4>' + escHtml(tr('hr_assessments', 'HR assessments')) + '</h4>' +
                 (assessments.length ? renderRecordList('assessments', assessments, renderAssessment) : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_assessments', 'No assessments')) + '</div>') +
-                loadMoreButton('assessments', agent.assessmentNextCursor) + '</section>' +
+                '</section>' +
             '<section class="hr-detail-section hr-access-section"><h4>' + escHtml(tr('hr_access_history', 'Agent access history')) + '</h4>' +
                 (accesses.length ? '<ul class="hr-history-list">' + renderAccessHistory(accesses) + '</ul>' : '<div class="hr-inline-empty">' + escHtml(tr('hr_no_access_history', 'No Agent has viewed this record')) + '</div>') +
                 loadMoreButton('access', agent.accessNextCursor) + '</section>' +
@@ -1026,7 +1067,7 @@
         const spec = commandSpec(action);
         if (!spec) return false;
         const confirmation = tr('hr_confirm_command', 'Confirm Human Resources action: {{action}}?', { action: actionLabel(action) });
-        if (typeof root.confirm === 'function' && !root.confirm(confirmation)) return false;
+        if (!await root.voConfirm(confirmation)) return false;
         const scrollSnapshot = captureScroll();
         state.commandBusy = action;
         state.commandNotice = '';
@@ -1212,6 +1253,13 @@
             state.detailLoading = false;
             render();
             return Promise.resolve(true);
+        }
+        if (
+            embeddedContext &&
+            embeddedContext.selectedAiId !== selected &&
+            typeof embeddedContext.selectAgent === 'function'
+        ) {
+            embeddedContext.selectAgent(selected);
         }
         state.detailLoading = true;
         render();

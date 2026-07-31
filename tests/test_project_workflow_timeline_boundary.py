@@ -27,6 +27,7 @@ TIMELINE_MODULES = (
     "conversation_timeline_events.py",
     "chat_history_timeline.py",
     "project_workflow_chat.py",
+    "project_workflow_chat_stream.py",
     "project_workflow_timeline.py",
     "codex_workflow_timeline_source.py",
     "openclaw_timeline_source.py",

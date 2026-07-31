@@ -23,7 +23,14 @@ def _hydrate():
         return
     exported = set(__all__)
     for key, value in vars(server).items():
-        if key.startswith("__") or key in ("_server_module", "_hydrate", "_wrap_exports"):
+        if key.startswith("__") or key in (
+            "_server_module",
+            "_hydrate",
+            "_wrap_exports",
+            "_get_skills_library_dir",
+            "_handle_skills_library_apply",
+            "_skill_sync_agent_context",
+        ):
             continue
         if key in exported and callable(value) and (
             getattr(value, "_service_wrapper", False) or getattr(value, "_service_wrapped", False)

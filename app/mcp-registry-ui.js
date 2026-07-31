@@ -470,7 +470,7 @@ async function saveMcpGuide(name) {
 }
 
 async function deleteMcpServer(name) {
-    if (!confirm(_mcpTr('mcp_delete_confirm', { name: name }, '从 VO 注册表删除 MCP server "{{name}}"？'))) return;
+    if (!await voConfirm(_mcpTr('mcp_delete_confirm', { name: name }, '从 VO 注册表删除 MCP server "{{name}}"？'), { tone: 'danger' })) return;
     try {
         var res = await _mcpMutationFetch('/api/mcp-registry/' + encodeURIComponent(name), { method: 'DELETE' });
         var data = await res.json();

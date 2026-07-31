@@ -56,6 +56,10 @@ def test_hr_daily_records_collapse_history_and_keep_raw_report_primary():
     assert "function isCurrentRecord(record)" in javascript
     assert "function renderRecordDateButton(kind, item, index)" in javascript
     assert "function renderRecordDialog()" in javascript
+    assert "function parseDailyReportPayload(rawResponse)" in javascript
+    assert "function renderStructuredReport(rawResponse)" in javascript
+    assert "hr-report-grid" in javascript
+    assert "hr_ai_self_assessment" in javascript
     assert "openRecordDetail" in javascript
     assert "closeRecordDetail" in javascript
     assert "renderReport(record, { showNormalized: true })" not in javascript
@@ -66,6 +70,9 @@ def test_hr_daily_records_collapse_history_and_keep_raw_report_primary():
     assert "const displayState = hrDisplayState(item.status)" in javascript
     assert "renderRecordList('reports', reports, renderReport)" in javascript
     assert "renderRecordList('assessments', assessments, renderAssessment)" in javascript
+    assert "loadMoreButton('assessments'" not in javascript
+    assert "hr_assessment_current" in javascript
+    assert "hr_daily_report_singleton" in javascript
     assert '<details open><summary>' in javascript
     assert ".hr-record-date-button" in css
     assert ".hr-record-dialog" in css

@@ -9,7 +9,7 @@ var _acpUnsaved = false;
 
 function toggleAgentPanel() {
     if (window._voLicense && window._voLicense.demo) {
-        alert(_tr('premium_agent_editor'));
+        voAlert(_tr('premium_agent_editor'));
         return;
     }
     if (!_agentPanel) _buildAgentPanel();
@@ -923,13 +923,13 @@ function _acpCreateNewAgent() {
     });
 }
 
-function _acpDeleteAgent(agentId) {
+async function _acpDeleteAgent(agentId) {
     var agentName = agentId;
     var agentCfg = (officeConfig.agents || []).find(function(a) { return a.id === agentId; });
     if (agentCfg) agentName = agentCfg.name || agentId;
 
     var providerKind = (agentCfg && agentCfg.providerKind) || (agentId.indexOf('hermes-') === 0 ? 'Hermes' : (agentId.indexOf('codex-') === 0 ? 'Codex' : 'OpenClaw'));
-    if (!confirm(_tr('delete_agent_confirm', { name: agentName, provider: providerKind }))) return;
+    if (!await voConfirm(_tr('delete_agent_confirm', { name: agentName, provider: providerKind }), { tone: 'danger' })) return;
 
     // Call server to delete from the backing agent platform.
     fetch('/api/agent/delete', {
@@ -938,7 +938,7 @@ function _acpDeleteAgent(agentId) {
         body: JSON.stringify({ id: agentId })
     }).then(function(res) { return res.json(); }).then(function(data) {
         if (data.error) {
-        alert(_tr('failed_delete_agent') + ': ' + data.error);
+            voAlert(_tr('failed_delete_agent') + ': ' + data.error);
             return;
         }
 
@@ -964,7 +964,7 @@ function _acpDeleteAgent(agentId) {
 
         _acpShowToast('🗑️ ' + _tr('agent_deleted', { name: agentName }));
     }).catch(function(e) {
-        alert(_tr('error_delete_agent') + ': ' + e.message);
+        voAlert(_tr('error_delete_agent') + ': ' + e.message);
     });
 }
 

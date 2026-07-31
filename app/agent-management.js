@@ -82,8 +82,8 @@
         const requestedSelection = options && Object.prototype.hasOwnProperty.call(options, 'selectedAiId')
             ? String(options.selectedAiId || '')
             : null;
-        if (state.activeTab === 'humanResources' && requestedSelection !== null) {
-            state.selectedAiId = state.roster.some(function (item) {
+        if (state.activeTab === 'humanResources') {
+            state.selectedAiId = requestedSelection && state.roster.some(function (item) {
                 return item.aiId === requestedSelection;
             }) ? requestedSelection : '';
         } else if (!state.roster.some(function (item) {
@@ -252,7 +252,11 @@
     function switchTab(name) {
         if (!['configuration', 'humanResources'].includes(name)) return false;
         saveScroll();
+        const previousTab = state.activeTab;
         state.activeTab = name;
+        if (name === 'humanResources' && previousTab !== 'humanResources') {
+            state.selectedAiId = '';
+        }
         renderTabs();
         mountActiveTab();
         return true;
@@ -295,6 +299,7 @@
         state.returnFocus = root.document.activeElement;
         state.open = true;
         if (tab) state.activeTab = tab === 'humanResources' ? tab : 'configuration';
+        if (state.activeTab === 'humanResources') state.selectedAiId = '';
         if (!state.roster.length && Array.isArray(root.agents)) setRoster(root.agents);
         render();
         bootstrapAudience();

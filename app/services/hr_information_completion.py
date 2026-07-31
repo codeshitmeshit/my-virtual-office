@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -18,6 +17,8 @@ from services.hr_directory import (
 )
 from services.hr_repository import AgentRecord, HRRepository
 from services.hr_command_status import HRCommandStatusTracker
+from services.hr_prompt_documents import agent_introduction_request_document
+from services.hr_structured_output import compact_diagnostic_text
 
 
 INTRODUCTION_REQUEST_MESSAGE = (
@@ -27,28 +28,7 @@ INTRODUCTION_REQUEST_MESSAGE = (
 
 
 def introduction_request_message(ai_id: str) -> str:
-    context = {
-        "schemaVersion": 1,
-        "requestType": "vo.hr.agent_introduction",
-        "agentAiId": ai_id,
-    }
-    response = {
-        "schemaVersion": 1,
-        "agentAiId": ai_id,
-        "identity": "<self-described identity>",
-        "responsibilities": ["<responsibility>"],
-        "strengths": ["<strength>"],
-        "collaborationScenarios": ["<when another Agent should collaborate with you>"],
-    }
-    return (
-        f"{INTRODUCTION_REQUEST_MESSAGE}\n\n"
-        f"请求上下文（JSON）：\n{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "请优先只返回一个 JSON 对象，字段和类型严格参考以下模板；"
-        "没有内容的数组请返回 []，不要添加其他字段或 Markdown 代码块：\n"
-        f"{json.dumps(response, ensure_ascii=False, separators=(',', ':'))}\n"
-        "如果当前运行环境确实无法输出合法 JSON，可以改用清晰的自然语言回答；"
-        "系统仍会保留原始回答并交由 HR 总结。"
-    )
+    return agent_introduction_request_document(ai_id)
 
 
 class HRInformationCompletionValidationError(ValueError):
@@ -60,6 +40,9 @@ class HRInformationCompletionItem:
     ai_id: str
     status: str
     error_code: str = ""
+    conversation_key: str = ""
+    error_detail: str = ""
+    raw_output_excerpt: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,6 +60,31 @@ class HRInformationCompletionReceipt:
     command_id: str
     command: str
     accepted: bool
+
+
+def _failure_context_items(
+    items: tuple[HRInformationCompletionItem, ...],
+) -> list[dict[str, str]]:
+    failures = []
+    for item in items:
+        if item.status != "failed" and not item.error_code:
+            continue
+        failures.append(
+            {
+                "aiId": item.ai_id,
+                "status": item.status,
+                "errorCode": item.error_code,
+                "conversationKey": item.conversation_key,
+                "detail": compact_diagnostic_text(item.error_detail, limit=240),
+                "rawOutputExcerpt": compact_diagnostic_text(
+                    item.raw_output_excerpt,
+                    limit=360,
+                ),
+            }
+        )
+        if len(failures) >= 12:
+            break
+    return failures
 
 
 class CallableHRInformationConversation(HRConversationPort, HRSummarizationPort):
@@ -176,12 +184,24 @@ class HRInformationCompletionService:
                 message=introduction_request_message(ai_id),
             )[0]
             if request.status not in {"response_received", "already_complete"}:
-                return HRInformationCompletionItem(ai_id, request.status, request.error_code)
+                return HRInformationCompletionItem(
+                    ai_id,
+                    request.status,
+                    request.error_code,
+                    request.conversation_key,
+                )
             current = self._repository.get_current_introduction(ai_id)
         if current is None:
             return HRInformationCompletionItem(ai_id, "failed", "hr_introduction_missing")
         summary = self._summarizer.summarize(ai_id, expected_version=current.version)
-        return HRInformationCompletionItem(ai_id, summary.status, summary.error_code)
+        return HRInformationCompletionItem(
+            ai_id,
+            summary.status,
+            summary.error_code,
+            summary.conversation_key,
+            summary.error_detail,
+            summary.raw_output_excerpt,
+        )
 
     def complete_missing(self) -> HRInformationCompletionResult:
         available = tuple(agent for agent in self._all_agents() if self._available(agent))
@@ -204,6 +224,7 @@ class HRInformationCompletionService:
                             ai_id,
                             "failed",
                             str(getattr(exc, "code", "hr_information_completion_failed")),
+                            error_detail=str(exc),
                         )
                     )
         items.sort(key=lambda item: item.ai_id)
@@ -230,6 +251,7 @@ class HRInformationCompletionService:
                 "published": result.published,
                 "noResponse": result.no_response,
                 "failed": result.failed,
+                "failures": _failure_context_items(result.items),
             },
             occurrence_key=f"hr-information-completion:{command_id}:complete",
         )
@@ -300,6 +322,7 @@ class HRInformationCompletionCommands:
                         "published": result.published,
                         "noResponse": result.no_response,
                         "failed": result.failed,
+                        "failures": _failure_context_items(result.items),
                     }
                     if result.failed:
                         self._tracker.failed(

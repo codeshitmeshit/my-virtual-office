@@ -18,6 +18,7 @@ os.environ.setdefault("VO_CLAUDE_CODE_ENABLED", "0")
 os.environ.setdefault("VO_STATUS_DIR", tempfile.mkdtemp(prefix="vo-agent-communication-skill-test-"))
 
 import server
+from services.agent_workspace_documents import agent_template_files
 
 
 def test_canonical_loader_matches_repository_skill():
@@ -329,7 +330,12 @@ def test_workspace_payload_exposes_discovery_readiness():
 
 
 def test_openclaw_agent_template_requires_vo_routing_without_private_fallback():
-    agents_md = server._agent_template_files("Analyst", "Market analyst", "📊")["AGENTS.md"]
+    agents_md = agent_template_files(
+        "Analyst",
+        "Market analyst",
+        "📊",
+        communication_profile="legacy",
+    )["AGENTS.md"]
     assert "`vo-agent-communication`" in agents_md
     assert "/api/agent-platform-communications/send" in agents_md
     assert "`sessions_list`" in agents_md
@@ -385,6 +391,8 @@ def test_existing_archive_manager_repairs_communication_skill():
     old_sync = server._sync_openclaw_communication_skill
     old_save = server._archive_manager_save_state
     old_activity = server._archive_manager_append_activity
+    old_refresh = server.refresh_agent_maps
+    old_get_roster = server.get_roster
     calls = []
     server._archive_manager_load_state = lambda: {}
     server._archive_manager_roster_agent = lambda: {
@@ -405,6 +413,8 @@ def test_existing_archive_manager_repairs_communication_skill():
     }
     server._archive_manager_save_state = lambda state: state
     server._archive_manager_append_activity = lambda *args, **kwargs: None
+    server.refresh_agent_maps = lambda: None
+    server.get_roster = lambda: []
     try:
         state = server._archive_manager_create_if_missing()
         assert state["status"] == "idle"
@@ -417,3 +427,5 @@ def test_existing_archive_manager_repairs_communication_skill():
         server._sync_openclaw_communication_skill = old_sync
         server._archive_manager_save_state = old_save
         server._archive_manager_append_activity = old_activity
+        server.refresh_agent_maps = old_refresh
+        server.get_roster = old_get_roster

@@ -77,6 +77,7 @@
     "_meeting_has_open_conflicts",
     "_meeting_has_substantive_disagreement",
     "_meeting_history_projection",
+    "_meeting_history_summary_record",
     "_meeting_live_advisory_prompt",
     "_meeting_mark_preparing_started",
     "_meeting_normalize_advisory_reply",
@@ -181,6 +182,10 @@
     {
       "callee": "_meeting_provider_ref",
       "caller": "_append_ignored_provider_completion"
+    },
+    {
+      "callee": "_meeting_parse_json_object",
+      "caller": "_archive_manager_ai_refine_uncoordinated"
     },
     {
       "callee": "_archive_maintenance_trigger",
@@ -355,6 +360,10 @@
       "caller": "_exec_meeting_project_history"
     },
     {
+      "callee": "len",
+      "caller": "_exec_meeting_project_history"
+    },
+    {
       "callee": "bool",
       "caller": "_exec_meeting_transcript_projection"
     },
@@ -369,10 +378,6 @@
     {
       "callee": "_status_meeting_projection",
       "caller": "_get_normalized_presence_state"
-    },
-    {
-      "callee": "_meeting_parse_json_object",
-      "caller": "_handle_archive_manager_ai_refine"
     },
     {
       "callee": "_log_activity",
@@ -523,6 +528,14 @@
       "caller": "_handle_executable_meeting_create"
     },
     {
+      "callee": "_exec_meeting_project_active",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
+      "callee": "_exec_meeting_project_history",
+      "caller": "_handle_executable_meeting_detail"
+    },
+    {
       "callee": "_load_exec_meeting_store",
       "caller": "_handle_executable_meeting_detail"
     },
@@ -572,6 +585,10 @@
     },
     {
       "callee": "_send_meeting_failure_notification",
+      "caller": "_handle_executable_meeting_end_with_moderator"
+    },
+    {
+      "callee": "isinstance",
       "caller": "_handle_executable_meeting_end_with_moderator"
     },
     {
@@ -992,6 +1009,10 @@
     },
     {
       "callee": "bool",
+      "caller": "_handle_meeting_request_create"
+    },
+    {
+      "callee": "isinstance",
       "caller": "_handle_meeting_request_create"
     },
     {
@@ -1451,6 +1472,10 @@
       "caller": "_meeting_history_projection"
     },
     {
+      "callee": "_meeting_history_summary_record",
+      "caller": "_meeting_history_projection"
+    },
+    {
       "callee": "_release_timed_out_preparing_meetings",
       "caller": "_meeting_history_projection"
     },
@@ -1461,6 +1486,14 @@
     {
       "callee": "isinstance",
       "caller": "_meeting_history_projection"
+    },
+    {
+      "callee": "dict",
+      "caller": "_meeting_history_summary_record"
+    },
+    {
+      "callee": "isinstance",
+      "caller": "_meeting_history_summary_record"
     },
     {
       "callee": "isinstance",
@@ -1911,15 +1944,7 @@
       "caller": "_meeting_request_unresolved_for_task"
     },
     {
-      "callee": "int",
-      "caller": "_meeting_request_urgency"
-    },
-    {
-      "callee": "max",
-      "caller": "_meeting_request_urgency"
-    },
-    {
-      "callee": "min",
+      "callee": "urgency_score",
       "caller": "_meeting_request_urgency"
     },
     {
@@ -2135,7 +2160,15 @@
       "caller": "_project_execution_apply_meeting_result"
     },
     {
+      "callee": "_project_stage_reconcile_terminal",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
       "callee": "_wf_get_backlog_col",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "is_marked_project",
       "caller": "_project_execution_apply_meeting_result"
     },
     {
@@ -2144,6 +2177,10 @@
     },
     {
       "callee": "next",
+      "caller": "_project_execution_apply_meeting_result"
+    },
+    {
+      "callee": "orchestration_state",
       "caller": "_project_execution_apply_meeting_result"
     },
     {

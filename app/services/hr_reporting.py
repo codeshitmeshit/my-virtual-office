@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Protocol
 
+from services.hr_prompt_documents import daily_report_request_document
 from services.hr_repository import (
     DailyCycleRecord,
     DailyReportRecord,
@@ -15,6 +15,7 @@ from services.hr_repository import (
     ReportRequestPage,
     ReportRequestRecord,
 )
+from services.hr_daily_report_response_filter import reportable_daily_response
 
 
 class HRReportingValidationError(ValueError):
@@ -25,35 +26,10 @@ def daily_report_request_message(base_message: str, *, ai_id: str, local_date: s
     """Build the provider-neutral preferred JSON contract with a text fallback."""
     if not isinstance(base_message, str) or not base_message.strip():
         raise HRReportingValidationError("daily report message must not be empty")
-    context = {
-        "schemaVersion": 1,
-        "requestType": "vo.hr.daily_report",
-        "agentAiId": ai_id,
-        "localDate": local_date,
-    }
-    response = {
-        "schemaVersion": 1,
-        "agentAiId": ai_id,
-        "localDate": local_date,
-        "completedWork": [],
-        "relatedProjectsOrTasks": [
-            {"type": "<project-or-task>", "id": "<stable-id>", "title": "<title>"}
-        ],
-        "artifacts": [
-            {"id": "<artifact-id>", "name": "<artifact-name>", "type": "<artifact-type>"}
-        ],
-        "blockers": [],
-        "requestedHelp": [],
-    }
-    return (
-        f"{base_message.strip()}\n\n"
-        "请求上下文（JSON）：\n"
-        f"{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n\n"
-        "请优先只返回一个 JSON 对象，字段和类型严格参考以下模板；"
-        "没有内容的数组请返回 []，不要添加其他字段或 Markdown 代码块：\n"
-        f"{json.dumps(response, ensure_ascii=False, separators=(',', ':'))}\n"
-        "如果当前运行环境确实无法输出合法 JSON，可以改用清晰的自然语言回答；"
-        "系统会保留原始回答供 HR 评估。不要虚构未发生的工作。"
+    return daily_report_request_document(
+        base_message.strip(),
+        ai_id=ai_id,
+        local_date=local_date,
     )
 
 
@@ -382,6 +358,7 @@ class HRDailyReportCollector:
                 )
                 if response is not None and not isinstance(response, str):
                     raise TypeError("conversation response must be text or None")
+                response = reportable_daily_response(response)
                 finished, _ = self._repository.record_report_response(
                     request_id=claim.id,
                     claim_token=token,

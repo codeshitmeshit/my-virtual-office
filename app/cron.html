@@ -132,6 +132,7 @@ a:hover { text-decoration: underline; }
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
     <script src="i18n.js"></script>
+    <script src="vo-dialogs.js?v=20260731"></script>
     <script>
     (function(){
         var lang='en';
@@ -750,7 +751,7 @@ async function toggleJob(id, currentlyEnabled) {
 }
 
 async function deleteJob(id, name) {
-  if (!confirm(`${i18n.t('confirm_delete_job') || 'Delete job'} "${name}"? ${i18n.t('cannot_be_undone') || 'This cannot be undone.'}`)) return;
+  if (!await voConfirm(`${i18n.t('confirm_delete_job') || 'Delete job'} "${name}"? ${i18n.t('cannot_be_undone') || 'This cannot be undone.'}`, { tone: 'danger' })) return;
   try {
     const projectJob = projectCronJobs.find(j => String(j.id) === String(id));
     if (projectJob) await projectCronRequest(projectJob, 'delete');

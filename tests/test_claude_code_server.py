@@ -56,7 +56,7 @@ server.VO_CONFIG = {
     "claudeCode": {
         **(server.VO_CONFIG.get("claudeCode") or {}),
         "enabled": True,
-        "replyText": os.environ["VO_CLAUDE_CODE_REPLY_TEXT"],
+        "replyText": "ack from claude server",
     },
 }
 

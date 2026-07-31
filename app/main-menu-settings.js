@@ -834,14 +834,14 @@ function mmImportConfig() {
         var file = fileInput.files[0];
         if (!file) return;
         var reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
                 var imported = JSON.parse(e.target.result);
                 if (!imported.canvasWidth && !imported.furniture) {
                     _acpShowToast('❌ Invalid config file');
                     return;
                 }
-    if (!confirm(_tr('import_config_confirm'))) return;
+                if (!await voConfirm(_tr('import_config_confirm'))) return;
                 // Merge imported config
                 if (imported.canvasWidth) { W = imported.canvasWidth; officeConfig.canvasWidth = W; }
                 if (imported.canvasHeight) { H = imported.canvasHeight; officeConfig.canvasHeight = H; }
@@ -866,10 +866,10 @@ function mmImportConfig() {
     fileInput.click();
 }
 
-function mmFullReset() {
-    if (!confirm('⚠️ ' + _tr('full_reset_confirm'))) return;
-    if (!confirm(_tr('reset_type_confirm'))) return;
-    var input = prompt(_tr('type_reset'));
+async function mmFullReset() {
+    if (!await voConfirm('⚠️ ' + _tr('full_reset_confirm'), { tone: 'danger' })) return;
+    if (!await voConfirm(_tr('reset_type_confirm'), { tone: 'danger' })) return;
+    var input = await voPrompt(_tr('type_reset'));
     if (input !== 'RESET') { _acpShowToast('Reset cancelled'); return; }
 
     // Clear everything

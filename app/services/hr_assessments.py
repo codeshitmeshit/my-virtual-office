@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Callable, Iterable, Protocol
 
+from services import business_prompt_bridge
 from services.hr_evidence import EvidenceBundle, HREvidenceCollector, SanitizedEvidence
 from services.hr_repository import AssessmentRecord, HRRepository
+from services.hr_structured_output import extract_json_object_text
 
 
 class HRAssessmentValidationError(ValueError):
@@ -184,6 +186,10 @@ class HRAssessmentParser:
         if len(output) > self.MAX_OUTPUT_CHARS:
             raise HRAssessmentValidationError("HR assessment is too large")
         try:
+            output = extract_json_object_text(output).json_text
+        except ValueError as exc:
+            raise HRAssessmentValidationError("HR assessment is invalid JSON") from exc
+        try:
             value = json.loads(output)
         except json.JSONDecodeError as exc:
             raise HRAssessmentValidationError("HR assessment is invalid JSON") from exc
@@ -210,6 +216,10 @@ class HRAssessmentParser:
             or not 1 <= workload_score <= 10
         ):
             raise HRAssessmentValidationError("assessment workload score is unsupported")
+        if workload == "insufficient_information" and workload_score != 1:
+            raise HRAssessmentValidationError(
+                "insufficient information assessment workload score must be 1"
+            )
         sufficiency = value["informationSufficiency"]
         if not isinstance(sufficiency, dict) or set(sufficiency) != {"status", "explanation"}:
             raise HRAssessmentValidationError("informationSufficiency is invalid")
@@ -409,21 +419,27 @@ class HRAssessmentOrchestrator:
     @classmethod
     def _prompt(cls, report, bundle: EvidenceBundle, *, adequate: bool) -> str:
         policy = (
-            "Evidence is sufficient for a cautious workload conclusion."
+            "证据足够支撑谨慎的工作量结论。"
             if adequate
-            else "Evidence is insufficient. workload MUST be insufficient_information; "
-            "informationSufficiency.status MUST be insufficient; principalContributions and "
-            "strengths MUST be empty. Do not infer low work from non-submission or attendance."
+            else "证据不足。workload 必须是 insufficient_information；"
+            "workloadScore 必须是 1；informationSufficiency.status 必须是 insufficient；"
+            "principalContributions 和 strengths 必须为空数组。"
+            "不要因为未提交、迟交或只出席会议就推断工作量低。"
         )
         schema = (
-            "Return JSON only with exactly: schemaVersion, agentAiId, localDate, "
+            "只返回一个 JSON 对象，且只能包含这些字段：schemaVersion, agentAiId, localDate, "
             "principalContributions, workload, workloadScore, rationale, evidenceReferences, blockers, "
             "strengths, improvements, runtimeDiagnosis, informationSufficiency, hrAiId, "
-            "assessedAt. schemaVersion=1. Evidence reference items contain evidenceType, "
-            "referenceId, rationale. informationSufficiency contains status and explanation. "
-            "workloadScore MUST be an integer from 1 to 10 where 1 is minimal observable workload "
-            "and 10 is extreme observable workload. Never output ranks, leaderboards, elimination, "
-            "pause, delete, or reassign actions."
+            "assessedAt。schemaVersion=1。evidenceReferences 数组中的每一项只能包含 "
+            "evidenceType, referenceId, rationale。informationSufficiency 只能包含 status 和 "
+            "explanation。workload 只能是 low, appropriate, high, overloaded, "
+            "insufficient_information 之一。workloadScore 必须是 1 到 10 的整数；"
+            "1 表示可观察工作量最低，10 表示可观察工作量极高；当 workload 为 "
+            "insufficient_information 时 workloadScore 必须为 1。所有面向用户的自然语言字段"
+            "必须使用简体中文，包括 principalContributions、rationale、"
+            "evidenceReferences[].rationale、blockers、strengths、improvements、"
+            "runtimeDiagnosis、informationSufficiency.explanation；不要输出英文评语。"
+            "禁止输出排名、排行榜、淘汰、暂停、删除、重新分配等惩罚性或处置性建议。"
         )
         report_payload = {
             "submissionState": report.submission_state,
@@ -432,15 +448,22 @@ class HRAssessmentOrchestrator:
             "windowClosedAt": report.window_closed_at,
             "submittedAt": report.submitted_at,
         }
-        return (
-            "<hr_assessment_prompt>\n"
-            f"  <output_contract>{schema}</output_contract>\n"
-            f"  <evidence_policy>{policy}</evidence_policy>\n"
-            f"  <agent ai_id=\"{report.ai_id}\" />\n"
-            f"  <local_date>{report.local_date}</local_date>\n"
-            f"  <agent_report>{json.dumps(report_payload, ensure_ascii=False)}</agent_report>\n"
-            f"  <allowed_evidence>{json.dumps(cls._evidence_payload(bundle), ensure_ascii=False)}</allowed_evidence>\n"
-            "</hr_assessment_prompt>"
+        return business_prompt_bridge.render_business_prompt(
+            {
+                "domain": "hr.assessment",
+                "operation": "evaluate",
+                "locale": "zh-CN",
+                "root": "hr_assessment_prompt",
+                "target": {"agentAiId": report.ai_id},
+                "sections": [
+                    {"name": "evidence_policy", "value": policy, "trusted": True},
+                    {"name": "agent", "value": {"ai_id": report.ai_id}},
+                    {"name": "local_date", "value": report.local_date},
+                    {"name": "agent_report", "format": "json", "value": report_payload},
+                    {"name": "allowed_evidence", "format": "json", "value": cls._evidence_payload(bundle)},
+                ],
+                "output": {"schema": schema},
+            },
         )
 
     @staticmethod
@@ -468,6 +491,44 @@ class HRAssessmentOrchestrator:
                 }
             )
         return result
+
+    def _fallback_insufficient_assessment(
+        self,
+        *,
+        ai_id: str,
+        local_date: str,
+        reason: str,
+    ) -> ParsedHRAssessment:
+        reason = str(reason or "").strip()[:160]
+        detail = f" HR 输出未能通过结构化校验：{reason}。" if reason else ""
+        return ParsedHRAssessment(
+            agent_ai_id=ai_id,
+            local_date=local_date,
+            principal_contributions=(),
+            workload="insufficient_information",
+            workload_score=1,
+            rationale=(
+                "HR 未能取得足够可验证信息，不能推断当日工作量。"
+                f"{detail}本次仅记录信息不足状态。"
+            ),
+            evidence_references=(),
+            blockers=(),
+            strengths=(),
+            improvements=("补充结构化日报与可引用工作证据。",),
+            runtime_diagnosis="评估输入不足或 HR 结构化输出不可用。",
+            information_sufficiency="日报或独立证据不足，无法形成可靠工作量结论。",
+            information_sufficiency_status="insufficient",
+            hr_ai_id=self._hr_ai_id,
+            assessed_at=self._now().isoformat(),
+        )
+
+    @staticmethod
+    def _can_fallback_parse_error(error: HRAssessmentValidationError) -> bool:
+        text = str(error)
+        return not (
+            "sufficient assessment requires contributions and evidence" in text
+            or "workload and information sufficiency conflict" in text
+        )
 
     def assess(
         self,
@@ -549,11 +610,20 @@ class HRAssessmentOrchestrator:
                     f"hr:assessment:{local_date}:{ai_id}",
                     self._timeout_seconds,
                 )
-                parsed = self._parser.parse(
-                    output,
-                    expected_ai_id=ai_id,
-                    expected_local_date=local_date,
-                )
+                try:
+                    parsed = self._parser.parse(
+                        output,
+                        expected_ai_id=ai_id,
+                        expected_local_date=local_date,
+                    )
+                except HRAssessmentValidationError as exc:
+                    if not self._can_fallback_parse_error(exc):
+                        raise
+                    parsed = self._fallback_insufficient_assessment(
+                        ai_id=ai_id,
+                        local_date=local_date,
+                        reason=str(exc),
+                    )
                 parsed = self._policy.validate(parsed)
                 if not adequate and (
                     parsed.workload != "insufficient_information"

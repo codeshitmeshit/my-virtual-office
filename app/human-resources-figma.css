@@ -347,10 +347,12 @@
     line-height: 1.5;
 }
 
+.agent-management-panel[data-active-tab="humanResources"] .hr-report-grid,
 .agent-management-panel[data-active-tab="humanResources"] .hr-assessment-grid {
     gap: 7px;
 }
 
+.agent-management-panel[data-active-tab="humanResources"] .hr-report-grid h5,
 .agent-management-panel[data-active-tab="humanResources"] .hr-assessment-grid h5 {
     font-size: 7px;
 }

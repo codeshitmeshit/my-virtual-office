@@ -26,9 +26,9 @@ function minimizeAllBubbles() {
     minimizeAllChat();
 }
 
-function triggerBubble(type) {
+async function triggerBubble(type) {
     if (!selectedAgent) return;
-    const text = prompt(type === 'thought' ? `💭 What is ${selectedAgent.name} thinking?` : `💬 What does ${selectedAgent.name} say?`);
+    const text = await voPrompt(type === 'thought' ? `💭 What is ${selectedAgent.name} thinking?` : `💬 What does ${selectedAgent.name} say?`);
     if (!text) return;
     if (type === 'thought') {
         selectedAgent.thought = text;
@@ -39,7 +39,7 @@ function triggerBubble(type) {
         getBubbleMinState(selectedAgent).thought = false;
         addGlobalLog(`💭 ${selectedAgent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${text.substring(0, 40)}...`);
     } else {
-    const target = prompt(_tr('message_target_prompt')) || '';
+    const target = await voPrompt(_tr('message_target_prompt')) || '';
         selectedAgent.speech = text;
         selectedAgent.speechTarget = target;
         selectedAgent.lastSpeech = text;

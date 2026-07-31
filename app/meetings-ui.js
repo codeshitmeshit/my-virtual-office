@@ -2055,7 +2055,7 @@ async function continueMeetingDecisionWindow(meetingId) {
         if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
         _mtgSetDecisionControlsDisabled(meetingId, false);
     } finally {
         if (btn) btn.disabled = false;
@@ -2085,7 +2085,7 @@ async function startExecutableMeeting(meetingId) {
         if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
-        alert(_mtgT('meeting_start_failed', 'Failed to start meeting') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_start_failed', 'Failed to start meeting') + ': ' + (e.message || String(e)));
         if (btn) {
             btn.disabled = false;
             btn.textContent = '▶ ' + _mtgT('meeting_start_existing', 'Start meeting');
@@ -2801,7 +2801,7 @@ function openMeetingTaskLink(projectId, taskId) {
     if (!projectId || !taskId) return;
     window.location.hash = '#projects';
     window.dispatchEvent(new CustomEvent('vo-open-project-task', { detail: { projectId: projectId, taskId: taskId } }));
-    alert(_mtgT('meeting_action_task_created', 'Task created') + ': ' + taskId);
+    voAlert(_mtgT('meeting_action_task_created', 'Task created') + ': ' + taskId);
 }
 
 function _mtgRenderConflictPanel(m) {
@@ -2944,7 +2944,7 @@ async function endExecutableMeetingWithAI(meetingId) {
         await _mtgAfterMeetingRefresh();
         switchMtgTab('completed');
     } catch (e) {
-        alert((_tr('failed_end_meeting') || 'Failed to end meeting') + ': ' + (e.message || String(e)));
+        voAlert((_tr('failed_end_meeting') || 'Failed to end meeting') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) {
             btn.disabled = false;
@@ -2999,7 +2999,7 @@ async function resolveMeetingConflict(meetingId, agentId, action) {
     try {
         await _mtgConflictAction(meetingId, { action: action || 'wait', agentId: agentId });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -3007,26 +3007,26 @@ async function reserveMeetingConflict(meetingId, agentId) {
     try {
         await _mtgConflictAction(meetingId, { action: 'reserve', agentId: agentId });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
 async function replaceMeetingConflict(meetingId, agentId) {
-    var replacement = prompt(_mtgT('meeting_conflict_replace_prompt', 'Replacement agent ID'), '');
+    var replacement = await voPrompt(_mtgT('meeting_conflict_replace_prompt', 'Replacement agent ID'), '');
     if (!replacement) return;
     try {
         await _mtgConflictAction(meetingId, { action: 'replace', agentId: agentId, replacement: replacement.trim() });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
 async function forceJoinMeetingConflict(meetingId, agentId) {
-    if (!confirm(_mtgT('meeting_conflict_force_confirm', 'Force join can interrupt current work. Continue?'))) return;
+    if (!await voConfirm(_mtgT('meeting_conflict_force_confirm', 'Force join can interrupt current work. Continue?'), { tone: 'danger' })) return;
     try {
         await _mtgConflictAction(meetingId, { action: 'force_join', agentId: agentId, confirmForce: true });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -3034,7 +3034,7 @@ async function refreshMeetingConflicts(meetingId) {
     try {
         await _mtgConflictAction(meetingId, { action: 'refresh' });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -3044,7 +3044,7 @@ async function pauseExecutableMeeting(meetingId) {
     try {
         await _mtgTransitionMeeting(meetingId, 'pause', 'Paused by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -3059,20 +3059,20 @@ async function resumeExecutableMeeting(meetingId) {
     try {
         await _mtgTransitionMeeting(meetingId, action, 'Resumed by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
 }
 
 async function cancelExecutableMeeting(meetingId) {
-    if (!confirm(_mtgT('meeting_cancel_confirm', 'Cancel this meeting?'))) return;
+    if (!await voConfirm(_mtgT('meeting_cancel_confirm', 'Cancel this meeting?'), { tone: 'danger' })) return;
     var btn = document.getElementById('mtg-cancel-' + meetingId);
     if (btn) btn.disabled = true;
     try {
         await _mtgTransitionMeeting(meetingId, 'cancel', 'Cancelled by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -3123,14 +3123,14 @@ async function submitEndMeeting() {
 }
 
 async function deleteMeetingHistory(meetingId) {
-    if (!confirm(_tr('delete_meeting_confirm'))) return;
+    if (!await voConfirm(_tr('delete_meeting_confirm'), { tone: 'danger' })) return;
     try {
         var res = await fetch('/api/meetings/history/' + meetingId, { method: 'DELETE' });
         var data = await res.json();
         if (data.ok) _mtgRefresh();
-        else alert(data.error || _tr('failed_delete'));
+        else voAlert(data.error || _tr('failed_delete'));
     } catch (e) {
-        alert(_tr('error') + ': ' + e.message);
+        voAlert(_tr('error') + ': ' + e.message);
     }
 }
 

@@ -8,6 +8,11 @@ import shutil
 from pathlib import Path
 from typing import Any, Mapping
 
+try:
+    from services import business_prompt_bridge
+except ModuleNotFoundError:  # pragma: no cover - supports app.services imports in tests.
+    from app.services import business_prompt_bridge
+
 
 MAX_SKILL_BYTES = 64 * 1024
 MAX_PROMPT_BYTES = 96 * 1024
@@ -147,14 +152,24 @@ def load_synced_skill_prompt(agent: Mapping[str, Any]) -> str:
         if consumed + len(content.encode("utf-8", errors="replace")) > MAX_PROMPT_BYTES:
             break
         consumed += len(content.encode("utf-8", errors="replace"))
-        blocks.append(f"<skill name=\"{name}\">\n{content}\n</skill>")
+        blocks.append({"name": "skill", "value": content, "attrs": {"name": name}})
 
     if not blocks:
         return ""
-    return (
-        "<vo_synced_skills trusted=\"true\">\n"
-        "These skills were explicitly synced to the target Virtual Office agent. "
-        "Use them when their frontmatter description or instructions match the user request.\n"
-        + "\n\n".join(blocks)
-        + "\n</vo_synced_skills>"
+    return business_prompt_bridge.render_business_prompt(
+        {
+            "domain": "provider.skill_sync",
+            "operation": "inject",
+            "locale": "en-US",
+            "root": "vo_synced_skills",
+            "attrs": {"trusted": "true"},
+            "sections": [
+                {
+                    "name": "instruction",
+                    "value": "These skills were explicitly synced to the target Virtual Office agent. Use them when their frontmatter description or instructions match the user request.",
+                    "trusted": True,
+                },
+                *blocks,
+            ],
+        }
     )

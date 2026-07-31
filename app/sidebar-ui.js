@@ -134,10 +134,10 @@ function updateSidebar() {
 }
 setInterval(updateSidebar, 1000);
 
-function branchCreatePrompt() {
-    var name = prompt(typeof i18n !== 'undefined' ? i18n.t('new_branch_name_prompt') : 'New branch name:');
+async function branchCreatePrompt() {
+    var name = await voPrompt(typeof i18n !== 'undefined' ? i18n.t('new_branch_name_prompt') : 'New branch name:');
     if (!name) return;
-    var emoji = prompt(typeof i18n !== 'undefined' ? i18n.t('branch_emoji_prompt') : 'Branch emoji:', '🏢') || '🏢';
+    var emoji = await voPrompt(typeof i18n !== 'undefined' ? i18n.t('branch_emoji_prompt') : 'Branch emoji:', '🏢') || '🏢';
     var idBase = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'BRANCH';
     var id = idBase;
     var n = 2;
@@ -249,10 +249,10 @@ function _getThemeColor(theme) {
     return map[theme] || '#888888';
 }
 
-function branchDeletePrompt(branchId) {
+async function branchDeletePrompt(branchId) {
     var branch = officeConfig.branches.find(function(b){ return b.id === branchId; });
     if (!branch) return;
-    if (!confirm(_tr('delete_branch_confirm', { name: branch.name }))) return;
+    if (!await voConfirm(_tr('delete_branch_confirm', { name: branch.name }), { tone: 'danger' })) return;
     officeConfig.branches = officeConfig.branches.filter(function(b){ return b.id !== branchId; });
     _invalidateBranchCache();
     agents.forEach(function(a){ if (a.branch === branchId) a.branch = 'UNASSIGNED'; });

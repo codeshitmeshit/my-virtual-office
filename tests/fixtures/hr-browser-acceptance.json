@@ -53,7 +53,7 @@
         "id": "report-1",
         "localDate": "2026-07-19",
         "submissionState": "submitted",
-        "rawResponse": "RAW FIXTURE REPORT ONE",
+        "rawResponse": "{\"schemaVersion\":1,\"agentAiId\":\"agent-1\",\"localDate\":\"2026-07-19\",\"completedWork\":[\"Completed fixture research\"],\"relatedProjectsOrTasks\":[{\"type\":\"task\",\"id\":\"fixture-task\",\"title\":\"Fixture research\"}],\"artifacts\":[{\"id\":\"artifact-1\",\"name\":\"Fixture notes\",\"type\":\"document\"}],\"blockers\":[],\"requestedHelp\":[],\"selfAssessment\":\"Fixture self-review: confident and complete.\"}",
         "revision": 1,
         "submittedAt": "2026-07-19T09:30:00Z"
       }

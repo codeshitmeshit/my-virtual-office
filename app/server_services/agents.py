@@ -3,10 +3,17 @@
 import os
 import sys
 
+from services.agent_platform_prompt_formatting import render_promoted_agent_platform_message_prompt
+from services.agent_workspace_documents import agent_template_files
+from services.bridge_prompt_preprocessing import (
+    agent_sender_label,
+    bridge_source_label,
+    promote_bridge_prompt_input,
+)
 from services import provider_skill_sync
 from services.retired_native_agents import is_retired_native_main_agent
 
-__all__ = ['_handle_agents_list', '_safe_agent_workspace_key', '_load_agent_workspaces', '_save_agent_workspaces', '_find_agent_record', '_skill_sync_agent_context', '_agent_workspace_abs_path', '_safe_workspace_relpath', '_resolve_workspace_file', '_read_workspace_text_file', '_save_workspace_text_file', '_delete_workspace_text_file', '_workspace_file_summaries', '_agent_skill_summaries', '_agent_project_tasks', '_agent_recent_activity', '_agent_score_info', '_office_config_agent_override', '_update_office_config_agent', '_get_agent_workspace_payload', '_handle_agent_workspace_update', '_handle_agent_platforms', '_comm_log_path', '_office_agent_lookup', '_office_agent_ref', '_append_comm_event', '_rewrite_comm_events', '_comm_event_progress_marker', '_upsert_comm_progress_event', '_remove_comm_progress_events', '_append_codex_progress_comm_event', '_load_comm_history', '_is_a2a_envelope_text', '_dedupe_visible_comm_history', '_comm_event_to_chat_message', '_merge_comm_events_into_agent_chat', '_handle_agent_platform_comm_send', '_handle_agent_platform_comm_history', '_sanitize_agent_id', '_remove_openclaw_agent_paths', '_run_async_blocking', '_gateway_rpc_call_async', '_gateway_rpc_call', '_agent_template_files', '_default_openclaw_agent_model', '_handle_agent_create', '_handle_hermes_agent_create', '_handle_codex_agent_create', '_handle_claude_code_agent_create', '_write_template', '_signal_gateway_reload', '_handle_agent_delete']
+__all__ = ['_handle_agents_list', '_safe_agent_workspace_key', '_load_agent_workspaces', '_save_agent_workspaces', '_find_agent_record', '_skill_sync_agent_context', '_agent_workspace_abs_path', '_safe_workspace_relpath', '_resolve_workspace_file', '_read_workspace_text_file', '_save_workspace_text_file', '_delete_workspace_text_file', '_workspace_file_summaries', '_agent_skill_summaries', '_agent_project_tasks', '_agent_recent_activity', '_agent_score_info', '_office_config_agent_override', '_update_office_config_agent', '_get_agent_workspace_payload', '_handle_agent_workspace_update', '_handle_agent_platforms', '_comm_log_path', '_office_agent_lookup', '_office_agent_ref', '_append_comm_event', '_rewrite_comm_events', '_comm_event_progress_marker', '_upsert_comm_progress_event', '_remove_comm_progress_events', '_append_codex_progress_comm_event', '_load_comm_history', '_is_a2a_envelope_text', '_dedupe_visible_comm_history', '_comm_event_to_chat_message', '_merge_comm_events_into_agent_chat', '_handle_agent_platform_comm_send', '_handle_agent_platform_comm_history', '_sanitize_agent_id', '_remove_openclaw_agent_paths', '_run_async_blocking', '_gateway_rpc_call_async', '_gateway_rpc_call', '_default_openclaw_agent_model', '_handle_agent_create', '_handle_hermes_agent_create', '_handle_codex_agent_create', '_handle_claude_code_agent_create', '_write_template', '_signal_gateway_reload', '_handle_agent_delete']
 
 
 def _server_module():
@@ -20,6 +27,9 @@ def _hydrate():
     exported = set(__all__)
     for key, value in vars(server).items():
         if key.startswith("__") or key in ("_server_module", "_hydrate", "_wrap_exports"):
+            continue
+        current = globals().get(key)
+        if key == "get_roster" and callable(current) and getattr(current, "__module__", "") not in {"server", "__main__"}:
             continue
         if key in exported and callable(value) and (
             getattr(value, "_service_wrapper", False) or getattr(value, "_service_wrapped", False)
@@ -1212,31 +1222,27 @@ def _handle_agent_platform_comm_send(body):
             "activeStatus": "",
         }
 
-    provider_prefixes = {
-        "openclaw": "OpenClaw",
-        "hermes": "Hermes",
-        "codex": "Codex",
-        "claude-code": "Claude Code",
-    }
     if is_human_source:
         sender_label = from_ref.get("name") or "User"
-        pretty_surface = source_label or ("Virtual Office Chat" if source_app == "virtual-office" and source_surface in {"chat-window", "chat"} else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip())
-        envelope_source = pretty_surface
+        envelope_source = bridge_source_label(source_app, source_surface, source_label)
     else:
-        provider_label = provider_prefixes.get(str(from_ref.get("providerKind") or "").lower(), str(from_ref.get("providerKind") or "Agent").replace("-", " ").title())
-        base_name = f"{from_ref.get('name') or from_ref['id']} {from_ref.get('emoji') or ''}".strip()
-        sender_label = f"{provider_label}: {base_name}" if provider_label else base_name
+        sender_label = agent_sender_label(from_ref)
         envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
-    target_prompt = (
-        "<agent_platform_message_prompt>\n"
-        "  <metadata trusted=\"false\">\n"
-        f"    <from id=\"{from_ref['id']}\" is_user=\"{'true' if is_human_source else 'false'}\">{json.dumps(sender_label)}</from>\n"
-        f"    <to id=\"{to_ref['id']}\" />\n"
-        f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{envelope_source}</source>\n"
-        "  </metadata>\n"
-        f"  <message>{message}</message>\n"
-        "  <reply_instruction>Reply directly to the sender. Keep the reply concise unless detail is needed.</reply_instruction>\n"
-        "</agent_platform_message_prompt>"
+    target_prompt = render_promoted_agent_platform_message_prompt(
+        promote_bridge_prompt_input(
+            provider_kind=str(to_ref.get("providerKind") or ""),
+            message=message,
+            from_id=from_ref["id"],
+            from_name=sender_label,
+            to_id=to_ref["id"],
+            is_user=is_human_source,
+            source_app=source_app,
+            source_surface=source_surface,
+            source_label=envelope_source,
+            reply_instruction=(
+                "Reply directly to the sender. Keep the reply concise unless detail is needed."
+            ),
+        )
     )
 
     gateway_presence.set_manual_override(to_ref["id"], "working", f"Replying to {sender_label}")
@@ -1427,60 +1433,6 @@ def _gateway_rpc_call(method, params=None, timeout=20):
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
 
-def _agent_template_files(name, role, emoji, agent_kind="OpenClaw"):
-    """Return non-secret bootstrap files for a newly-created agent workspace."""
-    return {
-        "IDENTITY.md": f"""<agent_identity>
-  <name>{name}</name>
-  <kind>{agent_kind}</kind>
-  <role>{role}</role>
-  <vibe>Helpful, efficient, ready to work</vibe>
-  <emoji>{emoji}</emoji>
-</agent_identity>
-""",
-        "SOUL.md": f"""<agent_soul>
-  <name>{name}</name>
-  <emoji>{emoji}</emoji>
-  <role>{role}</role>
-  <style>
-    <rule>Be helpful and direct.</rule>
-    <rule>Follow your AGENTS.md workflow strictly.</rule>
-    <rule>Keep work visible through Virtual Office when possible.</rule>
-  </style>
-</agent_soul>
-""",
-        "USER.md": """<agent_user_profile>
-  <name>(set by your owner)</name>
-  <timezone>(set by your owner)</timezone>
-  <notes>Prefers direct, clear communication.</notes>
-</agent_user_profile>
-""",
-        "AGENTS.md": f"""<agent_instructions>
-  <identity name="{name}" emoji="{emoji}" role="{role}" />
-  <role>{role}</role>
-  <core_rules>
-    <rule>Follow instructions carefully.</rule>
-    <rule>Log your work in memory/YYYY-MM-DD.md when useful.</rule>
-    <rule>Complete the full loop: working → work → report → idle.</rule>
-  </core_rules>
-  <communication>
-    <rule>Use Virtual Office communication tools when talking to other office agents.</rule>
-    <rule>Your text reply IS your response — write it directly.</rule>
-  </communication>
-  <memory>
-    <daily>memory/YYYY-MM-DD.md</daily>
-    <long_term>MEMORY.md</long_term>
-  </memory>
-</agent_instructions>
-""",
-        "HEARTBEAT.md": """<agent_heartbeat>
-  <instruction>Add periodic tasks below. If nothing needs attention, reply HEARTBEAT_OK.</instruction>
-</agent_heartbeat>
-""",
-        "MEMORY.md": f"<agent_memory name=\"{name}\"><note>No memories yet.</note></agent_memory>\n",
-        "TOOLS.md": f"<agent_tools name=\"{name}\"><note>Add tool-specific notes here.</note></agent_tools>\n",
-    }
-
 def _default_openclaw_agent_model():
     """Prefer the running main agent's model over stale global defaults."""
     result = _gateway_rpc_call("agents.list", {}, timeout=10)
@@ -1528,7 +1480,13 @@ def _handle_agent_create(body):
             return {"error": result.get("error", "OpenClaw agent creation failed"), "_status": status}
 
         agent_id = result.get("agentId") or agent_id
-        for filename, content in _agent_template_files(name, role, emoji, "OpenClaw").items():
+        for filename, content in agent_template_files(
+            name,
+            role,
+            emoji,
+            "OpenClaw",
+            communication_profile="service",
+        ).items():
             file_result = _gateway_rpc_call("agents.files.set", {"agentId": agent_id, "name": filename, "content": content}, timeout=20)
             if not file_result.get("ok"):
                 return {"error": f"Agent created but failed to write {filename}: {file_result.get('error', 'unknown error')}", "_status": 500}

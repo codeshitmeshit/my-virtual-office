@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Protocol
 
+from services import project_execution_prompt_formatting
 from services.project_execution_ordering import prior_incomplete_task
 from services.project_orchestration import active_task_ids, is_marked_project, orchestration_state
 from services.project_repository import ProjectNotFoundError
@@ -136,6 +137,7 @@ class RunnerPorts:
     finalize_cancel: Callable[[str, str, str, dict[str, Any]], bool]
     is_stage_pipeline: Callable[[Project], bool] = lambda project: False
     reconcile_terminal: Callable[[str, str, str, str], Any] = lambda project_id, task_id, attempt_id, reason: None
+    seed_checklist: Callable[..., bool] | None = None
 
 
 def invoke_provider(
@@ -180,16 +182,11 @@ def _checklist_needs_planning(task: Task, attempt: dict[str, Any], ports: Runner
 
 
 def _build_checklist_planning_prompt(project: Project, task: Task, attempt: dict[str, Any], workspace: str) -> str:
-    return (
-        "<checklist_planning_prompt>\n"
-        "  <role>You are preparing the acceptance checklist for a Virtual Office project task.</role>\n"
-        f"  <workspace>{workspace}</workspace>\n"
-        "  <scope>Do not execute the task yet. Do not create deliverable files. Only analyze the task and define concrete acceptance criteria.</scope>\n"
-        "  <output_contract>Return a short Markdown note followed by exactly one fenced ```json block containing a single object. The object must contain checklistUpdates: an array of {id, text, done, evidence}.</output_contract>\n"
-        "  <checklist_rules>Use stable short IDs. Set done=false for every item. Keep checklist items focused on deliverable acceptance only; do not include meeting action items, process notes, or generic reminders. Create enough items to verify the requested deliverable, normally 2-5.</checklist_rules>\n"
-        f"  <project id=\"{project.get('id', '')}\" title=\"{project.get('title', '')}\">{project.get('description', '')}</project>\n"
-        f"  <task id=\"{task.get('id', '')}\" title=\"{task.get('title', '')}\" attempt=\"{attempt.get('id')}\">{task.get('description', '')}</task>\n"
-        "</checklist_planning_prompt>\n"
+    return project_execution_prompt_formatting.render_checklist_planning_prompt(
+        project=project,
+        task=task,
+        attempt=attempt,
+        workspace=workspace,
     )
 
 
@@ -225,6 +222,11 @@ def _persist_checklist_planning(
             return
         changed = ports.apply_checklist_updates(task, planning_result)
         checklist = ports.acceptance_checklist(task)
+        if not changed or not checklist:
+            seed_checklist = getattr(ports, "seed_checklist", None)
+            if callable(seed_checklist):
+                changed = bool(seed_checklist(task, "project_execution_seed"))
+                checklist = ports.acceptance_checklist(task)
         attempt["checklistPlanning"] = {
             "status": planning_result.get("status") or ("completed" if planning_result.get("ok") else "failed"),
             "checklistUpdated": changed,
@@ -381,6 +383,34 @@ def _notify_start_failure(
         return
 
 
+def _blocked_checklist_items(task: Task, *, limit: int = 8) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in task.get("checklist") or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("source") in {"meeting_action_item", "meeting_risk"}:
+            continue
+        if item.get("done") is True:
+            continue
+        item_id = str(item.get("id") or "").strip()
+        text = str(item.get("text") or "").strip()
+        if not text:
+            continue
+        key = item_id or text
+        if key in seen:
+            continue
+        seen.add(key)
+        items.append({
+            "id": item_id,
+            "text": text,
+            "evidence": str(item.get("evidence") or "").strip(),
+        })
+        if len(items) >= limit:
+            break
+    return items
+
+
 def transition(
     project: Project,
     task: Task,
@@ -396,6 +426,8 @@ def transition(
 ) -> None:
     """Apply the compatible task transition and bounded state-history update."""
     previous = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
+    if next_state == "blocked" and task.get("lastError") == "checklist_incomplete_rework_limit" and not task.get("blockedChecklistItems"):
+        task["blockedChecklistItems"] = _blocked_checklist_items(task)
     task["executionState"] = next_state
     task["updatedAt"] = now()
     if next_state != "done":
@@ -415,10 +447,36 @@ def transition(
     task["stateHistory"] = task["stateHistory"][-100:]
 
 
+def _claim_attempt_runner(project_id: str, task_id: str, attempt_id: str, ports: RunnerPorts) -> bool:
+    update = getattr(ports.repository, "update", None)
+    find_attempt = getattr(ports, "find_attempt", None)
+    if not callable(update) or not callable(find_attempt):
+        return True
+
+    def claim(project: Project) -> bool:
+        task = _find_task(project, task_id)
+        attempt = find_attempt(task or {}, attempt_id)
+        if not task or not attempt:
+            return False
+        if not attempt_is_committable(task, attempt_id):
+            return False
+        if attempt.get("runnerClaimedAt"):
+            return False
+        attempt["runnerClaimedAt"] = ports.now()
+        return True
+
+    try:
+        return bool(update(project_id, claim))
+    except ProjectNotFoundError:
+        return False
+
+
 def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: threading.Event, *, ports: RunnerPorts) -> None:
     notification_key: str | None = None
     reconcile_reason: str | None = None
     try:
+        if not _claim_attempt_runner(project_id, task_id, attempt_id, ports):
+            return
         invocation = invoke_provider_with_checklist_planning(
             project_id, task_id, attempt_id,
             repository=ports.repository,
@@ -441,7 +499,10 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
             and attempt.get("status") not in {"cancelling", "cancelled"}
         ):
             return
-        stage_pipeline = ports.is_stage_pipeline(project)
+        stage_pipeline = (
+            ports.is_stage_pipeline(project)
+            and orchestration_state(project).get("state") != "draft"
+        )
         commit_baseline = copy.deepcopy(project)
         checklist_changed = ports.apply_checklist_updates(task, result)
         discussion_points_changed = ports.apply_meeting_discussion_points(task, result)
@@ -711,8 +772,23 @@ def start_task(
                     409,
                 )
             reopened = ports.reopen_completed_task(project, task, actor=str(body.get("by") or "user"))
+        state = task.get("executionState") or ("done" if task.get("completedAt") else "backlog")
+        normalized_state = str(state or "").strip().lower()
+        if normalized_state not in {"", "backlog", "blocked"}:
+            payload = {
+                "ok": False,
+                "error": "Task is not startable in its current execution state",
+                "code": "task_not_startable",
+                "taskId": task_id,
+                "executionState": state,
+            }
+            if normalized_state in {"validating", "executing", "reviewing", "reworking", "awaiting_meeting_resolution"}:
+                payload["activeTaskId"] = task_id
+            return _status(payload, 409)
         if body.get("resetExecutionContext") is True:
             ports.clear_restart_bindings(task, ports.now(), str(body.get("by") or "user"), "manual task restart")
+            ports.seed_checklist(task, "project_execution_seed")
+            task["_suppressExecutorChecklistCreateOnce"] = True
         if str(task.get("executionState") or "").lower() == "blocked":
             task["reworkCount"] = 0
         if git_state.get("dirty"):

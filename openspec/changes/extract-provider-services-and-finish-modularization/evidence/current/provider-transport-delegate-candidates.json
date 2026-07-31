@@ -1,34 +1,34 @@
 {
+  "schema": 1,
   "candidates": [
     {
-      "allowed": "parse route/query/Last-Event-ID, authenticate, choose HTTP status and headers",
-      "symbol": "OfficeHandler.do_GET"
+      "symbol": "OfficeHandler.do_GET",
+      "allowed": "parse route/query/Last-Event-ID, authenticate, choose HTTP status and headers"
     },
     {
-      "allowed": "parse/validate request and assemble compatibility response",
-      "symbol": "OfficeHandler.do_POST"
+      "symbol": "OfficeHandler.do_POST",
+      "allowed": "parse/validate request and assemble compatibility response"
     },
     {
-      "allowed": "HTTP headers, Last-Event-ID/after parsing, id/event/data framing, heartbeat, disconnect handling",
-      "symbol": "ProviderSSETransport.stream_run"
+      "symbol": "ProviderSSETransport.stream_run",
+      "allowed": "HTTP headers, Last-Event-ID/after parsing, id/event/data framing, heartbeat, disconnect handling"
     },
     {
-      "allowed": "HTTP headers, Last-Event-ID/after parsing, snapshot/recovery framing, heartbeat, disconnect handling",
-      "symbol": "ProviderSSETransport.stream_conversation"
+      "symbol": "ProviderSSETransport.stream_conversation",
+      "allowed": "HTTP headers, Last-Event-ID/after parsing, snapshot/recovery framing, heartbeat, disconnect handling"
     },
     {
-      "allowed": "route adapter forwarding to transport stream",
-      "symbol": "_handle_codex_run_events"
+      "symbol": "_handle_codex_run_events",
+      "allowed": "route adapter forwarding to transport stream"
     },
     {
-      "allowed": "route adapter forwarding to transport stream",
-      "symbol": "_handle_claude_code_run_events"
+      "symbol": "_handle_claude_code_run_events",
+      "allowed": "route adapter forwarding to transport stream"
     },
     {
-      "allowed": "route adapter forwarding to transport stream",
-      "symbol": "_handle_hermes_run_events"
+      "symbol": "_handle_hermes_run_events",
+      "allowed": "route adapter forwarding to transport stream"
     }
   ],
-  "mustMove": [],
-  "schema": 1
+  "mustMove": []
 }

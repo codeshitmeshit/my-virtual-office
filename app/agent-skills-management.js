@@ -56,7 +56,7 @@ async function saveAgentSkillToLibrary(agentId, skillName, onDone) {
         var data = await requestSave(false);
         if (data.ok) {
             if (data.status === 'identical') {
-        alert(_tr('skill_exists_library'));
+                voAlert(_tr('skill_exists_library'));
             } else {
                 _acpShowToast('✅ ' + (data.status === 'updated' ? 'Updated' : 'Saved') + ' "' + skillName + '" in Skill Library');
             }
@@ -266,7 +266,7 @@ function _showSkillWorkshopReviewDialog(proposal, detail, startEditing) {
 async function runSkillWorkshopAction(agentId, proposalId, action, proposalContent, onDone) {
     var body = { agentId: agentId, proposalId: proposalId, action: action };
     if (action === 'reject' || action === 'quarantine') {
-        var reason = prompt((action === 'reject' ? 'Reject' : 'Quarantine') + ' reason:', '');
+        var reason = await voPrompt((action === 'reject' ? 'Reject' : 'Quarantine') + ' reason:', '');
         if (reason == null) return;
         body.reason = reason;
     }
@@ -421,7 +421,7 @@ async function applyLibrarySkill() {
             hideLibraryPicker();
             loadAgentSkills(_currentSkillAgent);
         } else if (data.exists) {
-        if (confirm(_tr('overwrite_skill_confirm', { name: skillName }))) {
+            if (await voConfirm(_tr('overwrite_skill_confirm', { name: skillName }))) {
                 var res2 = await fetch('/api/skills-library/apply', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -446,17 +446,17 @@ function saveNewSkill() {
     if (!_currentSkillAgent) return;
     var name = document.getElementById('skill-new-name').value.trim();
     var content = document.getElementById('skill-new-content').value;
-    if (!name) { alert(_tr('skill_name_required')); return; }
+    if (!name) { voAlert(_tr('skill_name_required')); return; }
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         hideAddSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('✅ Skill "' + name + '" added');
-    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
 function editSkill(skillName) {
@@ -491,23 +491,23 @@ function saveEditedSkill() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: _editingSkillName, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         hideEditSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('✅ Skill "' + _editingSkillName + '" updated');
-    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
-function deleteSkill(skillName) {
+async function deleteSkill(skillName) {
     if (!_currentSkillAgent) return;
-    if (!confirm(_tr('remove_agent_skill_confirm', { name: skillName }))) return;
+    if (!await voConfirm(_tr('remove_agent_skill_confirm', { name: skillName }), { tone: 'danger' })) return;
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills/' + encodeURIComponent(skillName), {
         method: 'DELETE'
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         loadAgentSkills(_currentSkillAgent);
         _acpShowToast('🗑️ Skill "' + skillName + '" removed');
-    }).catch(function(e) { alert(_tr('error_deleting_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_deleting_skill') + ': ' + e.message); });
 }
 
 Object.assign(window, {

@@ -23,6 +23,7 @@ os.environ["VO_STATUS_DIR"] = IMPORT_STATUS_DIR
 import server
 from feishu_notifications import build_feishu_card
 from project_store import MarkdownProjectStore
+from server_services import projects as project_service
 
 
 AGENTS = [
@@ -172,7 +173,7 @@ def fake_feishu_sender(calls):
     return _send
 
 
-def create_project_execution_project(workspace):
+def create_project_execution_project(workspace, *, seed_acceptance=True):
     project = server._handle_project_create({
         "title": "Project Execution Test",
         "projectExecutionEnabled": True,
@@ -190,13 +191,23 @@ def create_project_execution_project(workspace):
     )
     assert validation.status == 200
     assert validation.payload["ok"] is True
+    unmark_project_for_legacy_execution(project["id"])
+    project = server._handle_project_get(project["id"])["project"]
     task = server._handle_task_create(project["id"], {
         "title": "Implement fixture",
         "columnId": project["columns"][0]["id"],
         "assignee": "executor",
         "executorAgentId": "executor",
     })["task"]
-    project.setdefault("tasks", []).append(task)
+    if seed_acceptance:
+        data, stored_project = server._project_find(project["id"])
+        stored_task = next(item for item in stored_project["tasks"] if item["id"] == task["id"])
+        server._project_execution_seed_acceptance_checklist(stored_task, "system")
+        server._save_projects(data)
+        project = stored_project
+        task = stored_task
+    if not any(item.get("id") == task["id"] for item in project.setdefault("tasks", [])):
+        project["tasks"].append(task)
     return project, task
 
 
@@ -743,7 +754,7 @@ def test_git_snapshot_command_failure_blocks_start_before_provider_invocation():
         server.subprocess.run = failed_git
         server._project_execution_call_executor = lambda *args, **kwargs: provider_calls.append(args) or {"ok": True}
         try:
-            project, task = create_project_execution_project(workspace)
+            project, task = create_project_execution_project(workspace, seed_acceptance=False)
             result = server._handle_project_execution_start(project["id"], task["id"], {})
             assert result["_status"] == 409
             assert result["code"] == "workspace_git_snapshot_failed"
@@ -1107,7 +1118,8 @@ def test_project_execution_prompt_requires_checklist_lifecycle_and_meeting_conte
     project = {"id": "project-1", "title": "Daily Report", "description": "Publish a daily report."}
     task = {"id": "task-1", "title": "日报", "description": "整理日报内容", "checklist": []}
     attempt = {"id": "attempt-1"}
-    prompt = server._project_execution_build_prompt(project, task, attempt, "/tmp/workspace")
+    project_service._hydrate()
+    prompt = project_service._project_execution_build_prompt(project, task, attempt, "/tmp/workspace")
     assert "<workflow>" in prompt
     assert '<step id="fill-back-checklist">' in prompt
     assert "<final_response>" in prompt
@@ -1154,7 +1166,7 @@ def test_project_execution_seeds_checklist_when_executor_omits_updates():
 
         server._project_execution_call_executor = executor_without_updates
         try:
-            project, task = create_project_execution_project(workspace)
+            project, task = create_project_execution_project(workspace, seed_acceptance=False)
             assert task["checklist"] == []
 
             started = server._handle_project_execution_start(project["id"], task["id"], {})
@@ -1168,7 +1180,7 @@ def test_project_execution_seeds_checklist_when_executor_omits_updates():
             assert all(item.get("source") == "project_execution_acceptance" for item in acceptance_items)
             assert all(item.get("done") is False for item in acceptance_items)
             assert prompts
-            assert all(f"id={item['id']}" in prompts[0] for item in acceptance_items)
+            assert all(f"id={item['id']}" in prompts[-1] for item in acceptance_items)
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)
@@ -1557,7 +1569,7 @@ def test_project_execution_manual_restart_clears_stale_meeting_bindings():
             "checklistUpdates": [{"id": "c1", "text": "Complete implementation", "done": True}],
         }
         try:
-            project, task = create_project_execution_project(workspace)
+            project, task = create_project_execution_project(workspace, seed_acceptance=False)
             server._handle_task_update(project["id"], task["id"], {
                 "checklist": [{"id": "c1", "text": "Complete implementation", "done": True, "completedAt": "2026-06-24T00:00:00+00:00"}],
                 "meetingActionItems": [{"id": "a1", "title": "old action", "status": "pending"}],
@@ -1718,8 +1730,8 @@ def test_provider_matrix_routes_execution_with_workspace_and_provider_ref():
                 finally:
                     restore_store(old)
         assert any(call[0] == "codex" and call[3] for call in calls)
-        assert any(call[0] == "openclaw" and "WORKSPACE:" in call[2] for call in calls)
-        assert any(call[0] == "hermes" and "WORKSPACE:" in call[2] for call in calls)
+        assert any(call[0] == "openclaw" and "<workspace>" in call[2] for call in calls)
+        assert any(call[0] == "hermes" and "<workspace>" in call[2] for call in calls)
     finally:
         restore_attrs(originals)
 
@@ -1827,6 +1839,15 @@ def test_project_level_start_uses_global_execution_order_before_column_order():
             assert started["ok"] is True
             assert started["taskId"] == second["id"]
             assert started["selectedTask"]["id"] == second["id"]
+
+            def selected_task_left_execution():
+                current = server._handle_project_get(project["id"])["project"]
+                current_second = next(t for t in current["tasks"] if t["id"] == second["id"])
+                if current_second.get("executionState") != "executing":
+                    return current_second
+                return None
+
+            wait_for(selected_task_left_execution)
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)
@@ -2253,7 +2274,8 @@ def test_project_execution_rework_prompt_highlights_unfinished_checklist_focus(t
     }
     attempt = {"id": "attempt-focus", "rework": True, "checklistCompletionRetry": True}
 
-    prompt = server._project_execution_build_prompt(project, task, attempt, str(workspace))
+    project_service._hydrate()
+    prompt = project_service._project_execution_build_prompt(project, task, attempt, str(workspace))
 
     assert "UNFINISHED CHECKLIST FOCUS" in prompt
     assert "id=evidence text=Produce multi-source evidence." in prompt
@@ -2444,6 +2466,7 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
                 "defaultExecutorAgentId": "executor",
                 "defaultReviewerAgentId": "reviewer",
             })["project"]
+            unmark_project_for_legacy_execution(empty["id"])
             no_task = server._handle_project_execution_project_start(empty["id"], {"mode": "continuous"})
             assert no_task["_status"] == 409
             assert no_task["code"] == "no_eligible_task"
@@ -2514,6 +2537,9 @@ def test_project_pipeline_restart_requires_every_task_to_allow_retriggering():
             assert current_second["executionState"] == "backlog"
             assert current_second["completedAt"] is None
             assert current_second["columnId"] == backlog_col["id"]
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                     if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") != "executing"
+                     else None)
         finally:
             server._project_execution_call_executor = old_executor
             restore_store(old)
@@ -2855,6 +2881,10 @@ def test_continuous_flow_auto_continues_when_task_does_not_require_acceptance():
             project, first = create_project_execution_project(workspace)
             server._handle_task_update(project["id"], first["id"], {"requiresUserAcceptance": False})
             second = server._handle_task_create(project["id"], {"title": "Second", "columnId": project["columns"][0]["id"], "requiresUserAcceptance": True})["task"]
+            data, stored_project = server._project_find(project["id"])
+            stored_second = next(item for item in stored_project["tasks"] if item["id"] == second["id"])
+            server._project_execution_seed_acceptance_checklist(stored_second, "system")
+            server._save_projects(data)
             started = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert started["ok"] is True
 
@@ -2935,6 +2965,10 @@ def test_direct_task_start_respects_repeat_trigger_setting_for_done_tasks():
             assert current["completedAt"] is None
             assert current["columnId"] == inprogress_col["id"]
             assert current["executionState"] == "executing"
+
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                     if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") != "executing"
+                     else None)
         finally:
             server._project_execution_call_executor = old_executor
             restore_store(old)
@@ -2982,6 +3016,9 @@ def test_dirty_confirmation_can_be_reconfirmed_for_same_fingerprint():
             repeated = server._handle_project_execution_start(project["id"], second_task["id"], {"dirtyFingerprint": first["dirtyFingerprint"]})
             assert repeated["ok"] is True
             assert repeated["taskId"] == second_task["id"]
+            wait_for(lambda: next(t for t in server._handle_project_get(project["id"])["project"]["tasks"] if t["id"] == second_task["id"])
+                     if next(t for t in server._handle_project_get(project["id"])["project"]["tasks"] if t["id"] == second_task["id"]).get("executionState") != "executing"
+                     else None)
         finally:
             server._project_execution_call_executor = old_call
             restore_store(old)
@@ -3363,7 +3400,8 @@ def test_reviewer_provider_matrix_receives_read_only_evidence_packet():
         attempt = {"id": "a1", "evidence": {"executorSummary": "implemented", "changedFiles": ["x.py"], "testResults": ["pytest passed"]}}
         project = {"title": "P", "description": "", "workspacePath": "/tmp/should-not-be-sent"}
         task = {"title": "T", "description": "", "checklist": [{"text": "done", "done": True}]}
-        prompt = server._project_execution_build_review_prompt(project, task, attempt)
+        project_service._hydrate()
+        prompt = project_service._project_execution_build_review_prompt(project, task, attempt)
         for provider, reviewer in [
             ("openclaw", {"id": "reviewer", "providerKind": "openclaw"}),
             ("hermes", {"id": "hermes-executor", "providerKind": "hermes"}),
@@ -4017,6 +4055,9 @@ def test_feishu_acceptance_rework_uses_card_feedback_input():
             current = server._handle_project_get(project["id"])["project"]["tasks"][0]
             assert any(item.get("rework") is True for item in current["attempts"])
             assert current["reworkFeedback"] == "请补充 README 的验收说明"
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                     if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") != "reworking"
+                     else None)
         finally:
             server.send_feishu_notification = old_send
             server._project_execution_call_executor = old_executor
@@ -4095,6 +4136,9 @@ def test_acceptance_reject_can_rework_skipped_review_result():
             assert rejected["task"]["reviewResult"] == {}
             assert rejected["task"]["reworkFeedback"] == "需要补充真实数据"
             assert rejected["task"]["activeAttemptId"] == rejected["attemptId"]
+            wait_for(lambda: server._handle_project_get(project["id"])["project"]["tasks"][0]
+                     if server._handle_project_get(project["id"])["project"]["tasks"][0].get("executionState") != "reworking"
+                     else None)
         finally:
             server._project_execution_call_executor = old_executor
             restore_store(old)

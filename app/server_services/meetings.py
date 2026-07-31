@@ -6,6 +6,7 @@ configuration while removing domain business bodies from server.py.
 """
 
 import sys
+from services import meeting_prompt_documents
 from services.meeting_priority_policy import (
     coerce_moderator_outcome_for_priority,
     default_ai_request_resolution_policy,
@@ -1063,24 +1064,10 @@ def _meeting_live_advisory_prompt(meeting, conflict):
     occupied_meeting = ""
     if source.get("meetingId"):
         occupied_meeting = str(source.get("meetingId") or "")
-    return (
-        "<meeting_live_advisory_prompt>\n"
-        "  <role>你是 Virtual Office 的 busy-agent subagent advisory turn。</role>\n"
-        "  <situation>现在有人想邀请你参加另一场 AI 会议，但系统检测到你正在忙。</situation>\n"
-        "  <boundary>请只评估你自己的可用性和打断风险，不要替用户执行等待、更换或强制加入。</boundary>\n"
-        "  <candidate_meeting>\n"
-        f"    <topic>{meeting.get('topic') or meeting.get('agenda') or meeting.get('id')}</topic>\n"
-        "  </candidate_meeting>\n"
-        "  <conflict>\n"
-        f"    <reason>{conflict.get('reason') or conflict.get('busyKind')}</reason>\n"
-        f"    <summary>{conflict.get('summary') or ''}</summary>\n"
-        f"    <occupied_meeting_id>{occupied_meeting}</occupied_meeting_id>\n"
-        f"    <pause_capability>{conflict.get('pauseCapability') or 'unknown'}</pause_capability>\n"
-        f"    <risk_level>{conflict.get('riskLevel') or 'medium'}</risk_level>\n"
-        "  </conflict>\n"
-        "  <output_contract>返回且只返回一个 JSON 对象，不要 Markdown，不要额外说明。</output_contract>\n"
-        "  <json_schema>{\"recommendation\":\"wait|reserve|replace|force_join\",\"estimatedAvailability\":\"例如 2-5 分钟、当前会议结束后、unknown\",\"busyReason\":\"用中文简述你为什么忙\",\"interruptionRisk\":\"用中文说明打断风险\",\"resumeNotes\":\"用中文说明如果被打断如何恢复或为什么不能恢复\",\"confidence\":\"high|medium|low\"}</json_schema>\n"
-        "</meeting_live_advisory_prompt>"
+    return meeting_prompt_documents.live_advisory_prompt(
+        meeting=meeting,
+        conflict=conflict,
+        occupied_meeting_id=occupied_meeting,
     )
 
 def _meeting_call_advisory_provider(meeting, conflict):
@@ -1529,7 +1516,7 @@ def _exec_meeting_project_active(meeting, events=None):
         "decisionWindowSec": meeting.get("decisionWindowSec", 0),
         "decisionDeadlineAt": meeting.get("decisionDeadlineAt", ""),
         "arbitration": meeting.get("arbitration") or {},
-        "moderatorFailure": meeting.get("moderatorFailure") or {},
+        **({"moderatorFailure": meeting.get("moderatorFailure") or {}} if meeting.get("moderatorFailure") else {}),
         "preparingStartedAt": meeting.get("preparingStartedAt") or "",
         "preparingTimeoutSec": meeting.get("preparingTimeoutSec") or _meeting_preparing_timeout_sec(),
         "cancelReason": meeting.get("cancelReason") or "",
@@ -2473,6 +2460,7 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
         }
         meeting["result"] = final_result
         meeting["currentSpeaker"] = ""
+        meeting.pop("moderatorFailure", None)
         previous = meeting.get("stage")
         event = _append_exec_meeting_event(store, meeting, "moderator_takeover", actor=actor, payload={
             "action": "user_takeover",
@@ -2495,16 +2483,11 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
 
 def _meeting_build_targeted_prompt(meeting, speaker, question, events):
     base = _meeting_build_prompt(meeting, speaker, meeting.get("decisionForStage") or meeting.get("stage"), events)
-    instruction = (
-        "\n<targeted_question>\n"
-        f"  <from>user</from>\n"
-        f"  <question>{_meeting_truncate_text(question, 2000)}</question>\n"
-        "  <rule>Answer this targeted question once. Keep the same JSON schema.</rule>\n"
-        "  <rule>Do not treat this as a formal round turn.</rule>\n"
-        "</targeted_question>\n"
+    instruction = meeting_prompt_documents.targeted_question_prompt(
+        question=_meeting_truncate_text(question, 2000)
     )
     budget = _meeting_context_budget(meeting.get("contextBudget"))
-    return _meeting_truncate_text(base + instruction, budget["maxPromptChars"])
+    return _meeting_truncate_text(f"{base}\n{instruction}\n", budget["maxPromptChars"])
 
 def _handle_executable_meeting_targeted_question(meeting_id, body):
     question = str(body.get("question") or body.get("text") or body.get("message") or "").strip()
@@ -2758,29 +2741,21 @@ def _meeting_normalize_provider_reply(reply):
 def _meeting_build_result_prompt(meeting, events):
     transcript = _meeting_events_text(events)
     policy = _meeting_resolution_policy(meeting.get("resolutionPolicy"))
-    outcome_instruction = (
-        "<outcome_rule>Outcome must be one of: approved, rejected, no_consensus, needs_user_decision. Use approved when the proposal or answer can be accepted, rejected when it should not pass, no_consensus when unresolved disagreements remain, and needs_user_decision only when a human decision is required.</outcome_rule>\n"
+    outcome_rule = (
+        "Outcome must be one of: approved, rejected, no_consensus, needs_user_decision. Use approved when the proposal or answer can be accepted, rejected when it should not pass, no_consensus when unresolved disagreements remain, and needs_user_decision only when a human decision is required."
     )
     if policy == "moderator_decision":
-        outcome_instruction += "<policy_rule>This meeting uses moderator_decision policy, so choose approved, rejected, or no_consensus; do not use needs_user_decision unless essential.</policy_rule>\n"
+        policy_rule = "This meeting uses moderator_decision policy, so choose approved, rejected, or no_consensus; do not use needs_user_decision unless essential."
     else:
-        outcome_instruction += "<policy_rule>This meeting uses user_decision policy, so use needs_user_decision if the transcript still requires human arbitration.</policy_rule>\n"
+        policy_rule = "This meeting uses user_decision policy, so use needs_user_decision if the transcript still requires human arbitration."
     return _meeting_truncate_text(
-        "<meeting_result_prompt>\n"
-        "  <role>You are the meeting moderator.</role>\n"
-        "  <goal>Summarize and close this meeting based only on the transcript below.</goal>\n"
-        "  <meeting>\n"
-        f"    <topic>{meeting.get('topic') or 'Untitled Meeting'}</topic>\n"
-        f"    <purpose>{meeting.get('purpose') or ''}</purpose>\n"
-        f"    <type>{meeting.get('meetingType') or 'discussion'}</type>\n"
-        f"    <resolution_policy>{policy}</resolution_policy>\n"
-        f"    <participants>{', '.join(meeting.get('participants') or [])}</participants>\n"
-        "  </meeting>\n"
-        f"  <transcript>{transcript or '(no participant turns yet)'}</transcript>\n"
-        "  <output_contract>Return exactly one JSON object and no surrounding prose or Markdown fences.</output_contract>\n"
-        f"  <outcome_rules>\n{outcome_instruction}  </outcome_rules>\n"
-        "  <json_schema>{\"outcome\":\"approved|rejected|no_consensus|needs_user_decision\",\"summary\":\"...\",\"decision\":\"...\",\"rationale\":\"...\",\"unresolvedQuestions\":[\"...\"],\"disagreements\":[\"...\"],\"actionItems\":[{\"owner\":\"...\",\"item\":\"...\"}]}</json_schema>\n"
-        "</meeting_result_prompt>\n",
+        meeting_prompt_documents.result_prompt(
+            meeting=meeting,
+            transcript=transcript,
+            policy=policy,
+            outcome_rule=outcome_rule,
+            policy_rule=policy_rule,
+        ) + "\n",
         (meeting.get("contextBudget") or {}).get("maxPromptChars", 12000),
     )
 
@@ -2989,39 +2964,40 @@ def _meeting_build_prompt(meeting, speaker, stage, events):
     speaker_seen = int((meeting.get("participantLastSeen") or {}).get(speaker) or 0)
     topic = meeting.get("topic") or "Untitled Meeting"
     agenda = meeting.get("agenda") or topic
-    fixed = (
-        "<meeting>\n"
-        f"  <topic>{topic}</topic>\n"
-        f"  <agenda>{agenda}</agenda>\n"
-        f"  <purpose>{meeting.get('purpose') or ''}</purpose>\n"
-        f"  <type>{meeting.get('meetingType') or 'discussion'}</type>\n"
-        f"  <stage>{stage}</stage>\n"
-        f"  <round current=\"{meeting.get('round') or 0}\" max=\"{meeting.get('maxRounds') or 0}\" />\n"
-        f"  <speaker>{speaker}</speaker>\n"
-        f"  <moderator>{meeting.get('moderator') or ''}</moderator>\n"
-        "</meeting>\n"
-    )
     initial = _meeting_truncate_text(meeting.get("context") or "", budget["maxInitialContextChars"])
     all_events = _meeting_events_text(events)
     unseen_events = _meeting_events_text([e for e in events if int(e.get("sequence") or 0) > speaker_seen])
     recent_events = _meeting_events_text(events[-budget["maxRecentEvents"]:])
     summary = _meeting_truncate_text(meeting.get("rollingSummary") or "", budget["maxSummaryChars"])
+    context_values = {}
     if mode == "full":
-        context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <full_transcript>{all_events}</full_transcript>\n"
+        context_values = {
+            "confirmed_context": f"Confirmed context\n{initial}",
+            "full_transcript": f"Full transcript\n{all_events}",
+        }
     elif mode == "summary":
-        context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <rolling_summary>{summary}</rolling_summary>\n  <recent_statements>{recent_events}</recent_statements>\n"
+        context_values = {
+            "confirmed_context": f"Confirmed context\n{initial}",
+            "rolling_summary": f"Rolling summary\n{summary}",
+            "recent_statements": f"Relevant recent statements\n{recent_events}",
+        }
     else:
         if speaker_seen <= 0:
-            context_body = f"  <confirmed_context>{initial}</confirmed_context>\n  <prior_meeting_events>{recent_events}</prior_meeting_events>\n"
+            context_values = {
+                "confirmed_context": f"Confirmed context\n{initial}",
+                "prior_meeting_events": recent_events,
+            }
         else:
-            context_body = f"  <new_events_since_last_turn>{unseen_events or '(none)'}</new_events_since_last_turn>\n"
-    instruction = (
-        "  <instruction>Contribute to the meeting. Avoid repeating previous points.</instruction>\n"
-        "  <output_contract>Return exactly one JSON object and no surrounding prose or Markdown fences.</output_contract>\n"
-        "  <json_schema>{\"position\":\"...\",\"reasoning\":\"...\",\"disagreements\":[\"...\"],\"questions\":[\"...\"],\"suggestedNextStep\":\"...\",\"confidence\":\"high|medium|low\"}</json_schema>\n"
+            context_values = {
+                "new_events_since_last_turn": f"New events since your last turn\n{unseen_events or '(none)'}",
+            }
+    prompt = meeting_prompt_documents.turn_prompt(
+        meeting={**meeting, "topic": topic, "agenda": agenda},
+        speaker=speaker,
+        stage=stage,
+        context_values=context_values,
     )
-    prompt = "<meeting_turn_prompt>\n" + fixed + context_body + instruction + "</meeting_turn_prompt>\n"
-    return _meeting_truncate_text(prompt, budget["maxPromptChars"])
+    return _meeting_truncate_text(prompt + "\n", budget["maxPromptChars"])
 
 def _meeting_provider_ref(agent_id):
     agent = _office_agent_lookup(agent_id) or {}

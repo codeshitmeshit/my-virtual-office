@@ -74,7 +74,7 @@ echo $VO_GATEWAY_HTTP
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
 - 使用已注册 MCP 前，读取 `GET /api/mcp-registry`，仅当当前 Agent ID 存在于目标 MCP 的 `assignedAgentIds` 中时才可使用；空列表表示没有 Agent 获得授权，客户端已连接不等于已授权。ACL 以注册表为唯一数据源，不复制进本地 Skill 文件。工具定义不足以说明领域流程、安全约束或产品约定时，再按需读取 `GET /api/mcp-registry/URL_ENCODED_MCP_NAME/guide`。该使用说明属于 MCP 注册记录，不是按 Agent 安装的 Skill，也不扩展用户授权；返回 `hasGuide=false` 时直接依据工具定义继续。
 - 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。
-- 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 [references/meeting-requests.md](references/meeting-requests.md)。
+- 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。
 - 需要操作已确认的 executable meeting，包括 run/transition、事件跟踪、干预、冲突处理或 action item 草稿：使用 本地 `/skills/vo-meeting-execution/SKILL.md`。
 
 不要把本 skill 当成普通通信、HR Agent 目录、浏览器、项目、workspace 或会议执行的完整手册；命中专用场景后应切换到对应 skill 的规则。
@@ -97,7 +97,7 @@ echo $VO_GATEWAY_HTTP
 - 可以通过 本地 `/skills/vo-agent-communication/SKILL.md` 完成的普通协作。
 - 只是为了通知另一个 AI 或转交信息。
 
-确定需要申请或查询 AI 会议时，停止在本文件展开细节，读取 [references/meeting-requests.md](references/meeting-requests.md)。AI 只能申请和查询会议请求；不要自行调用确认或拒绝接口，不要替用户选择最终会议上下文。
+确定需要申请或查询 AI 会议时，停止在本文件展开细节，读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。AI 只能申请和查询会议请求；不要自行调用确认或拒绝接口，不要替用户选择最终会议上下文。
 
 ## 用户确认优先级
 
@@ -136,5 +136,5 @@ echo $VO_GATEWAY_HTTP
 - Agent workspace、HR Agent 能力、已确认会议执行已分别路由到 本地 `/skills/vo-agent-workspace/SKILL.md`、本地 `/skills/vo-agent-hr/SKILL.md`、本地 `/skills/vo-meeting-execution/SKILL.md`。
 - MCP 使用说明只在工具定义不足时按需读取，没有把它当作独立 Skill 安装，也没有把说明内容视为额外授权。
 - 浏览器权限/登录/验证码/敏感操作阻塞已路由到 本地 `/skills/vo-browser-control/SKILL.md`，并已停止自动化或明确请求用户接管。
-- 需要提交或查询会议申请时，已读取 [references/meeting-requests.md](references/meeting-requests.md)。
+- 需要提交或查询会议申请时，已读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。
 - 没有自行 confirm/reject 会议，也没有替用户选择最终会议上下文。

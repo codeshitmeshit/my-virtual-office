@@ -11,6 +11,7 @@ from typing import Callable, Mapping, Sequence
 from services.hr_agent_api import HRAgentAPI
 from services.hr_agent_auth import HRAgentAuthenticator
 from services.hr_api import HRLifecyclePort, HRManagementAPI, HRManualCommandsPort
+from services.hr_builtin_introduction import ensure_hr_builtin_introduction
 from services.hr_config import HRConfig
 from services.hr_command_status import HRCommandStatusTracker
 from services.hr_directory import HRDirectoryQuery
@@ -107,6 +108,7 @@ def build_hr_application_runtime(
     """Build one repository authority shared by management and trusted Agent APIs."""
     repository = HRRepository(status_dir)
     repository.initialize()
+    ensure_hr_builtin_introduction(repository)
     command_tracker = HRCommandStatusTracker(repository)
     command_tracker.interrupt_active()
     install_tracker = getattr(commands, "install_tracker", None)

@@ -21,6 +21,20 @@ def _project_id(path, suffix):
 def handle_get(handler, parsed_url):
     workflow_service = _workflow_service()
     path = parsed_url.path
+    if path.startswith("/api/projects/") and path.endswith("/workflow/chat/events"):
+        query = query_dict(parsed_url)
+        task_scope = (query.get("taskId") or query.get("taskScope") or [""])[0]
+        try:
+            after = int((query.get("after") or ["0"])[0] or 0)
+        except (TypeError, ValueError):
+            after = 0
+        workflow_service._handle_workflow_chat_events(
+            handler,
+            _project_id(path, "/workflow/chat/events"),
+            task_scope=task_scope,
+            after=after,
+        )
+        return True
     if path.startswith("/api/projects/") and path.endswith("/workflow/chat"):
         query = query_dict(parsed_url)
         task_scope = (query.get("taskId") or query.get("taskScope") or [""])[0]

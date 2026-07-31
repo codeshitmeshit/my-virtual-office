@@ -435,6 +435,14 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
             ports.update_binding_status(cron_id, "missing_target", "Task not found")
             record("skipped", "task_missing")
             return {"ok": True, "status": "skipped", "reason": "task_missing", "projectId": project_id, "id": cron_id}
+        if task.get("completedAt") and task.get("scheduledRepeatEnabled") is not True:
+            ports.update_binding_status(cron_id, "disengaged_completed", "Task completed, cron disengaged")
+            record("skipped", "task_completed_cron_disengaged")
+            _gateway(ports, "cron.update", {"id": cron_id, "patch": {"enabled": False}}, 5)
+            return {
+                "ok": True, "status": "skipped", "reason": "task_completed_cron_disengaged",
+                "projectId": project_id, "id": cron_id, "taskId": task_id,
+            }
         if is_marked_project(project):
             reason = marked_task_cron_skip_reason(project, task)
             ports.update_binding_status(cron_id, "skipped", reason, {"taskId": task_id})
@@ -453,14 +461,6 @@ def _dispatch_locked(project_id: str, cron_id: str, source: str, *, ports: Dispa
             return {
                 "ok": True, "status": "skipped", "reason": "project_active",
                 "activeTaskId": active.get("id"), "projectId": project_id, "id": cron_id,
-            }
-        if task.get("completedAt") and task.get("scheduledRepeatEnabled") is not True:
-            ports.update_binding_status(cron_id, "disengaged_completed", "Task completed, cron disengaged")
-            record("skipped", "task_completed_cron_disengaged")
-            _gateway(ports, "cron.update", {"id": cron_id, "patch": {"enabled": False}}, 5)
-            return {
-                "ok": True, "status": "skipped", "reason": "task_completed_cron_disengaged",
-                "projectId": project_id, "id": cron_id, "taskId": task_id,
             }
         reopened = False
         if task.get("completedAt"):

@@ -112,6 +112,7 @@ try {
     const locale = ${JSON.stringify(locale)};
     window.__hrFixture = { data: fixture, denyManagement: false, failExport: false, failDetail: false, requests: [] };
     window.confirm = () => true;
+    window.voConfirm = () => Promise.resolve(true);
     window.i18n = {
       t(key, params) {
         let value = locale[key] || key;
@@ -185,17 +186,21 @@ try {
   assert.deepEqual(clickState, { selectedAgentId: 'agent-1' });
   await waitFor("HumanResources.state.detail || HumanResources.state.detailError");
   assert.equal(await evaluate("HumanResources.state.detailError"), '');
-  assert.equal(await evaluate("document.querySelector('.hr-detail-view')?.textContent.includes('RAW FIXTURE REPORT ONE')"), true);
+  assert.equal(await evaluate("document.querySelector('.hr-detail-view')?.textContent.includes('AI self-assessment')"), true);
+  assert.equal(await evaluate("document.querySelector('.hr-detail-view')?.textContent.includes('Fixture self-review')"), true);
+  assert.equal(await evaluate("document.querySelector('.hr-detail-view')?.textContent.includes('Completed fixture research')"), true);
   const detail = await evaluate(`(() => ({
     reportCards: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card)').length,
     assessmentCards: document.querySelectorAll('.hr-assessment-card').length,
     reportDetailBlocks: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card) details').length,
+    reportGridVisible: document.querySelectorAll('.hr-record-card:not(.hr-assessment-card) .hr-report-grid').length,
     evidenceVisible: document.body.textContent.includes('Daily report evidence'),
     accessRows: document.querySelectorAll('.hr-detail-section .hr-history-list li').length,
   }))()`);
   assert.equal(detail.reportCards, 1);
   assert.equal(detail.assessmentCards, 1);
   assert.equal(detail.reportDetailBlocks, 1);
+  assert.equal(detail.reportGridVisible, 1);
   assert.equal(detail.evidenceVisible, true);
   assert.ok(detail.accessRows >= 1);
 
@@ -259,7 +264,7 @@ try {
   const partialFailureScreenshot = await captureScreenshot('hr-partial-failure');
 
   await evaluate("window.__hrFixture.failExport = false; HumanResources.selectAgent('agent-1')");
-  await waitFor("document.body.textContent.includes('RAW FIXTURE REPORT ONE')");
+  await waitFor("document.body.textContent.includes('Fixture self-review')");
   await evaluate("window.__hrFixture.failDetail = true; HumanResources.state.detail.accessNextCursor = 'retry-access'; HumanResources.loadMore('access')");
   await waitFor("document.querySelector('.hr-degraded-banner')");
   assert.equal(await evaluate("document.body.innerText.includes('Builder Agent')"), true, 'valid detail remains browsable after paging failure');

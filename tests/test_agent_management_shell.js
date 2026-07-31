@@ -15,6 +15,7 @@ assert.equal(shell.selectAgent('hermes-default'), true);
 assert.equal(shell.state.selectedAiId, 'hermes-default');
 assert.equal(shell.switchTab('humanResources'), true);
 assert.equal(shell.state.activeTab, 'humanResources');
+assert.equal(shell.state.selectedAiId, '', 'switching to HR opens the overview by default');
 assert.equal(shell.setRoster([
     { aiId: 'codex-local', name: 'Codex' },
     { aiId: 'hermes-default', name: 'Hermes' },
@@ -24,6 +25,7 @@ assert.equal(shell.switchTab('configuration'), true);
 assert.equal(shell.setRoster([{ aiId: 'codex-local', name: 'Codex' }]).length, 1);
 assert.equal(shell.state.selectedAiId, 'codex-local', 'configuration still defaults to a selectable Agent');
 assert.equal(shell.switchTab('humanResources'), true);
+assert.equal(shell.state.selectedAiId, '', 'HR tab does not inherit the configuration Agent');
 assert.equal(shell.mountTab('configuration', { mount() {} }), true);
 shell.reportMutation({ state: 'saved' });
 assert.equal(shell.state.mutations.at(-1).state, 'saved');

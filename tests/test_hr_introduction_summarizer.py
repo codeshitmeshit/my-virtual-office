@@ -101,6 +101,71 @@ def test_valid_structured_summary_publishes_version_with_provenance(repository):
     assert [item.version for item in history] == [2, 1]
 
 
+def test_markdown_wrapped_summary_is_extracted_before_validation(repository):
+    raw = "I investigate production incidents and write reliability reports."
+    current = response_received(repository, raw)
+    hr = FakeHR("```json\n" + output(raw) + "\n```")
+
+    result = HRIntroductionSummarizer(repository, hr).summarize(
+        "agent-1",
+        expected_version=current.version,
+    )
+
+    assert result.status == "published"
+    assert repository.get_current_introduction("agent-1").introduction == (
+        "Investigates production incidents and reports reliability findings."
+    )
+
+
+def test_invalid_summary_is_repaired_with_strict_json_prompt(repository):
+    raw = "I investigate production incidents and write reliability reports."
+    current = response_received(repository, raw)
+    responses = iter(("not json", output(raw)))
+    hr = FakeHR(lambda: next(responses))
+
+    result = HRIntroductionSummarizer(repository, hr).summarize(
+        "agent-1",
+        expected_version=current.version,
+    )
+
+    assert result.status == "published"
+    assert len(hr.calls) == 2
+    repair_prompt, repair_key, _timeout = hr.calls[1]
+    assert repair_key.endswith(":repair")
+    assert "<hr_introduction_summary_repair_prompt>" in repair_prompt
+    assert "<invalid_output>not json</invalid_output>" in repair_prompt
+
+
+def test_structured_agent_response_falls_back_when_hr_outputs_broken_json(repository):
+    raw = json.dumps(
+        {
+            "schemaVersion": 1,
+            "agentAiId": "agent-1",
+            "identity": "Hermes 默认 Agent，用户通常叫我“小欧”。",
+            "responsibilities": ["理解用户需求并将模糊指令拆解为可执行任务。"],
+            "strengths": ["多 Agent 协作编排与任务分发。"],
+            "collaborationScenarios": ["任务跨多个 Agent，需要统一拆解、派发、追踪和汇总时。"],
+        },
+        ensure_ascii=False,
+    )
+    current = response_received(repository, raw)
+    broken = '{"schemaVersion":1,"introduction":"昵称"小欧"","supportingEvidence":[],"materialConflict":false,"clarificationQuestion":""}'
+    hr = FakeHR(broken)
+
+    result = HRIntroductionSummarizer(repository, hr).summarize(
+        "agent-1",
+        expected_version=current.version,
+    )
+
+    assert result.status == "published"
+    assert len(hr.calls) == 2
+    published = repository.get_current_introduction("agent-1")
+    assert published.state == "published"
+    assert published.source == "agent-structured-introduction"
+    assert "用户通常叫我“小欧”" in published.introduction
+    assert "理解用户需求" in published.introduction
+
+
 @pytest.mark.parametrize(
     "payload",
     (

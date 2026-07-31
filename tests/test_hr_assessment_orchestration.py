@@ -75,6 +75,7 @@ def assessment(ai_id, *, sufficient=True, evidence=()):
             "localDate": LOCAL_DATE,
             "principalContributions": ["完成任务"] if sufficient else [],
             "workload": "appropriate" if sufficient else "insufficient_information",
+            "workloadScore": 5 if sufficient else 1,
             "rationale": (
                 "日报与任务记录互相印证。"
                 if sufficient
@@ -173,6 +174,8 @@ def test_hr_assesses_closed_cycle_from_report_and_independent_evidence(setup):
     assert stored.evidence[0].metadata["assessmentRationale"] == "支持已完成任务的事实。"
     assert hr.calls[0][1:] == ("hr:assessment:2026-07-19:agent-1", 45.0)
     assert "完成任务 task-1" in hr.calls[0][0]
+    assert "所有面向用户的自然语言字段必须使用简体中文" in hr.calls[0][0]
+    assert "不要输出英文评语" in hr.calls[0][0]
 
 
 def test_only_hr_can_mutate_assessments(setup):
@@ -219,7 +222,8 @@ def test_non_submission_alone_forces_insufficient_information(setup):
     stored = repository.get_current_assessment("agent-2", LOCAL_DATE)
     assert stored.workload == "insufficient_information"
     assert stored.principal_contributions == ()
-    assert "MUST be insufficient_information" in hr.calls[0][0]
+    assert "workload 必须是 insufficient_information" in hr.calls[0][0]
+    assert "workloadScore 必须是 1" in hr.calls[0][0]
 
 
 def test_meeting_record_alone_cannot_determine_performance(setup):
@@ -321,6 +325,23 @@ def test_failed_job_is_visible_and_retryable_without_provider_error_leak(setup):
     ).assess(("agent-1",), local_date=LOCAL_DATE, actor_ai_id="hr")
     assert retried[0].status == "complete"
     assert repository.get_assessment_job("agent-1", LOCAL_DATE).attempt_count == 2
+
+
+def test_invalid_hr_json_saves_insufficient_information_assessment(setup):
+    repository, reporting, opened = setup
+    reporting.close_cycle(opened.cycle.id, closed_at=NOW)
+    result = HRAssessmentOrchestrator(
+        repository,
+        collector(),
+        FakeHR({"agent-2": "not json"}),
+    ).assess(("agent-2",), local_date=LOCAL_DATE, actor_ai_id="hr")
+
+    assert result[0].status == "complete"
+    stored = repository.get_current_assessment("agent-2", LOCAL_DATE)
+    assert stored.workload == "insufficient_information"
+    assert stored.principal_contributions == ()
+    assert "结构化校验" in stored.rationale
+    assert repository.get_assessment_job("agent-2", LOCAL_DATE).status == "complete"
 
 
 def test_late_report_creates_new_current_version_with_revision_reason(setup):

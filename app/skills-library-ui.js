@@ -247,7 +247,7 @@ async function saveSkill() {
 }
 
 async function deleteLibrarySkill(skillName) {
-    if (!confirm(_tr('delete_library_skill_confirm', { name: skillName }))) return;
+    if (!await voConfirm(_tr('delete_library_skill_confirm', { name: skillName }), { tone: 'danger' })) return;
 
     try {
         var res = await _sklMutationFetch('/api/skills-library/' + encodeURIComponent(skillName), { method: 'DELETE' });

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Mapping
 
+from services import business_prompt_bridge
 
 FINAL_RESULT_FILENAME = "TASK_FINAL_RESULT.md"
 AVAILABLE = "available"
@@ -174,39 +175,64 @@ def prior_stage_result_prompt_block(project: Mapping[str, Any], task: Mapping[st
         selected.append(handoff)
     if not selected:
         return ""
-    lines = [
-        "<prior_stage_result_index>",
-        "  <usage>Use these prior task outputs as dependency context. Inspect the listed Markdown path or artifact refs when the current task depends on the earlier conclusion. Do not assume parallel tasks were merged into one output.</usage>",
-    ]
+    stages = []
     for handoff in selected:
-        lines.append(f"  <stage index=\"{handoff.get('stage')}\">")
         tasks = handoff.get("tasks") if isinstance(handoff.get("tasks"), list) else []
+        task_results = []
         for item in tasks:
             if not isinstance(item, Mapping):
                 continue
             path = str(item.get("markdownPath") or "")
             summary = _compact(item.get("summary"), 360)
-            lines.append(
-                "    "
-                f"<task_result task_id=\"{item.get('taskId')}\" status=\"{item.get('status')}\" result=\"{path or 'missing'}\" title=\"{item.get('title') or item.get('taskId')}\">"
-                f"{summary or 'No summary recorded.'}"
-                "</task_result>"
+            task_results.append(
+                {
+                    "name": "task_result",
+                    "value": summary or "No summary recorded.",
+                    "attrs": {
+                        "task_id": item.get("taskId"),
+                        "status": item.get("status"),
+                        "result": path or "missing",
+                        "title": item.get("title") or item.get("taskId"),
+                    },
+                }
             )
-        lines.append("  </stage>")
-    lines.append("</prior_stage_result_index>")
-    return "\n".join(lines) + "\n"
+        stages.append({"name": "stage", "children": task_results, "attrs": {"index": handoff.get("stage")}})
+    return business_prompt_bridge.render_business_prompt(
+        {
+            "domain": "project.prior_stage_result",
+            "operation": "index",
+            "locale": "en-US",
+            "root": "prior_stage_result_index",
+            "sections": [
+                {
+                    "name": "usage",
+                    "trusted": True,
+                    "value": (
+                        "Use these prior task outputs as dependency context. Inspect the listed Markdown path or artifact refs when the current task depends on the earlier conclusion. Do not assume parallel tasks were merged into one output."
+                    ),
+                },
+                *stages,
+            ],
+        }
+    ) + "\n"
 
 
 def task_final_result_prompt_instructions() -> str:
-    return (
-        "<task_final_result_requirement>\n"
-        f"  <artifact>{FINAL_RESULT_FILENAME}</artifact>\n"
-        "  <rule>Treat the artifact above as the mandatory default artifact for this task.</rule>\n"
-        "  <rule>Your final Markdown summary is the source for that artifact when no explicit deliverable file is requested.</rule>\n"
-        "  <rule>Include the final conclusion, completed work, changed files/artifacts, verification, remaining risks, and notes useful for later stages.</rule>\n"
-        "  <rule>Later-stage tasks will receive only compact indexes and paths by default, so keep this summary self-contained and searchable.</rule>\n"
-        "</task_final_result_requirement>\n"
-    )
+    return business_prompt_bridge.render_business_prompt(
+        {
+            "domain": "project.task_final_result",
+            "operation": "requirement",
+            "locale": "en-US",
+            "root": "task_final_result_requirement",
+            "sections": [
+                {"name": "artifact", "value": FINAL_RESULT_FILENAME, "trusted": True},
+                {"name": "rule", "value": "Treat the artifact above as the mandatory default artifact for this task.", "trusted": True},
+                {"name": "rule", "value": "Your final Markdown summary is the source for that artifact when no explicit deliverable file is requested.", "trusted": True},
+                {"name": "rule", "value": "Include the final conclusion, completed work, changed files/artifacts, verification, remaining risks, and notes useful for later stages.", "trusted": True},
+                {"name": "rule", "value": "Later-stage tasks will receive only compact indexes and paths by default, so keep this summary self-contained and searchable.", "trusted": True},
+            ],
+        }
+    ) + "\n"
 
 
 def _compact(value: Any, limit: int = 400) -> str:

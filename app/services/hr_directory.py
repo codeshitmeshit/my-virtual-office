@@ -10,7 +10,14 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Iterable, Protocol, Sequence
 
+from services import business_prompt_bridge
+from services.hr_agent_introduction_summary import summarize_structured_agent_introduction
 from services.hr_repository import AgentRecord, HRRepository, HRRepositoryError
+from services.hr_structured_output import (
+    compact_diagnostic_text,
+    extract_json_object_text,
+    render_repair_prompt,
+)
 
 
 INELIGIBLE_AVAILABILITY = frozenset(
@@ -130,6 +137,8 @@ class IntroductionSummaryResult:
     version: int
     conversation_key: str
     error_code: str
+    error_detail: str = ""
+    raw_output_excerpt: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,29 +573,52 @@ class HRIntroductionSummarizer:
     @staticmethod
     def _prompt(ai_id: str, raw_response: str, previous_introduction: str) -> str:
         previous = previous_introduction or "(none)"
-        return (
-            "<hr_introduction_summary_prompt>\n"
-            "  <output_contract>Return only JSON with keys schemaVersion, introduction, supportingEvidence, materialConflict, clarificationQuestion.</output_contract>\n"
-            "  <schema_rules>\n"
-            "    <rule>schemaVersion must be 1.</rule>\n"
-            "    <rule>supportingEvidence must contain exact excerpts from the Agent response.</rule>\n"
-            "    <rule>Do not invent responsibilities.</rule>\n"
-            "    <rule>If the response materially conflicts with the previous introduction, set materialConflict=true, keep introduction empty, and provide one neutral clarificationQuestion.</rule>\n"
-            "  </schema_rules>\n"
-            f"  <agent ai_id=\"{ai_id}\" />\n"
-            f"  <previous_introduction>{previous}</previous_introduction>\n"
-            f"  <agent_response>{raw_response}</agent_response>\n"
-            "</hr_introduction_summary_prompt>"
+        return business_prompt_bridge.render_business_prompt(
+            {
+                "domain": "hr.introduction_summary",
+                "operation": "summarize",
+                "locale": "zh-CN",
+                "root": "hr_introduction_summary_prompt",
+                "target": {"agentAiId": ai_id},
+                "sections": [
+                    {
+                        "name": "schema_rules",
+                        "trusted": True,
+                        "value": [
+                            "schemaVersion must be 1.",
+                            "supportingEvidence must contain exact excerpts from the Agent response.",
+                            "Do not invent responsibilities.",
+                            "If the response materially conflicts with the previous introduction, set materialConflict=true, keep introduction empty, and provide one neutral clarificationQuestion.",
+                        ],
+                    },
+                    {"name": "agent", "value": {"ai_id": ai_id}},
+                    {"name": "previous_introduction", "value": previous},
+                    {"name": "agent_response", "value": raw_response},
+                ],
+                "output": {
+                    "schema": {
+                        "schemaVersion": 1,
+                        "introduction": "string",
+                        "supportingEvidence": ["exact excerpts from the Agent response"],
+                        "materialConflict": "boolean",
+                        "clarificationQuestion": "string",
+                    },
+                    "rules": (
+                        "Return only one JSON object with keys schemaVersion, introduction, "
+                        "supportingEvidence, materialConflict, clarificationQuestion. "
+                        "Do not include Markdown, code fences, greetings, or explanations."
+                    ),
+                },
+            },
         )
 
     @staticmethod
     def _validate_output(payload: str, raw_response: str, *, has_previous: bool) -> dict[str, object]:
-        if not isinstance(payload, str) or not payload.strip():
-            raise HRDirectoryValidationError("HR returned no structured introduction")
-        if len(payload) > 20_000:
+        structured = extract_json_object_text(payload)
+        if len(structured.json_text) > 20_000:
             raise HRDirectoryValidationError("HR structured introduction is too large")
         try:
-            value = json.loads(payload)
+            value = json.loads(structured.json_text)
         except json.JSONDecodeError as exc:
             raise HRDirectoryValidationError("HR structured introduction is malformed JSON") from exc
         expected_keys = {
@@ -626,6 +658,50 @@ class HRIntroductionSummarizer:
         elif not introduction.strip() or question.strip():
             raise HRDirectoryValidationError("HR publication result is invalid")
         return value
+
+    def _ask_and_validate(
+        self,
+        *,
+        ai_id: str,
+        raw_response: str,
+        previous_introduction: str,
+        conversation_key: str,
+        has_previous: bool,
+    ) -> dict[str, object]:
+        payload = self._hr.ask_hr(
+            self._prompt(ai_id, raw_response, previous_introduction),
+            conversation_key,
+            self._timeout_seconds,
+        )
+        try:
+            return self._validate_output(payload, raw_response, has_previous=has_previous)
+        except Exception as first_error:
+            repair_key = f"{conversation_key}:repair"
+            repair_payload = self._hr.ask_hr(
+                render_repair_prompt(
+                    ai_id=ai_id,
+                    raw_response=raw_response,
+                    invalid_output=payload,
+                    validation_error=str(first_error),
+                ),
+                repair_key,
+                self._timeout_seconds,
+            )
+            try:
+                return self._validate_output(
+                    repair_payload,
+                    raw_response,
+                    has_previous=has_previous,
+                )
+            except Exception as second_error:
+                detail = (
+                    f"initial={compact_diagnostic_text(first_error, limit=220)}; "
+                    f"repair={compact_diagnostic_text(second_error, limit=220)}"
+                )
+                excerpt = compact_diagnostic_text(repair_payload or payload)
+                error = HRDirectoryValidationError(detail)
+                error.raw_output_excerpt = excerpt
+                raise error from second_error
 
     def summarize(
         self,
@@ -668,14 +744,11 @@ class HRIntroductionSummarizer:
             return IntroductionSummaryResult(ai_id, "already_published", current.version, "", "")
         key = self._conversation_key(ai_id, current.version, candidate)
         try:
-            payload = self._hr.ask_hr(
-                self._prompt(ai_id, candidate, current.introduction),
-                key,
-                self._timeout_seconds,
-            )
-            value = self._validate_output(
-                payload,
-                candidate,
+            value = self._ask_and_validate(
+                ai_id=ai_id,
+                raw_response=candidate,
+                previous_introduction=current.introduction,
+                conversation_key=key,
                 has_previous=bool(current.introduction),
             )
             conflict = bool(value["materialConflict"])
@@ -700,13 +773,42 @@ class HRIntroductionSummarizer:
             )
         except HRRepositoryError as exc:
             return IntroductionSummaryResult(ai_id, "failed", current.version, key, exc.code)
-        except Exception:
+        except Exception as exc:
+            fallback_introduction = summarize_structured_agent_introduction(candidate)
+            if fallback_introduction:
+                try:
+                    saved = self._repository.save_introduction(
+                        ai_id=ai_id,
+                        state="published",
+                        raw_response=candidate,
+                        introduction=fallback_introduction,
+                        source="agent-structured-introduction",
+                        actor_id=self._hr_ai_id,
+                        expected_version=current.version,
+                    )
+                    return IntroductionSummaryResult(
+                        ai_id,
+                        "published",
+                        saved.version,
+                        key,
+                        "",
+                    )
+                except HRRepositoryError as fallback_exc:
+                    return IntroductionSummaryResult(
+                        ai_id,
+                        "failed",
+                        current.version,
+                        key,
+                        fallback_exc.code,
+                    )
             return IntroductionSummaryResult(
                 ai_id,
                 "failed",
                 current.version,
                 key,
                 "hr_introduction_summary_invalid",
+                compact_diagnostic_text(exc, limit=500),
+                compact_diagnostic_text(getattr(exc, "raw_output_excerpt", ""), limit=700),
             )
 
 

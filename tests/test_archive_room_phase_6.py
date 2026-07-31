@@ -18,6 +18,7 @@ os.environ["VO_STATUS_DIR"] = IMPORT_STATUS_DIR
 os.environ["VO_OPENCLAW_PATH"] = IMPORT_OC_HOME
 
 import server
+from server_services import archive_room as archive_room_service
 from project_store import MarkdownProjectStore
 
 
@@ -182,7 +183,8 @@ def test_project_characterized_context_differs_by_project_and_has_boundary():
         assert finance_ctx["projectCharacteristics"]["businessBackground"] != design_ctx["projectCharacteristics"]["businessBackground"]
         assert "不改写 AI" in finance_ctx["boundary"]
 
-        prompt = server._archive_context_prompt_block(finance, finance_task)
+        archive_room_service._hydrate()
+        prompt = archive_room_service._archive_context_prompt_block(finance, finance_task)
         assert "supplemental" in prompt
         assert "does not override your identity" in prompt
         assert "Finance" in prompt

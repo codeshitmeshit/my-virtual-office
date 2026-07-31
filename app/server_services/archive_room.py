@@ -15,6 +15,7 @@ import urllib.parse
 import uuid
 from datetime import datetime, timedelta, timezone
 
+from services import archive_prompt_documents
 from services import archive_manager_coordinated_work
 from services.archive_manager_work_coordinator import ArchiveManagerWorkCoordinator
 
@@ -1252,22 +1253,7 @@ def _archive_manager_ai_refine_prompt(project, record):
             "projectBasicInfo": record.get("projectBasicInfo") or {},
         },
     }
-    return (
-        "<archive_manager_ai_refine_prompt>\n"
-        "  <role>你是 Virtual Office 的档案管理员 archive-manager。</role>\n"
-        "  <goal>请对当前项目档案做一次精确整理和概括。</goal>\n"
-        "  <boundary>只整理档案室上下文，不执行普通项目任务，不修改项目代码，不创建会议。</boundary>\n"
-        "  <rules>\n"
-        "    <rule>请基于输入中的项目、任务、产物、已有档案、待确认项和来源信息，产出稳定 JSON。</rule>\n"
-        "    <rule>不要输出 JSON 以外的文字。</rule>\n"
-        "    <rule>如果信息不足，请在 gaps 中说明，不要编造事实。</rule>\n"
-        "    <rule>stale 或 pending 内容不能当作已确认事实。</rule>\n"
-        "  </rules>\n"
-        "  <output_contract>必须返回一个 JSON 对象。</output_contract>\n"
-        "  <json_schema>{\"status\":\"ok|needs_human|error\",\"summary\":\"面向人类的项目档案精整摘要，2-4 句\",\"currentState\":\"当前状态，一句话\",\"nextStep\":\"建议下一步，一句话；不确定则写空字符串\",\"highlights\":[\"关键事实或判断，最多 5 条\"],\"risks\":[\"风险/冲突/待确认，最多 5 条\"],\"gaps\":[\"缺失信息或需要人工确认的问题，最多 5 条\"],\"archiveEntries\":[{\"title\":\"条目标题\",\"kind\":\"summary|risk|decision|artifact|context\",\"text\":\"条目内容\",\"confidence\":\"ai_inference|manager_confirmed\"}]}</json_schema>\n"
-        f"  <input_data>{json.dumps(payload, ensure_ascii=False, indent=2)}</input_data>\n"
-        "</archive_manager_ai_refine_prompt>"
-    )
+    return archive_prompt_documents.refine_prompt(payload)
 
 
 def _archive_apply_ai_refinement(record, parsed, source, now):
@@ -2273,31 +2259,14 @@ def _archive_context_prompt_block(project, task=None):
         record = _archive_room_derive_project(project)
         package = _archive_build_context_package(project, record=record, task=task, artifacts=[])
     except Exception as exc:
-        return f"\n<archive_room_project_context override=\"false\" role=\"supplemental\" unavailable=\"true\"><error>{exc}</error></archive_room_project_context>\n"
-    lines = [
-        "\n<archive_room_project_context override=\"false\" role=\"supplemental\">",
-    ]
-    for conclusion in package.get("conclusions", [])[:6]:
-        lines.append(f"  <conclusion>{conclusion}</conclusion>")
+        return "\n" + archive_prompt_documents.unavailable_context_prompt(exc) + "\n"
     characteristics = package.get("projectCharacteristics") or {}
-    if characteristics.get("confirmedRules"):
-        lines.append("  <confirmed_rules>")
-        for rule in characteristics.get("confirmedRules", [])[:4]:
-            lines.append(f"    <rule>{rule}</rule>")
-        lines.append("  </confirmed_rules>")
-    if characteristics.get("risks"):
-        lines.append("  <known_risks>")
-        for risk in characteristics.get("risks", [])[:4]:
-            lines.append(f"    <risk>{risk}</risk>")
-        lines.append("  </known_risks>")
-    if package.get("reminders"):
-        lines.append("  <archive_reminders>")
-        for reminder in package.get("reminders", [])[:4]:
-            lines.append(f"    <reminder severity=\"{reminder.get('severity')}\">{reminder.get('message')}</reminder>")
-        lines.append("  </archive_reminders>")
-    lines.append("  <usage>Use these archive notes as project/task context. Preserve confidence and ask for confirmation when context is missing or conflicting.</usage>")
-    lines.append("</archive_room_project_context>\n")
-    return "\n".join(lines)
+    return "\n" + archive_prompt_documents.context_prompt(
+        conclusions=package.get("conclusions", []),
+        confirmed_rules=characteristics.get("confirmedRules", []),
+        risks=characteristics.get("risks", []),
+        reminders=package.get("reminders", []),
+    ) + "\n"
 
 
 def _archive_room_derive_project(project):

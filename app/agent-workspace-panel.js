@@ -632,7 +632,7 @@ function _initAgentWorkspaceUI() {
                 });
             }
         });
-        body.addEventListener('click', function(e) {
+        body.addEventListener('click', async function(e) {
             var target = e.target.closest('[data-aw-action]');
             var editTask = e.target.closest('[data-aw-edit-task]');
             var editNote = e.target.closest('[data-aw-edit-note]');
@@ -659,9 +659,9 @@ function _initAgentWorkspaceUI() {
             if (editTask) {
                 var task = _findWorkspaceTask(editTask.dataset.awEditTask);
                 if (!task) return;
-    var text = prompt(_tr('task_title_prompt'), task.text || '');
+                var text = await voPrompt(_tr('task_title_prompt'), task.text || '');
                 if (text == null) return;
-    var detail = prompt(_tr('task_details_prompt'), task.detail || '');
+                var detail = await voPrompt(_tr('task_details_prompt'), task.detail || '');
                 if (detail == null) return;
                 _agentWorkspacePost('updateTask', { id: task.id, text: text, detail: detail, due: task.due || '', priority: task.priority || 'normal' });
                 return;
@@ -669,9 +669,9 @@ function _initAgentWorkspaceUI() {
             if (editNote) {
                 var note = _findWorkspaceNote(editNote.dataset.awEditNote);
                 if (!note) return;
-    var title = prompt(_tr('note_title_prompt'), note.title || '');
+                var title = await voPrompt(_tr('note_title_prompt'), note.title || '');
                 if (title == null) return;
-    var content = prompt(_tr('note_content_prompt'), note.content || '');
+                var content = await voPrompt(_tr('note_content_prompt'), note.content || '');
                 if (content == null) return;
                 _agentWorkspacePost('updateNote', { id: note.id, title: title, content: content, folder: note.folder || 'General', kind: note.kind || 'note', tags: note.tags || [] });
                 return;
@@ -691,7 +691,7 @@ function _initAgentWorkspaceUI() {
                 });
             }
             if (action === 'deleteFile') {
-    if (confirm(_tr('delete_path_confirm', { path: target.dataset.awPath }))) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
+                if (await voConfirm(_tr('delete_path_confirm', { path: target.dataset.awPath }), { tone: 'danger' })) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
             }
             if (action === 'closeFile') {
                 if (_agentWorkspace.data) delete _agentWorkspace.data.fileEditor;
@@ -716,7 +716,7 @@ function _initAgentWorkspaceUI() {
                 _renderAgentWorkspace();
             }
             if (action === 'deleteAgentSkill') {
-    if (confirm(_tr('delete_skill_confirm', { name: id }))) _agentWorkspacePost('deleteAgentSkill', { name: id });
+                if (await voConfirm(_tr('delete_skill_confirm', { name: id }), { tone: 'danger' })) _agentWorkspacePost('deleteAgentSkill', { name: id });
             }
             if (action === 'applyLibrarySkill') {
                 _agentWorkspacePost('applyLibrarySkill', { name: id, overwrite: true });

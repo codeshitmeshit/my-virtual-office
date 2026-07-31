@@ -1,4 +1,5 @@
 {
+  "schema": 1,
   "aliases": {
     "approval.request": [
       {
@@ -15,27 +16,39 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1150
+        "line": 1125
       },
       {
         "file": "app/server.py",
-        "line": 4512
+        "line": 4717
       },
       {
         "file": "app/server.py",
-        "line": 4898
+        "line": 5103
       },
       {
         "file": "app/server.py",
-        "line": 5355
+        "line": 5498
       },
       {
         "file": "app/server.py",
-        "line": 6137
+        "line": 6276
       },
       {
         "file": "app/server.py",
-        "line": 7471
+        "line": 7628
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 621
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1216
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2142
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -49,7 +62,7 @@
     "approval.required": [
       {
         "file": "app/server.py",
-        "line": 6133
+        "line": 6272
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -63,11 +76,11 @@
     "approval.resolved": [
       {
         "file": "app/server.py",
-        "line": 5919
+        "line": 6058
       },
       {
         "file": "app/server.py",
-        "line": 8746
+        "line": 8915
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -85,27 +98,47 @@
       },
       {
         "file": "app/server.py",
-        "line": 5820
+        "line": 5959
       },
       {
         "file": "app/server.py",
-        "line": 5939
+        "line": 6078
       },
       {
         "file": "app/server.py",
-        "line": 8528
+        "line": 8697
       },
       {
         "file": "app/server.py",
-        "line": 8577
+        "line": 8746
       },
       {
         "file": "app/server.py",
-        "line": 8584
+        "line": 8753
       },
       {
         "file": "app/server.py",
-        "line": 8758
+        "line": 8927
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1573
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1626
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2311
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2318
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2363
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -119,7 +152,7 @@
     "clarify.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1150
+        "line": 1125
       },
       {
         "file": "app/services/provider_events.py",
@@ -147,7 +180,7 @@
     "message.complete": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1156
+        "line": 1131
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -161,19 +194,23 @@
     "message.completed": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1156
+        "line": 1131
       },
       {
         "file": "app/server.py",
-        "line": 4491
+        "line": 4696
       },
       {
         "file": "app/server.py",
-        "line": 5326
+        "line": 5469
       },
       {
         "file": "app/server.py",
-        "line": 6100
+        "line": 6239
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 600
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -191,43 +228,55 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1094
+        "line": 1069
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1096
+        "line": 1071
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1101
+        "line": 1076
       },
       {
         "file": "app/server.py",
-        "line": 4489
+        "line": 4694
       },
       {
         "file": "app/server.py",
-        "line": 5323
+        "line": 5466
       },
       {
         "file": "app/server.py",
-        "line": 6100
+        "line": 6239
       },
       {
         "file": "app/server.py",
-        "line": 6101
+        "line": 6240
       },
       {
         "file": "app/server.py",
-        "line": 7473
+        "line": 7630
       },
       {
         "file": "app/server.py",
-        "line": 9886
+        "line": 10055
       },
       {
         "file": "app/server.py",
-        "line": 35691
+        "line": 36714
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 598
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1187
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2144
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -245,15 +294,19 @@
     "message.delta.text": [
       {
         "file": "app/server.py",
-        "line": 4489
+        "line": 4694
       },
       {
         "file": "app/server.py",
-        "line": 5323
+        "line": 5466
       },
       {
         "file": "app/server.py",
-        "line": 6100
+        "line": 6239
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 598
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -271,7 +324,7 @@
     "message.error": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1153
+        "line": 1128
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -285,11 +338,19 @@
     "provider.activity": [
       {
         "file": "app/server.py",
-        "line": 7476
+        "line": 7633
       },
       {
         "file": "app/server.py",
-        "line": 7489
+        "line": 7646
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2147
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2160
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -298,6 +359,10 @@
       {
         "file": "app/services/conversation_timeline_events.py",
         "line": 26
+      },
+      {
+        "file": "app/services/project_workflow_chat_stream.py",
+        "line": 106
       },
       {
         "file": "app/services/provider_events.py",
@@ -326,6 +391,12 @@
         "line": 28
       }
     ],
+    "provider.skill_sync": [
+      {
+        "file": "app/services/provider_skill_sync.py",
+        "line": 161
+      }
+    ],
     "provider.snapshot": [
       {
         "file": "app/provider_sse_transport.py",
@@ -347,39 +418,51 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1108
+        "line": 1083
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1112
+        "line": 1087
       },
       {
         "file": "app/server.py",
-        "line": 4496
+        "line": 4701
       },
       {
         "file": "app/server.py",
-        "line": 5330
+        "line": 5473
       },
       {
         "file": "app/server.py",
-        "line": 6102
+        "line": 6241
       },
       {
         "file": "app/server.py",
-        "line": 6103
+        "line": 6242
       },
       {
         "file": "app/server.py",
-        "line": 7476
+        "line": 7633
       },
       {
         "file": "app/server.py",
-        "line": 9891
+        "line": 10060
       },
       {
         "file": "app/server.py",
-        "line": 35694
+        "line": 36717
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 605
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1190
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2147
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -393,7 +476,7 @@
     "reasoning.delta": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1108
+        "line": 1083
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -423,19 +506,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4524
+        "line": 4729
       },
       {
         "file": "app/server.py",
-        "line": 5364
+        "line": 5507
       },
       {
         "file": "app/server.py",
-        "line": 5383
+        "line": 5526
       },
       {
         "file": "app/server.py",
-        "line": 7550
+        "line": 7719
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 633
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1225
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1244
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -443,6 +538,10 @@
       },
       {
         "file": "app/services/conversation_timeline_events.py",
+        "line": 17
+      },
+      {
+        "file": "app/services/project_workflow_chat_stream.py",
         "line": 17
       },
       {
@@ -485,43 +584,63 @@
       },
       {
         "file": "app/server.py",
-        "line": 4524
+        "line": 4729
       },
       {
         "file": "app/server.py",
-        "line": 5364
+        "line": 5507
       },
       {
         "file": "app/server.py",
-        "line": 5383
+        "line": 5526
       },
       {
         "file": "app/server.py",
-        "line": 5936
+        "line": 6075
       },
       {
         "file": "app/server.py",
-        "line": 6142
+        "line": 6281
       },
       {
         "file": "app/server.py",
-        "line": 6234
+        "line": 6373
       },
       {
         "file": "app/server.py",
-        "line": 7486
+        "line": 7643
       },
       {
         "file": "app/server.py",
-        "line": 7550
+        "line": 7719
       },
       {
         "file": "app/server.py",
-        "line": 7591
+        "line": 7760
       },
       {
         "file": "app/server.py",
-        "line": 7676
+        "line": 7845
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 633
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1225
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1244
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1623
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2157
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -530,6 +649,10 @@
       {
         "file": "app/services/conversation_timeline_events.py",
         "line": 16
+      },
+      {
+        "file": "app/services/project_workflow_chat_stream.py",
+        "line": 17
       },
       {
         "file": "app/services/provider_events.py",
@@ -599,63 +722,91 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1156
+        "line": 1131
       },
       {
         "file": "app/server.py",
-        "line": 4491
+        "line": 4696
       },
       {
         "file": "app/server.py",
-        "line": 4492
+        "line": 4697
       },
       {
         "file": "app/server.py",
-        "line": 4519
+        "line": 4724
       },
       {
         "file": "app/server.py",
-        "line": 5364
+        "line": 5507
       },
       {
         "file": "app/server.py",
-        "line": 5370
+        "line": 5513
       },
       {
         "file": "app/server.py",
-        "line": 5379
+        "line": 5522
       },
       {
         "file": "app/server.py",
-        "line": 6140
+        "line": 6279
       },
       {
         "file": "app/server.py",
-        "line": 7484
+        "line": 7641
       },
       {
         "file": "app/server.py",
-        "line": 7550
+        "line": 7719
       },
       {
         "file": "app/server.py",
-        "line": 7589
+        "line": 7758
       },
       {
         "file": "app/server.py",
-        "line": 8429
+        "line": 8598
       },
       {
         "file": "app/server.py",
-        "line": 9937
+        "line": 10106
       },
       {
         "file": "app/server.py",
-        "line": 9939
+        "line": 10108
       },
       {
         "file": "app/server.py",
-        "line": 35731
+        "line": 36754
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 600
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 601
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 628
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1225
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1231
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1240
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2155
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -664,6 +815,10 @@
       {
         "file": "app/services/conversation_timeline_events.py",
         "line": 14
+      },
+      {
+        "file": "app/services/project_workflow_chat_stream.py",
+        "line": 17
       },
       {
         "file": "app/services/provider_events.py",
@@ -713,67 +868,87 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1153
+        "line": 1128
       },
       {
         "file": "app/server.py",
-        "line": 4524
+        "line": 4729
       },
       {
         "file": "app/server.py",
-        "line": 5364
+        "line": 5507
       },
       {
         "file": "app/server.py",
-        "line": 5375
+        "line": 5518
       },
       {
         "file": "app/server.py",
-        "line": 5383
+        "line": 5526
       },
       {
         "file": "app/server.py",
-        "line": 6145
+        "line": 6284
       },
       {
         "file": "app/server.py",
-        "line": 6234
+        "line": 6373
       },
       {
         "file": "app/server.py",
-        "line": 7488
+        "line": 7645
       },
       {
         "file": "app/server.py",
-        "line": 7550
+        "line": 7719
       },
       {
         "file": "app/server.py",
-        "line": 7594
+        "line": 7763
       },
       {
         "file": "app/server.py",
-        "line": 7676
+        "line": 7845
       },
       {
         "file": "app/server.py",
-        "line": 8429
+        "line": 8598
       },
       {
         "file": "app/server.py",
-        "line": 8467
+        "line": 8636
       },
       {
         "file": "app/server.py",
-        "line": 9942
+        "line": 10111
       },
       {
         "file": "app/server.py",
-        "line": 9944
+        "line": 10113
       },
       {
         "file": "app/server.py",
-        "line": 35731
+        "line": 36754
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 633
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1225
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1236
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1244
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2159
       },
       {
         "file": "app/services/codex_fast_path.py",
@@ -782,6 +957,10 @@
       {
         "file": "app/services/conversation_timeline_events.py",
         "line": 15
+      },
+      {
+        "file": "app/services/project_workflow_chat_stream.py",
+        "line": 17
       },
       {
         "file": "app/services/provider_events.py",
@@ -831,15 +1010,19 @@
     "run.native.started": [
       {
         "file": "app/server.py",
-        "line": 4476
+        "line": 4681
       },
       {
         "file": "app/server.py",
-        "line": 6098
+        "line": 6237
       },
       {
         "file": "app/server.py",
-        "line": 6099
+        "line": 6238
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 585
       },
       {
         "file": "app/services/provider_events.py",
@@ -873,31 +1056,39 @@
       },
       {
         "file": "app/server.py",
-        "line": 5292
+        "line": 5435
       },
       {
         "file": "app/server.py",
-        "line": 5294
+        "line": 5437
       },
       {
         "file": "app/server.py",
-        "line": 6070
+        "line": 6209
       },
       {
         "file": "app/server.py",
-        "line": 6098
+        "line": 6237
       },
       {
         "file": "app/server.py",
-        "line": 7534
+        "line": 7703
       },
       {
         "file": "app/server.py",
-        "line": 9853
+        "line": 10022
       },
       {
         "file": "app/server.py",
-        "line": 35670
+        "line": 36693
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1157
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1159
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -915,7 +1106,11 @@
     "run.stop_requested": [
       {
         "file": "app/server.py",
-        "line": 5430
+        "line": 5573
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1281
       },
       {
         "file": "app/services/provider_events.py",
@@ -925,7 +1120,7 @@
     "secret.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1150
+        "line": 1125
       },
       {
         "file": "app/services/provider_events.py",
@@ -935,7 +1130,7 @@
     "session.active_list": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1229
+        "line": 1204
       },
       {
         "file": "app/services/provider_events.py",
@@ -945,7 +1140,7 @@
     "session.create": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1058
+        "line": 1033
       },
       {
         "file": "app/services/provider_events.py",
@@ -963,7 +1158,11 @@
       },
       {
         "file": "app/server.py",
-        "line": 24479
+        "line": 25421
+      },
+      {
+        "file": "app/server_services/workflow.py",
+        "line": 1060
       },
       {
         "file": "app/services/provider_events.py",
@@ -973,7 +1172,7 @@
     "session.metrics": [
       {
         "file": "app/server.py",
-        "line": 9880
+        "line": 10049
       },
       {
         "file": "app/services/provider_events.py",
@@ -983,7 +1182,7 @@
     "session.resume": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1052
+        "line": 1027
       },
       {
         "file": "app/services/provider_events.py",
@@ -1007,7 +1206,7 @@
     "sudo.request": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1150
+        "line": 1125
       },
       {
         "file": "app/services/provider_events.py",
@@ -1017,23 +1216,27 @@
     "tool.call": [
       {
         "file": "app/server.py",
-        "line": 4049
+        "line": 4254
       },
       {
         "file": "app/server.py",
-        "line": 4073
+        "line": 4278
       },
       {
         "file": "app/server.py",
-        "line": 4500
+        "line": 4705
       },
       {
         "file": "app/server.py",
-        "line": 5334
+        "line": 5477
       },
       {
         "file": "app/server.py",
-        "line": 6104
+        "line": 6243
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 609
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1047,7 +1250,7 @@
     "tool.call.start": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1061,7 +1264,7 @@
     "tool.complete": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1079,39 +1282,55 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1141
+        "line": 1116
       },
       {
         "file": "app/server.py",
-        "line": 4504
+        "line": 4709
       },
       {
         "file": "app/server.py",
-        "line": 5343
+        "line": 5486
       },
       {
         "file": "app/server.py",
-        "line": 6108
+        "line": 6247
       },
       {
         "file": "app/server.py",
-        "line": 6111
+        "line": 6250
       },
       {
         "file": "app/server.py",
-        "line": 7479
+        "line": 7636
       },
       {
         "file": "app/server.py",
-        "line": 9905
+        "line": 10074
       },
       {
         "file": "app/server.py",
-        "line": 35697
+        "line": 36720
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 613
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1204
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1210
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2150
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1125,7 +1344,7 @@
     "tool.end": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1139,7 +1358,7 @@
     "tool.ended": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1153,7 +1372,7 @@
     "tool.error": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1171,47 +1390,63 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1141
+        "line": 1116
       },
       {
         "file": "app/server.py",
-        "line": 4504
+        "line": 4709
       },
       {
         "file": "app/server.py",
-        "line": 4505
+        "line": 4710
       },
       {
         "file": "app/server.py",
-        "line": 5343
+        "line": 5486
       },
       {
         "file": "app/server.py",
-        "line": 5349
+        "line": 5492
       },
       {
         "file": "app/server.py",
-        "line": 6112
+        "line": 6251
       },
       {
         "file": "app/server.py",
-        "line": 6115
+        "line": 6254
       },
       {
         "file": "app/server.py",
-        "line": 7481
+        "line": 7638
       },
       {
         "file": "app/server.py",
-        "line": 9905
+        "line": 10074
       },
       {
         "file": "app/server.py",
-        "line": 35697
+        "line": 36720
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 613
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 614
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1204
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2152
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1225,7 +1460,7 @@
     "tool.generating": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/provider_events.py",
@@ -1235,7 +1470,7 @@
     "tool.progress": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/provider_events.py",
@@ -1245,27 +1480,31 @@
     "tool.result": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1133
+        "line": 1108
       },
       {
         "file": "app/server.py",
-        "line": 4049
+        "line": 4254
       },
       {
         "file": "app/server.py",
-        "line": 4077
+        "line": 4282
       },
       {
         "file": "app/server.py",
-        "line": 4504
+        "line": 4709
       },
       {
         "file": "app/server.py",
-        "line": 5343
+        "line": 5486
       },
       {
         "file": "app/server.py",
-        "line": 6108
+        "line": 6247
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 613
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1279,7 +1518,7 @@
     "tool.start": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1297,43 +1536,55 @@
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/providers/hermes.py",
-        "line": 1125
+        "line": 1100
       },
       {
         "file": "app/server.py",
-        "line": 4500
+        "line": 4705
       },
       {
         "file": "app/server.py",
-        "line": 5334
+        "line": 5477
       },
       {
         "file": "app/server.py",
-        "line": 6104
+        "line": 6243
       },
       {
         "file": "app/server.py",
-        "line": 6107
+        "line": 6246
       },
       {
         "file": "app/server.py",
-        "line": 7482
+        "line": 7639
       },
       {
         "file": "app/server.py",
-        "line": 9901
+        "line": 10070
       },
       {
         "file": "app/server.py",
-        "line": 9903
+        "line": 10072
       },
       {
         "file": "app/server.py",
-        "line": 35697
+        "line": 36720
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 609
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 1195
+      },
+      {
+        "file": "app/server_services/agent_bridges.py",
+        "line": 2153
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -1347,7 +1598,7 @@
     "tool.update": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/provider_events.py",
@@ -1357,7 +1608,7 @@
     "tool.updated": [
       {
         "file": "app/providers/hermes.py",
-        "line": 1119
+        "line": 1094
       },
       {
         "file": "app/services/provider_events.py",
@@ -1371,13 +1622,12 @@
       },
       {
         "file": "app/server.py",
-        "line": 9869
+        "line": 10038
       },
       {
         "file": "app/services/provider_events.py",
         "line": 29
       }
     ]
-  },
-  "schema": 1
+  }
 }

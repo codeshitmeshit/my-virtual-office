@@ -7,9 +7,15 @@ independent from the legacy server entry point and HTTP transport.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
+
+from services.agent_platform_prompt_formatting import render_promoted_agent_platform_message_prompt
+from services.bridge_prompt_preprocessing import (
+    agent_sender_label,
+    bridge_source_label,
+    promote_bridge_prompt_input,
+)
 
 
 Agent = Mapping[str, Any]
@@ -174,36 +180,27 @@ class VOAgentCommunicationService:
                 "activeStatus": "",
             }
 
-        provider_prefixes = {
-            "openclaw": "OpenClaw",
-            "hermes": "Hermes",
-            "codex": "Codex",
-            "claude-code": "Claude Code",
-        }
         if is_human_source:
             sender_label = from_ref.get("name") or "User"
-            pretty_surface = source_label or (
-                "Virtual Office Chat"
-                if source_app == "virtual-office" and source_surface in {"chat-window", "chat"}
-                else f"{source_app.replace('-', ' ').title()} {source_surface.replace('-', ' ').title()}".strip()
-            )
-            envelope_source = pretty_surface
+            envelope_source = bridge_source_label(source_app, source_surface, source_label)
         else:
-            provider_kind = str(from_ref.get("providerKind") or "").lower()
-            provider_label = provider_prefixes.get(provider_kind, str(from_ref.get("providerKind") or "Agent").replace("-", " ").title())
-            base_name = f"{from_ref.get('name') or from_ref['id']} {from_ref.get('emoji') or ''}".strip()
-            sender_label = f"{provider_label}: {base_name}" if provider_label else base_name
+            sender_label = agent_sender_label(from_ref)
             envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
-        target_prompt = (
-            "<agent_platform_message_prompt>\n"
-            "  <metadata trusted=\"false\">\n"
-            f"    <from id=\"{from_ref['id']}\" is_user=\"{'true' if is_human_source else 'false'}\">{json.dumps(sender_label)}</from>\n"
-            f"    <to id=\"{to_ref['id']}\" />\n"
-            f"    <source app={json.dumps(source_app)} surface={json.dumps(source_surface)}>{envelope_source}</source>\n"
-            "  </metadata>\n"
-            f"  <message>{message}</message>\n"
-            "  <reply_instruction>Reply directly to the sender. Keep the reply concise unless detail is needed.</reply_instruction>\n"
-            "</agent_platform_message_prompt>"
+        target_prompt = render_promoted_agent_platform_message_prompt(
+            promote_bridge_prompt_input(
+                provider_kind=str(to_ref.get("providerKind") or ""),
+                message=message,
+                from_id=from_ref["id"],
+                from_name=sender_label,
+                to_id=to_ref["id"],
+                is_user=is_human_source,
+                source_app=source_app,
+                source_surface=source_surface,
+                source_label=envelope_source,
+                reply_instruction=(
+                    "Reply directly to the sender. Keep the reply concise unless detail is needed."
+                ),
+            )
         )
         synced_skills = str(self._ports.load_synced_skills(to_agent) or "").strip()
         if synced_skills:

@@ -297,7 +297,9 @@ def test_agent_directory_and_public_detail_trust_registered_vo_identity(runtime)
         "GET",
     )
     assert status == 200
-    assert len(payload["items"]) == 2
+    assert {item["aiId"] for item in payload["items"]} == {"agent-1", "agent-2", "hr"}
+    hr_item = next(item for item in payload["items"] if item["aiId"] == "hr")
+    assert hr_item["introduction"]
     assert repository.repository.list_access_log().items == ()
 
     status, payload = call(

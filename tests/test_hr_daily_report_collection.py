@@ -89,11 +89,15 @@ def test_visible_request_preserves_context_idempotency_and_raw_response(setup):
     assert result[0].status == "submitted"
     sent = conversation.calls[0]
     assert (sent.sender_ai_id, sent.target_ai_id) == ("hr", "agent-1")
-    assert sent.message.startswith(MESSAGE)
+    assert sent.message.startswith("<hr_daily_report_request>")
+    assert f"<task>{MESSAGE}</task>" in sent.message
     assert '"requestType":"vo.hr.daily_report"' in sent.message
     assert '"agentAiId":"agent-1"' in sent.message
     assert '"localDate":"2026-07-19"' in sent.message
     assert '"completedWork":[]' in sent.message
+    assert '"selfAssessment":"' in sent.message
+    assert "不要只根据当前这条请求或当前对话上下文作答" in sent.message
+    assert "所有会话、任务执行记录、产出记录和相关日志" in sent.message
     assert "无法输出合法 JSON" in sent.message
     assert "```" not in sent.message
     assert sent.conversation_key == "hr:daily-report:2026-07-19:agent-1"
@@ -141,6 +145,20 @@ def test_no_response_does_not_invent_report_content(setup, response):
     assert report.raw_response is None
 
 
+def test_openclaw_delivery_receipt_is_not_saved_as_report_content(setup):
+    repository, reporting, opened = setup
+    result = collector(
+        repository,
+        reporting,
+        FakeConversation({"agent-1": "[DELIVERED] Message delivered to OpenClaw agent."}),
+    ).process_requests((opened.requests[0].id,), message=MESSAGE, worker_id="worker")
+    assert result[0].status == "no_response"
+    request = repository.get_report_request(opened.requests[0].id)
+    report = repository.get_daily_report("agent-1", "2026-07-19")
+    assert request.status == "no_response"
+    assert report.raw_response is None
+
+
 def test_completed_request_is_restart_idempotent_and_not_resent(setup):
     repository, reporting, opened = setup
     first = FakeConversation({"agent-1": "done"})
@@ -178,12 +196,14 @@ def test_daily_report_contract_escapes_identity_and_keeps_text_fallback():
         "日报", ai_id='agent-"quoted', local_date="2026-07-19"
     )
     assert 'agent-\\"quoted' in message
+    assert '"selfAssessment":"' in message
+    assert "不要只根据当前这条请求或当前对话上下文作答" in message
     assert "自然语言回答" in message
 
 
 def test_structured_agent_json_is_preserved_as_raw_for_hr_assessment(setup):
     repository, reporting, opened = setup
-    raw = '{"schemaVersion":1,"agentAiId":"agent-1","localDate":"2026-07-19","completedWork":["done"],"relatedProjectsOrTasks":[],"artifacts":[],"blockers":[],"requestedHelp":[]}'
+    raw = '{"schemaVersion":1,"agentAiId":"agent-1","localDate":"2026-07-19","completedWork":["done"],"relatedProjectsOrTasks":[],"artifacts":[],"blockers":[],"requestedHelp":[],"selfAssessment":"完成质量稳定，暂无阻塞。"}'
     result = collector(
         repository, reporting, FakeConversation({"agent-1": raw})
     ).process_requests((opened.requests[0].id,), message=MESSAGE, worker_id="json-worker")

@@ -5482,10 +5482,10 @@ function updateSidebar() {
 }
 setInterval(updateSidebar, 1000);
 
-function branchCreatePrompt() {
-    var name = prompt(typeof i18n !== 'undefined' ? i18n.t('new_branch_name_prompt') : 'New branch name:');
+async function branchCreatePrompt() {
+    var name = await voPrompt(typeof i18n !== 'undefined' ? i18n.t('new_branch_name_prompt') : 'New branch name:');
     if (!name) return;
-    var emoji = prompt(typeof i18n !== 'undefined' ? i18n.t('branch_emoji_prompt') : 'Branch emoji:', '🏢') || '🏢';
+    var emoji = await voPrompt(typeof i18n !== 'undefined' ? i18n.t('branch_emoji_prompt') : 'Branch emoji:', '🏢') || '🏢';
     var idBase = name.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 24) || 'BRANCH';
     var id = idBase;
     var n = 2;
@@ -5597,10 +5597,10 @@ function _getThemeColor(theme) {
     return map[theme] || '#888888';
 }
 
-function branchDeletePrompt(branchId) {
+async function branchDeletePrompt(branchId) {
     var branch = officeConfig.branches.find(function(b){ return b.id === branchId; });
     if (!branch) return;
-    if (!confirm(_tr('delete_branch_confirm', { name: branch.name }))) return;
+    if (!await voConfirm(_tr('delete_branch_confirm', { name: branch.name }), { tone: 'danger' })) return;
     officeConfig.branches = officeConfig.branches.filter(function(b){ return b.id !== branchId; });
     _invalidateBranchCache();
     agents.forEach(function(a){ if (a.branch === branchId) a.branch = 'UNASSIGNED'; });
@@ -9242,7 +9242,7 @@ function _initAgentWorkspaceUI() {
                 });
             }
         });
-        body.addEventListener('click', function(e) {
+        body.addEventListener('click', async function(e) {
             var target = e.target.closest('[data-aw-action]');
             var editTask = e.target.closest('[data-aw-edit-task]');
             var editNote = e.target.closest('[data-aw-edit-note]');
@@ -9269,9 +9269,9 @@ function _initAgentWorkspaceUI() {
             if (editTask) {
                 var task = _findWorkspaceTask(editTask.dataset.awEditTask);
                 if (!task) return;
-    var text = prompt(_tr('task_title_prompt'), task.text || '');
+                var text = await voPrompt(_tr('task_title_prompt'), task.text || '');
                 if (text == null) return;
-    var detail = prompt(_tr('task_details_prompt'), task.detail || '');
+                var detail = await voPrompt(_tr('task_details_prompt'), task.detail || '');
                 if (detail == null) return;
                 _agentWorkspacePost('updateTask', { id: task.id, text: text, detail: detail, due: task.due || '', priority: task.priority || 'normal' });
                 return;
@@ -9279,9 +9279,9 @@ function _initAgentWorkspaceUI() {
             if (editNote) {
                 var note = _findWorkspaceNote(editNote.dataset.awEditNote);
                 if (!note) return;
-    var title = prompt(_tr('note_title_prompt'), note.title || '');
+                var title = await voPrompt(_tr('note_title_prompt'), note.title || '');
                 if (title == null) return;
-    var content = prompt(_tr('note_content_prompt'), note.content || '');
+                var content = await voPrompt(_tr('note_content_prompt'), note.content || '');
                 if (content == null) return;
                 _agentWorkspacePost('updateNote', { id: note.id, title: title, content: content, folder: note.folder || 'General', kind: note.kind || 'note', tags: note.tags || [] });
                 return;
@@ -9301,7 +9301,7 @@ function _initAgentWorkspaceUI() {
                 });
             }
             if (action === 'deleteFile') {
-    if (confirm(_tr('delete_path_confirm', { path: target.dataset.awPath }))) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
+                if (await voConfirm(_tr('delete_path_confirm', { path: target.dataset.awPath }), { tone: 'danger' })) _agentWorkspacePost('deleteFile', { path: target.dataset.awPath });
             }
             if (action === 'closeFile') {
                 if (_agentWorkspace.data) delete _agentWorkspace.data.fileEditor;
@@ -9326,7 +9326,7 @@ function _initAgentWorkspaceUI() {
                 _renderAgentWorkspace();
             }
             if (action === 'deleteAgentSkill') {
-    if (confirm(_tr('delete_skill_confirm', { name: id }))) _agentWorkspacePost('deleteAgentSkill', { name: id });
+                if (await voConfirm(_tr('delete_skill_confirm', { name: id }), { tone: 'danger' })) _agentWorkspacePost('deleteAgentSkill', { name: id });
             }
             if (action === 'applyLibrarySkill') {
                 _agentWorkspacePost('applyLibrarySkill', { name: id, overwrite: true });
@@ -9457,9 +9457,9 @@ function minimizeAllBubbles() {
     minimizeAllChat();
 }
 
-function triggerBubble(type) {
+async function triggerBubble(type) {
     if (!selectedAgent) return;
-    const text = prompt(type === 'thought' ? `💭 What is ${selectedAgent.name} thinking?` : `💬 What does ${selectedAgent.name} say?`);
+    const text = await voPrompt(type === 'thought' ? `💭 What is ${selectedAgent.name} thinking?` : `💬 What does ${selectedAgent.name} say?`);
     if (!text) return;
     if (type === 'thought') {
         selectedAgent.thought = text;
@@ -9470,7 +9470,7 @@ function triggerBubble(type) {
         getBubbleMinState(selectedAgent).thought = false;
         addGlobalLog(`💭 ${selectedAgent.name} ${(typeof i18n !== 'undefined' ? i18n.t('chat_thinking') : 'Thinking')}: ${text.substring(0, 40)}...`);
     } else {
-    const target = prompt(_tr('message_target_prompt')) || '';
+    const target = await voPrompt(_tr('message_target_prompt')) || '';
         selectedAgent.speech = text;
         selectedAgent.speechTarget = target;
         selectedAgent.lastSpeech = text;
@@ -13480,7 +13480,7 @@ function _isValidPlacement(type, x, y) {
 var _placementValid = true; // updated each frame for ghost preview color
 
 // --- EDIT MODE CLICK HANDLING ---
-function handleEditClick(worldX, worldY, screenX, screenY, event) {
+async function handleEditClick(worldX, worldY, screenX, screenY, event) {
     // 1. If in placement mode → place item
     if (placingType === 'wall') {
         var _clickTx = Math.floor(worldX / TILE);
@@ -13585,7 +13585,7 @@ function handleEditClick(worldX, worldY, screenX, screenY, event) {
         var newItem = { id: _generateFurnitureId(), type: placingType, x: sx, y: sy };
         // Custom text label — prompt for text on placement
         if (placingType === 'textLabel') {
-    var labelText = prompt(_tr('enter_label_text'), _tr('label_default'));
+            var labelText = await voPrompt(_tr('enter_label_text'), _tr('label_default'));
             if (!labelText) return true; // cancelled
             newItem.text = labelText;
             newItem.labelColor = '#ffffff';
@@ -14003,7 +14003,7 @@ canvas.addEventListener('mousemove', function(e) {
 // --- EDIT MODE TOGGLE (called from toolbar button) ---
 function toggleEditMode() {
     if (window._voLicense && window._voLicense.demo) {
-        alert(_tr('premium_edit_office'));
+        voAlert(_tr('premium_edit_office'));
         return;
     }
     editMode = !editMode;
@@ -15341,14 +15341,14 @@ function mmImportConfig() {
         var file = fileInput.files[0];
         if (!file) return;
         var reader = new FileReader();
-        reader.onload = function(e) {
+        reader.onload = async function(e) {
             try {
                 var imported = JSON.parse(e.target.result);
                 if (!imported.canvasWidth && !imported.furniture) {
                     _showOfficeToast('❌ Invalid config file');
                     return;
                 }
-    if (!confirm(_tr('import_config_confirm'))) return;
+                if (!await voConfirm(_tr('import_config_confirm'))) return;
                 // Merge imported config
                 if (imported.canvasWidth) { W = imported.canvasWidth; officeConfig.canvasWidth = W; }
                 if (imported.canvasHeight) { H = imported.canvasHeight; officeConfig.canvasHeight = H; }
@@ -15373,10 +15373,10 @@ function mmImportConfig() {
     fileInput.click();
 }
 
-function mmFullReset() {
-    if (!confirm('⚠️ ' + _tr('full_reset_confirm'))) return;
-    if (!confirm(_tr('reset_type_confirm'))) return;
-    var input = prompt(_tr('type_reset'));
+async function mmFullReset() {
+    if (!await voConfirm('⚠️ ' + _tr('full_reset_confirm'), { tone: 'danger' })) return;
+    if (!await voConfirm(_tr('reset_type_confirm'), { tone: 'danger' })) return;
+    var input = await voPrompt(_tr('type_reset'));
     if (input !== 'RESET') { _showOfficeToast('Reset cancelled'); return; }
 
     // Clear everything
@@ -16430,7 +16430,7 @@ async function saveAgentSkillToLibrary(agentId, skillName, onDone) {
         var data = await requestSave(false);
         if (data.ok) {
             if (data.status === 'identical') {
-        alert(_tr('skill_exists_library'));
+                voAlert(_tr('skill_exists_library'));
             } else {
                 _showOfficeToast('✅ ' + (data.status === 'updated' ? 'Updated' : 'Saved') + ' "' + skillName + '" in Skill Library');
             }
@@ -16640,7 +16640,7 @@ function _showSkillWorkshopReviewDialog(proposal, detail, startEditing) {
 async function runSkillWorkshopAction(agentId, proposalId, action, proposalContent, onDone) {
     var body = { agentId: agentId, proposalId: proposalId, action: action };
     if (action === 'reject' || action === 'quarantine') {
-        var reason = prompt((action === 'reject' ? 'Reject' : 'Quarantine') + ' reason:', '');
+        var reason = await voPrompt((action === 'reject' ? 'Reject' : 'Quarantine') + ' reason:', '');
         if (reason == null) return;
         body.reason = reason;
     }
@@ -16795,7 +16795,7 @@ async function applyLibrarySkill() {
             hideLibraryPicker();
             loadAgentSkills(_currentSkillAgent);
         } else if (data.exists) {
-        if (confirm(_tr('overwrite_skill_confirm', { name: skillName }))) {
+            if (await voConfirm(_tr('overwrite_skill_confirm', { name: skillName }))) {
                 var res2 = await fetch('/api/skills-library/apply', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -16820,17 +16820,17 @@ function saveNewSkill() {
     if (!_currentSkillAgent) return;
     var name = document.getElementById('skill-new-name').value.trim();
     var content = document.getElementById('skill-new-content').value;
-    if (!name) { alert(_tr('skill_name_required')); return; }
+    if (!name) { voAlert(_tr('skill_name_required')); return; }
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: name, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         hideAddSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _showOfficeToast('✅ Skill "' + name + '" added');
-    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
 function editSkill(skillName) {
@@ -16865,23 +16865,23 @@ function saveEditedSkill() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: _editingSkillName, content: content })
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         hideEditSkillForm();
         loadAgentSkills(_currentSkillAgent);
         _showOfficeToast('✅ Skill "' + _editingSkillName + '" updated');
-    }).catch(function(e) { alert(_tr('error_saving_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_saving_skill') + ': ' + e.message); });
 }
 
-function deleteSkill(skillName) {
+async function deleteSkill(skillName) {
     if (!_currentSkillAgent) return;
-    if (!confirm(_tr('remove_agent_skill_confirm', { name: skillName }))) return;
+    if (!await voConfirm(_tr('remove_agent_skill_confirm', { name: skillName }), { tone: 'danger' })) return;
     fetch('/api/agent/' + encodeURIComponent(_currentSkillAgent) + '/skills/' + encodeURIComponent(skillName), {
         method: 'DELETE'
     }).then(function(r) { return r.json(); }).then(function(data) {
-    if (data.error) { alert(_tr('error') + ': ' + data.error); return; }
+        if (data.error) { voAlert(_tr('error') + ': ' + data.error); return; }
         loadAgentSkills(_currentSkillAgent);
         _showOfficeToast('🗑️ Skill "' + skillName + '" removed');
-    }).catch(function(e) { alert(_tr('error_deleting_skill') + ': ' + e.message); });
+    }).catch(function(e) { voAlert(_tr('error_deleting_skill') + ': ' + e.message); });
 }
 
 // ─── MEETINGS DASHBOARD ──────────────────────────────────────────
@@ -19042,7 +19042,7 @@ async function continueMeetingDecisionWindow(meetingId) {
         if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
         _mtgSetDecisionControlsDisabled(meetingId, false);
     } finally {
         if (btn) btn.disabled = false;
@@ -19078,7 +19078,7 @@ async function startExecutableMeeting(meetingId) {
         if (_mtgMeetingCompleted(ran && ran.meeting)) switchMtgTab('completed');
         else switchMtgTab('active');
     } catch (e) {
-        alert(_mtgT('meeting_start_failed', 'Failed to start meeting') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_start_failed', 'Failed to start meeting') + ': ' + (e.message || String(e)));
         if (btn) {
             btn.disabled = false;
             btn.textContent = '▶ ' + _mtgT('meeting_start_existing', 'Start meeting');
@@ -19812,7 +19812,7 @@ function openMeetingTaskLink(projectId, taskId) {
     if (!projectId || !taskId) return;
     window.location.hash = '#projects';
     window.dispatchEvent(new CustomEvent('vo-open-project-task', { detail: { projectId: projectId, taskId: taskId } }));
-    alert(_mtgT('meeting_action_task_created', 'Task created') + ': ' + taskId);
+    voAlert(_mtgT('meeting_action_task_created', 'Task created') + ': ' + taskId);
 }
 
 function _mtgRenderConflictPanel(m) {
@@ -19956,7 +19956,7 @@ async function endExecutableMeetingWithAI(meetingId) {
         await _mtgAfterMeetingRefresh();
         switchMtgTab('completed');
     } catch (e) {
-        alert((_tr('failed_end_meeting') || 'Failed to end meeting') + ': ' + (e.message || String(e)));
+        voAlert((_tr('failed_end_meeting') || 'Failed to end meeting') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) {
             btn.disabled = false;
@@ -20017,7 +20017,7 @@ async function resolveMeetingConflict(meetingId, agentId, action) {
     try {
         await _mtgConflictAction(meetingId, { action: action || 'wait', agentId: agentId });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -20025,26 +20025,26 @@ async function reserveMeetingConflict(meetingId, agentId) {
     try {
         await _mtgConflictAction(meetingId, { action: 'reserve', agentId: agentId });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
 async function replaceMeetingConflict(meetingId, agentId) {
-    var replacement = prompt(_mtgT('meeting_conflict_replace_prompt', 'Replacement agent ID'), '');
+    var replacement = await voPrompt(_mtgT('meeting_conflict_replace_prompt', 'Replacement agent ID'), '');
     if (!replacement) return;
     try {
         await _mtgConflictAction(meetingId, { action: 'replace', agentId: agentId, replacement: replacement.trim() });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
 async function forceJoinMeetingConflict(meetingId, agentId) {
-    if (!confirm(_mtgT('meeting_conflict_force_confirm', 'Force join can interrupt current work. Continue?'))) return;
+    if (!await voConfirm(_mtgT('meeting_conflict_force_confirm', 'Force join can interrupt current work. Continue?'), { tone: 'danger' })) return;
     try {
         await _mtgConflictAction(meetingId, { action: 'force_join', agentId: agentId, confirmForce: true });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -20052,7 +20052,7 @@ async function refreshMeetingConflicts(meetingId) {
     try {
         await _mtgConflictAction(meetingId, { action: 'refresh' });
     } catch (e) {
-        alert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_conflict_failed', 'Conflict handling failed') + ': ' + (e.message || String(e)));
     }
 }
 
@@ -20062,7 +20062,7 @@ async function pauseExecutableMeeting(meetingId) {
     try {
         await _mtgTransitionMeeting(meetingId, 'pause', 'Paused by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -20077,20 +20077,20 @@ async function resumeExecutableMeeting(meetingId) {
     try {
         await _mtgTransitionMeeting(meetingId, action, 'Resumed by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
 }
 
 async function cancelExecutableMeeting(meetingId) {
-    if (!confirm(_mtgT('meeting_cancel_confirm', 'Cancel this meeting?'))) return;
+    if (!await voConfirm(_mtgT('meeting_cancel_confirm', 'Cancel this meeting?'), { tone: 'danger' })) return;
     var btn = document.getElementById('mtg-cancel-' + meetingId);
     if (btn) btn.disabled = true;
     try {
         await _mtgTransitionMeeting(meetingId, 'cancel', 'Cancelled by user');
     } catch (e) {
-        alert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
+        voAlert(_mtgT('meeting_control_failed', 'Meeting control failed') + ': ' + (e.message || String(e)));
     } finally {
         if (btn) btn.disabled = false;
     }
@@ -20143,15 +20143,15 @@ async function submitEndMeeting() {
 }
 
 async function deleteMeetingHistory(meetingId) {
-    if (!confirm(_tr('delete_meeting_confirm'))) return;
+    if (!await voConfirm(_tr('delete_meeting_confirm'), { tone: 'danger' })) return;
     return _mtgRunActionOnce('meeting-history-delete:' + meetingId, async function() {
     try {
         var res = await fetch('/api/meetings/history/' + meetingId, { method: 'DELETE' });
         var data = await res.json();
         if (data.ok) _mtgRefresh();
-        else alert(data.error || _tr('failed_delete'));
+        else voAlert(data.error || _tr('failed_delete'));
     } catch (e) {
-        alert(_tr('error') + ': ' + e.message);
+        voAlert(_tr('error') + ': ' + e.message);
     }
     });
 }
@@ -20462,7 +20462,7 @@ async function saveSkill() {
 }
 
 async function deleteLibrarySkill(skillName) {
-    if (!confirm(_tr('delete_library_skill_confirm', { name: skillName }))) return;
+    if (!await voConfirm(_tr('delete_library_skill_confirm', { name: skillName }), { tone: 'danger' })) return;
 
     try {
         var res = await fetch('/api/skills-library/' + encodeURIComponent(skillName), { method: 'DELETE' });

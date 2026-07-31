@@ -248,6 +248,42 @@ def test_environment_scheduler_switch_overrides_persisted_page_schedule(setup):
 def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     repository, _reporting, _opened, _lifecycle, api = setup
     access_count = len(repository.list_access_log().items)
+    repository.save_assessment(
+        assessment_id="assessment-agent-1-old",
+        ai_id="agent-1",
+        local_date="2026-07-19",
+        status="complete",
+        workload="insufficient_information",
+        workload_score=1,
+        principal_contributions=[],
+        rationale="old assessment",
+        blockers=[],
+        strengths=[],
+        improvements=[],
+        runtime_diagnosis="old diagnosis",
+        information_sufficiency="old sufficiency",
+        evidence_version="sha256:old",
+        hr_id="hr",
+        evidence=[],
+    )
+    repository.save_assessment(
+        assessment_id="assessment-agent-1-current",
+        ai_id="agent-1",
+        local_date="2026-07-19",
+        status="complete",
+        workload="insufficient_information",
+        workload_score=1,
+        principal_contributions=[],
+        rationale="current assessment",
+        blockers=[],
+        strengths=[],
+        improvements=[],
+        runtime_diagnosis="current diagnosis",
+        information_sufficiency="current sufficiency",
+        evidence_version="sha256:current",
+        hr_id="hr",
+        evidence=[],
+    )
     result = api.agent_detail("agent-1", report_limit=1, assessment_limit=1)
     assert result.status == 200
     agent = result.payload["agent"]
@@ -255,6 +291,8 @@ def test_agent_detail_is_full_human_projection_with_independent_cursors(setup):
     assert agent["aiId"] == "agent-1"
     assert agent["introduction"] == "Builds APIs"
     assert agent["reports"][0]["rawResponse"] == "private daily report"
+    assert [item["id"] for item in agent["assessments"]] == ["assessment-agent-1-current"]
+    assert agent["assessmentNextCursor"] is None
     assert agent["identityHistory"][0]["aiId"] == "agent-1"
     assert agent["accessHistory"][0]["targetAiId"] == "agent-1"
     assert "accessNextCursor" in agent

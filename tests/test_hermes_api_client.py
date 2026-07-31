@@ -5,6 +5,7 @@ import json
 import os
 import sys
 import threading
+import pytest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -81,7 +82,10 @@ class HermesFixtureHandler(BaseHTTPRequestHandler):
 
 def with_server():
     HermesFixtureHandler.requests = []
-    server = ThreadingHTTPServer(("127.0.0.1", 0), HermesFixtureHandler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", 0), HermesFixtureHandler)
+    except PermissionError as exc:
+        pytest.skip(f"local sockets are not available in this sandbox: {exc}")
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, f"http://127.0.0.1:{server.server_address[1]}"

@@ -44,7 +44,10 @@ def classify_slash_message(
         return SlashGuardResult("ordinary", text=value)
     if value in SUPPORTED_COMMANDS:
         return SlashGuardResult("command", text=value, command=value)
-    return SlashGuardResult("blocked", text=value)
+    command_name = value.split(maxsplit=1)[0]
+    if command_name.lower() in SUPPORTED_COMMANDS:
+        return SlashGuardResult("blocked", text=value)
+    return SlashGuardResult("ordinary", text=value)
 
 
 def blocked_command_name(text: Any) -> str:

@@ -556,15 +556,15 @@
                 '<strong>' + esc(proposal.topic || proposal.goal || text('AI 会议申请', 'AI meeting request')) + '</strong>' +
                 '<span>' + esc(text('状态：', 'Status: ') + (record.status || 'pending')) + '</span>' +
                 '</div>' +
-                '<button class="mtg-btn mtg-btn-end" type="button" onclick="' + jsCall('openMeetingRequestDetailModal', record.id) + '">' + esc(text('打开完整审查', 'Open full review')) + '</button>';
+                '<button class="mtg-btn mtg-btn-end" type="button" onclick="openMeetingRequestDetailModal(' + JSON.stringify(String(record.id || '')).replace(/"/g, '&quot;') + ')">' + esc(text('打开完整审查', 'Open full review')) + '</button>';
         } else {
-            var detailRecord = normalizeDetailRecord(record);
+            record = normalizeDetailRecord(record);
             html += '<div class="meeting-center-record-summary">' +
                 '<strong>' + esc(record.topic || text('未命名会议', 'Untitled meeting')) + '</strong>' +
                 '<span>' + esc(text('状态：', 'Status: ') + meetingStage(record)) + '</span>' +
                 (record.projectTitle ? '<span>' + esc(text('项目：', 'Project: ') + record.projectTitle) + '</span>' : '') +
                 '</div>' +
-                '<div class="meeting-center-aside-detail">' + runtime.renderMeetingDetail(detailRecord, { includeTranscript: false }) + '</div>';
+                '<div class="meeting-center-aside-detail">' + runtime.renderMeetingDetail(record, { includeTranscript: false }) + '</div>';
         }
         target.innerHTML = html;
     }

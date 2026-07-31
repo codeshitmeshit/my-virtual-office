@@ -103,9 +103,10 @@ def test_completion_only_contacts_available_agents_with_missing_introductions(tm
     assert result.published == 2
     assert result.failed == 0
     assert [call[0] for call in agent_calls] == ["missing"]
+    assert agent_calls[0][1].startswith("<hr_agent_introduction_request>")
     assert '"requestType":"vo.hr.agent_introduction"' in agent_calls[0][1]
     assert '"agentAiId":"missing"' in agent_calls[0][1]
-    assert '"responsibilities":["<responsibility>"]' in agent_calls[0][1]
+    assert '"responsibilities":["&lt;responsibility&gt;"]' in agent_calls[0][1]
     assert "自然语言回答" in agent_calls[0][1]
     assert "```" not in agent_calls[0][1]
     assert len(hr_calls) == 2
@@ -177,6 +178,41 @@ def test_command_is_async_single_flight_and_records_bounded_activity(tmp_path):
     assert activity.action == "complete_information"
     assert activity.status == "complete"
     assert activity.context["published"] == 2
+
+
+def test_failed_summary_records_agent_diagnostics_in_command_context(tmp_path):
+    repo = repository(tmp_path)
+    service = HRInformationCompletionService(
+        repo,
+        CallableHRInformationConversation(
+            lambda _ai_id, *_args: "I coordinate infrastructure incidents.",
+            lambda *_args: "not json",
+        ),
+        max_workers=1,
+    )
+    queued = []
+    commands = HRInformationCompletionCommands(
+        service,
+        tracker=HRCommandStatusTracker(repo),
+        submit=lambda callback: queued.append(callback) or True,
+        new_id=iter(("command-1",)).__next__,
+    )
+
+    assert commands.complete().accepted is True
+    queued.pop()()
+
+    activity = next(
+        item for item in repo.list_hr_activity().items if item.id == "command-1"
+    )
+    assert activity.status == "failed"
+    assert activity.error == "hr_information_completion_partial_failure"
+    assert activity.context["failed"] == 2
+    failures = activity.context["failures"]
+    assert {item["aiId"] for item in failures} == {"missing", "waiting-summary"}
+    assert all(item["errorCode"] == "hr_introduction_summary_invalid" for item in failures)
+    assert all(item["conversationKey"].startswith("hr:introduction-summary:") for item in failures)
+    assert all("repair=" in item["detail"] for item in failures)
+    assert all(item["rawOutputExcerpt"] == "not json" for item in failures)
 
 
 def test_completion_module_has_no_transport_or_legacy_entrypoint_dependency():
