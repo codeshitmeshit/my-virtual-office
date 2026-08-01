@@ -30,6 +30,17 @@ def handle_post(handler, parsed_url):
         except JsonBodyError as e:
             result = {"ok": False, "error": str(e), "_status": 400}
         return send_json(handler, result)
+    if parsed_url.path == "/api/feishu-notification/topic-preflight":
+        try:
+            body = read_json(handler)
+            root_message_id = str((body or {}).get("rootMessageId") or "").strip()
+            if not root_message_id:
+                result = {"ok": False, "error": "rootMessageId is required", "_status": 400}
+            else:
+                result = notifications_service._feishu_notification_topic_preflight(root_message_id)
+        except JsonBodyError as e:
+            result = {"ok": False, "error": str(e), "_status": 400}
+        return send_json(handler, result)
     return False
 
 

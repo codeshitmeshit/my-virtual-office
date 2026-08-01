@@ -135,6 +135,13 @@ from services import system_agent_roles as system_agent_roles_service
 from services.provider_events import ProviderEventJournal, canonical_event_name, sanitize_payload
 from services.provider_approvals import ProviderApprovalService, TrustedApprovalContext
 from services.provider_conversations import CallableConversationStatePort, CallableQueuedConversationPort, ConversationKey, ProviderConversationService
+from services.feishu_notification_topics import FileTopicStore, NotificationTopicService
+from services.feishu_notification_topic_runtime import (
+    load_origin_history as load_notification_topic_origin_history,
+    load_topic_resources as load_notification_topic_resources,
+    lookup_notification_root,
+    safe_preflight_audit,
+)
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
 from services.provider_runs import ProviderRunCoordinator
@@ -172,7 +179,7 @@ from provider_execution import (
     normalize_provider_result,
     provider_http_status,
 )
-from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message, update_feishu_notification
+from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, reply_feishu_message, reply_feishu_notification, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message, update_feishu_notification
 from feishu_long_connection import FeishuLongConnectionReceiver
 
 SETTINGS_PROBE_CACHE = SettingsProbeCache()
@@ -202,6 +209,8 @@ SETTINGS_PROBE_CACHE = SettingsProbeCache()
 # server_routes.dispatch(self, "DELETE", parsed_url)
 
 _FEISHU_LONG_CONNECTION_RECEIVER = None
+_FEISHU_NOTIFICATION_TOPIC_SERVICE = None
+_FEISHU_NOTIFICATION_TOPIC_LOCK = threading.Lock()
 _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
 _FEISHU_LONG_CONNECTION_LOCK = threading.Lock()
 _FEISHU_CHAT_LONG_CONNECTION_LOCK = threading.Lock()
@@ -887,6 +896,10 @@ def _load_vo_config():
             "feishuAppSecret": _env_or("VO_FEISHU_APP_SECRET", notifications_cfg.get("feishuAppSecret", "")),
             "feishuReceiveIdType": _env_or("VO_FEISHU_RECEIVE_ID_TYPE", notifications_cfg.get("feishuReceiveIdType", "chat_id")),
             "feishuReceiveId": _env_or("VO_FEISHU_RECEIVE_ID", notifications_cfg.get("feishuReceiveId", "")),
+            "topicConversationsEnabled": _env_bool(
+                "VO_FEISHU_NOTIFICATION_TOPICS_ENABLED",
+                notifications_cfg.get("topicConversationsEnabled", False),
+            ),
         },
         "feishu": {
             "chatApp": {
@@ -4564,6 +4577,7 @@ CODEX_FEISHU_APPROVAL_ROUTES = CodexFeishuApprovalRouteStore(
 CODEX_FEISHU_APPROVAL_COORDINATOR = CodexFeishuApprovalCoordinator(
     CODEX_FEISHU_APPROVAL_ROUTES,
     send_notification=send_feishu_notification,
+    reply_notification=reply_feishu_notification,
     update_notification=update_feishu_notification,
     status_dir=STATUS_DIR,
 )
@@ -13333,6 +13347,7 @@ def _send_meeting_failure_notification(meeting, failure=None):
 def _feishu_notification_config_response():
     cfg = VO_CONFIG.get("notifications", {}) or {}
     receiver = _get_feishu_long_connection_receiver()
+    topic_service = _FEISHU_NOTIFICATION_TOPIC_SERVICE
     return {
         "ok": True,
         "feishuEnabled": cfg.get("feishuEnabled", True),
@@ -13343,6 +13358,12 @@ def _feishu_notification_config_response():
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
         "feishuCallbackMode": "long_connection",
         "feishuLongConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
+        "topicConversationsEnabled": bool(cfg.get("topicConversationsEnabled", False)),
+        "topicConversations": topic_service.status() if topic_service else {
+            "enabled": bool(cfg.get("topicConversationsEnabled", False)),
+            "counters": {},
+            "coordinator": {"activeTopics": 0, "pending": 0},
+        },
     }
 
 
@@ -13353,11 +13374,20 @@ def _save_feishu_notification_config(body):
     app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
     receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
     receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
+    topic_conversations_enabled = (
+        bool((body or {}).get("topicConversationsEnabled"))
+        if "topicConversationsEnabled" in (body or {})
+        else bool((VO_CONFIG.get("notifications") or {}).get("topicConversationsEnabled", False))
+    )
     if webhook and not re.match(r"^https://open\.(feishu|larksuite)\.cn/open-apis/bot/v2/hook/[A-Za-z0-9_-]+$", webhook):
         return {"ok": False, "error": "Invalid Feishu webhook URL", "code": "invalid_webhook", "_status": 400}
     if receive_id_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
         return {"ok": False, "error": "Invalid Feishu receive ID type", "code": "invalid_receive_id_type", "_status": 400}
-    notifications = {"feishuEnabled": enabled, "feishuReceiveIdType": receive_id_type}
+    notifications = {
+        "feishuEnabled": enabled,
+        "feishuReceiveIdType": receive_id_type,
+        "topicConversationsEnabled": topic_conversations_enabled,
+    }
     if webhook or (body or {}).get("clearWebhook"):
         notifications["feishuWebhook"] = webhook
     if app_id or (body or {}).get("clearApp"):
@@ -14028,6 +14058,58 @@ def _get_feishu_chat_long_connection_receiver():
     return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
 
 
+def _get_feishu_notification_topic_service():
+    global _FEISHU_NOTIFICATION_TOPIC_SERVICE
+    with _FEISHU_NOTIFICATION_TOPIC_LOCK:
+        if _FEISHU_NOTIFICATION_TOPIC_SERVICE is not None:
+            return _FEISHU_NOTIFICATION_TOPIC_SERVICE
+
+        def notification_app_config():
+            return _feishu_app_send_config(VO_CONFIG.get("notifications", {}))
+
+        _FEISHU_NOTIFICATION_TOPIC_SERVICE = NotificationTopicService(
+            enabled=lambda: bool((VO_CONFIG.get("notifications") or {}).get("topicConversationsEnabled", False)),
+            app_identity=lambda: str((VO_CONFIG.get("notifications") or {}).get("feishuAppId") or "notification-app"),
+            store=FileTopicStore(STATUS_DIR),
+            root_lookup=lambda message_id: lookup_notification_root(STATUS_DIR, message_id, _load_comm_history),
+            history_loader=lambda root: load_notification_topic_origin_history(root, _load_comm_history),
+            agent_lookup=_find_agent_record,
+            dispatch=_dispatch_representative_agent_message,
+            reply=lambda message_id, content, **kwargs: reply_feishu_message(
+                message_id,
+                content,
+                app_config=notification_app_config(),
+                **kwargs,
+            ),
+            resource_loader=lambda message: load_notification_topic_resources(
+                message,
+                download=download_feishu_message_resource,
+                validate=PROVIDER_CONVERSATION_SERVICE.validate_attachments,
+                app_config=notification_app_config(),
+                status_dir=STATUS_DIR,
+            ),
+            record_event=lambda event: _record_feishu_channel_event({
+                "channel": "feishu",
+                "sourceApp": "feishu",
+                "sourceSurface": "feishu-notification-topic",
+                **dict(event),
+            }),
+        )
+        return _FEISHU_NOTIFICATION_TOPIC_SERVICE
+
+
+def _handle_feishu_notification_topic_message(body):
+    try:
+        return _get_feishu_notification_topic_service().handle_event(body if isinstance(body, dict) else {})
+    except Exception as exc:
+        print(f"[FeishuNotificationTopic] handler failed: {type(exc).__name__}: {exc}")
+        return {"ok": False, "status": "handler_error"}
+
+
+def _feishu_notification_topic_preflight(root_message_id):
+    return safe_preflight_audit(_get_feishu_notification_topic_service().preflight(root_message_id))
+
+
 def _stop_feishu_chat_long_connection(status="disabled"):
     global _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
     with _FEISHU_CHAT_LONG_CONNECTION_LOCK:
@@ -14058,13 +14140,35 @@ def _start_feishu_long_connection():
     with _FEISHU_LONG_CONNECTION_LOCK:
         existing = _FEISHU_LONG_CONNECTION_RECEIVER
         if existing and existing.app_id == app_id and existing.app_secret == app_secret:
-            return existing.start()
-        _FEISHU_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
-            app_id=app_id,
-            app_secret=app_secret,
-            action_handler=_handle_feishu_card_action,
-        )
-        return _FEISHU_LONG_CONNECTION_RECEIVER.start()
+            existing.message_handler = _handle_feishu_notification_topic_message
+            status = existing.start()
+            try:
+                status["topicRecoveryQueued"] = _get_feishu_notification_topic_service().recover_pending()
+            except Exception as exc:
+                status["topicRecoveryError"] = type(exc).__name__
+            return status
+        try:
+            _FEISHU_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
+                app_id=app_id,
+                app_secret=app_secret,
+                action_handler=_handle_feishu_card_action,
+                message_handler=_handle_feishu_notification_topic_message,
+            )
+        except TypeError:
+            # Preserve compatibility with injected legacy/test receiver factories.
+            _FEISHU_LONG_CONNECTION_RECEIVER = FeishuLongConnectionReceiver(
+                app_id=app_id,
+                app_secret=app_secret,
+                action_handler=_handle_feishu_card_action,
+            )
+            _FEISHU_LONG_CONNECTION_RECEIVER.message_handler = _handle_feishu_notification_topic_message
+        status = _FEISHU_LONG_CONNECTION_RECEIVER.start()
+        try:
+            recovered = _get_feishu_notification_topic_service().recover_pending()
+            status["topicRecoveryQueued"] = recovered
+        except Exception as exc:
+            status["topicRecoveryError"] = type(exc).__name__
+        return status
 
 
 def _start_feishu_chat_long_connection():
@@ -14641,27 +14745,36 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
     if not classify_slash_message(message, attachments).is_ordinary:
         return provider_block_response(message)
     sender = source_meta.get("sender") if isinstance(source_meta.get("sender"), dict) else {}
+    sender_ids = sender.get("sender_id") if isinstance(sender.get("sender_id"), dict) else {}
+    open_id = sender.get("openId") or sender.get("open_id") or sender_ids.get("open_id") or sender_ids.get("openId")
+    user_id = sender.get("userId") or sender.get("user_id") or sender_ids.get("user_id") or sender_ids.get("userId")
+    union_id = sender.get("unionId") or sender.get("union_id") or sender_ids.get("union_id") or sender_ids.get("unionId")
     sender_name = re.sub(
         r"[\x00-\x1f\x7f]+",
         " ",
-        str(source_meta.get("senderName") or sender.get("name") or sender.get("openId") or sender.get("userId") or "Feishu User"),
+        str(source_meta.get("senderName") or sender.get("name") or open_id or user_id or "Feishu User"),
     ).strip()[:512] or "Feishu User"
-    sender_id = str(sender.get("openId") or sender.get("userId") or sender.get("unionId") or "feishu-user").strip()[:256]
-    source_surface = "feishu-group" if source_meta.get("sourceSurface") == "feishu-group" else "feishu-dm"
-    source_label = "Feishu Group" if source_surface == "feishu-group" else "Feishu DM"
+    sender_id = str(open_id or user_id or union_id or "feishu-user").strip()[:256]
+    requested_surface = str(source_meta.get("sourceSurface") or "").strip()
+    source_surface = requested_surface if requested_surface in {"feishu-group", "feishu-notification-topic"} else "feishu-dm"
+    source_label = (
+        "Feishu Group" if source_surface == "feishu-group"
+        else ("Feishu Notification Topic" if source_surface == "feishu-notification-topic" else "Feishu DM")
+    )
     source_message_id = str(source_meta.get("sourceMessageId") or "").strip()[:256]
     source_actor = {
-        key: str(sender.get(key) or "").strip()[:256]
-        for key in ("openId", "userId", "unionId")
-        if str(sender.get(key) or "").strip()
+        key: str(value).strip()[:256]
+        for key, value in (("openId", open_id), ("userId", user_id), ("unionId", union_id))
+        if str(value or "").strip()
     }
     if sender_name:
         source_actor["name"] = sender_name
-    sender_type = str(sender.get("type") or "").strip().lower()[:64]
+    sender_type = str(sender.get("type") or sender.get("sender_type") or "").strip().lower()[:64]
     if sender_type:
         source_actor["type"] = sender_type
-    if isinstance(sender.get("isBot"), bool):
-        source_actor["isBot"] = sender["isBot"]
+    sender_is_bot = sender.get("isBot") if isinstance(sender.get("isBot"), bool) else sender.get("is_bot")
+    if isinstance(sender_is_bot, bool):
+        source_actor["isBot"] = sender_is_bot
     body = {
         "agentId": agent_id,
         "message": message,
@@ -14679,6 +14792,13 @@ def _dispatch_representative_agent_message(agent_id, message, conversation_id, s
         "representativeAgentId": agent_id,
         "sourceActor": source_actor,
     }
+    for key in (
+        "rootId", "threadId", "replyToMessageId", "topicConversationId",
+        "originConversationId", "inheritanceStatus",
+    ):
+        value = str(source_meta.get(key) or "").strip()
+        if value:
+            body[key] = value[:300]
     if attachments:
         body["attachments"] = attachments
     def route_followup_if_needed(result, *, elapsed_ms=0):

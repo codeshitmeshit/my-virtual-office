@@ -188,6 +188,7 @@ class FeishuLongConnectionReceiver:
         message = getattr(event, "message", None)
         sender = getattr(event, "sender", None)
         sender_id = getattr(sender, "sender_id", None)
+        sender_type = str(getattr(sender, "sender_type", "") or getattr(sender, "type", "") or "")[:40]
         chat_type = str(getattr(message, "chat_type", "") or "")
         message_type = str(getattr(message, "message_type", "") or getattr(message, "msg_type", "") or "")
         content = getattr(message, "content", None) or ""
@@ -202,14 +203,49 @@ class FeishuLongConnectionReceiver:
             text = str(parsed_content.get("text") or parsed_content.get("content") or "")
         else:
             text = str(parsed_content or "")
+        try:
+            message_create_time = int(getattr(message, "create_time", 0) or 0)
+        except (TypeError, ValueError):
+            message_create_time = 0
+
+        def object_dict(value: Any, *, limit: int = 100) -> list[dict[str, Any]]:
+            result = []
+            for item in value if isinstance(value, (list, tuple)) else []:
+                if isinstance(item, dict):
+                    source = item
+                else:
+                    source = {
+                        key: getattr(item, key, None)
+                        for key in (
+                            "key", "id", "name", "tenant_key", "open_id", "user_id",
+                            "file_key", "image_key", "file_name", "file_size", "mime_type", "type",
+                        )
+                        if getattr(item, key, None) not in (None, "")
+                    }
+                result.append({str(key)[:80]: value for key, value in source.items() if value not in (None, "")})
+                if len(result) >= limit:
+                    break
+            return result
+
+        mentions = object_dict(getattr(message, "mentions", None), limit=100)
+        resources = object_dict(getattr(message, "resources", None), limit=10)
+        if isinstance(parsed_content, dict):
+            for resource_type, key_name in (("image", "image_key"), ("file", "file_key")):
+                key = parsed_content.get(key_name)
+                if key and not any(item.get("file_key") == key or item.get("image_key") == key for item in resources):
+                    resources.append({"resource_type": resource_type, key_name: str(key)[:500]})
         return {
             "schema": "2.0",
             "header": {
                 "event_type": "im.message.receive_v1",
                 "event_id": str(getattr(header, "event_id", "") or ""),
+                "tenant_key": str(getattr(header, "tenant_key", "") or "")[:300],
+                "create_time": str(getattr(header, "create_time", "") or "")[:40],
             },
             "event": {
                 "sender": {
+                    "sender_type": sender_type,
+                    "is_bot": sender_type.lower() in {"bot", "app"},
                     "sender_id": {
                         "open_id": str(getattr(sender_id, "open_id", "") or ""),
                         "user_id": str(getattr(sender_id, "user_id", "") or ""),
@@ -223,6 +259,13 @@ class FeishuLongConnectionReceiver:
                     "message_type": message_type,
                     "content": parsed_content,
                     "text": text,
+                    "root_id": str(getattr(message, "root_id", "") or "")[:300],
+                    "thread_id": str(getattr(message, "thread_id", "") or "")[:300],
+                    "parent_id": str(getattr(message, "parent_id", "") or "")[:300],
+                    "reply_to_message_id": str(getattr(message, "reply_to_message_id", "") or getattr(message, "parent_id", "") or "")[:300],
+                    "create_time": message_create_time,
+                    "mentions": mentions,
+                    "resources": resources[:10],
                 },
             },
         }

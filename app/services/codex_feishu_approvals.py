@@ -566,12 +566,14 @@ class CodexFeishuApprovalCoordinator:
         store: CodexFeishuApprovalRouteStore,
         *,
         send_notification: Callable[..., Mapping[str, Any]],
+        reply_notification: Callable[..., Mapping[str, Any]] | None = None,
         update_notification: Callable[..., Mapping[str, Any]] | None = None,
         status_dir: str = "",
         attempt_id_factory: Callable[[], str] | None = None,
     ) -> None:
         self.store = store
         self._send_notification = send_notification
+        self._reply_notification = reply_notification
         self._update_notification = update_notification
         self.status_dir = str(status_dir or "")
         self._attempt_id_factory = attempt_id_factory or (lambda: uuid.uuid4().hex)
@@ -592,7 +594,7 @@ class CodexFeishuApprovalCoordinator:
     def freeze_origin(context: Mapping[str, Any]) -> dict[str, Any]:
         context = context if isinstance(context, Mapping) else {}
         surface = str(context.get("sourceSurface") or "").strip().lower()
-        if str(context.get("sourceApp") or "").strip().lower() != "feishu" or surface not in {"feishu-dm", "feishu-group"}:
+        if str(context.get("sourceApp") or "").strip().lower() != "feishu" or surface not in {"feishu-dm", "feishu-group", "feishu-notification-topic"}:
             raise ValueError("Codex approval is not from a trusted Feishu turn")
         actor = context.get("sourceActor") if isinstance(context.get("sourceActor"), Mapping) else {}
         actor_ids = {
@@ -604,7 +606,7 @@ class CodexFeishuApprovalCoordinator:
         source_message_id = str(context.get("sourceMessageId") or "").strip()[:300]
         if not actor_ids or not chat_id or not source_message_id:
             raise ValueError("trusted Feishu origin requires actor, chat, and source message identity")
-        return {
+        result = {
             "sourceApp": "feishu",
             "sourceSurface": surface,
             "sourceMessageId": source_message_id,
@@ -612,6 +614,13 @@ class CodexFeishuApprovalCoordinator:
             "actorIds": actor_ids,
             "actorName": str(actor.get("name") or context.get("fromDisplayName") or "Feishu User").strip()[:160],
         }
+        if surface == "feishu-notification-topic":
+            result.update({
+                "rootId": str(context.get("rootId") or "").strip()[:300],
+                "threadId": str(context.get("threadId") or "").strip()[:300],
+                "replyToMessageId": str(context.get("replyToMessageId") or source_message_id).strip()[:300],
+            })
+        return result
 
     @staticmethod
     def _summary(approval: Mapping[str, Any]) -> str:
@@ -763,17 +772,25 @@ class CodexFeishuApprovalCoordinator:
                 "operation": "send",
             },
         }
-        result = dict(self._send_notification(
-            intent,
-            webhook_url=None,
-            app_config={
-                "appId": app_config.get("appId") or "",
-                "appSecret": app_config.get("appSecret") or "",
-                "receiveIdType": receive_id_type,
-                "receiveId": receive_id,
-            },
-            status_dir=self.status_dir or None,
-        ))
+        if record.get("sourceSurface") == "feishu-notification-topic" and application == "notification" and callable(self._reply_notification):
+            result = dict(self._reply_notification(
+                str(record.get("sourceMessageId") or ""),
+                intent,
+                app_config={"appId": app_config.get("appId") or "", "appSecret": app_config.get("appSecret") or ""},
+                status_dir=self.status_dir or None,
+            ))
+        else:
+            result = dict(self._send_notification(
+                intent,
+                webhook_url=None,
+                app_config={
+                    "appId": app_config.get("appId") or "",
+                    "appSecret": app_config.get("appSecret") or "",
+                    "receiveIdType": receive_id_type,
+                    "receiveId": receive_id,
+                },
+                status_dir=self.status_dir or None,
+            ))
         sent = bool(result.get("ok")) and result.get("status") == "sent" and bool(result.get("messageId"))
         ambiguous = str(result.get("status") or "") in {"network_error", "timeout", "send_timeout"}
         delivery = {
@@ -832,8 +849,16 @@ class CodexFeishuApprovalCoordinator:
         notification_config = notification_config or {}
         chat_config = chat_config or {}
         attempts = []
+        is_notification_topic = record.get("sourceSurface") == "feishu-notification-topic"
         if self._configured(notification_config):
-            receive_type, receive_id = self._notification_target(record, notification_config, chat_config)
+            can_reply_to_topic = is_notification_topic and callable(self._reply_notification)
+            if is_notification_topic:
+                receive_type, receive_id = (
+                    ("topic_reply", str(record.get("sourceMessageId") or ""))
+                    if can_reply_to_topic else ("", "")
+                )
+            else:
+                receive_type, receive_id = self._notification_target(record, notification_config, chat_config)
             if receive_type and receive_id:
                 primary = self._attempt(
                     record,
@@ -847,6 +872,8 @@ class CodexFeishuApprovalCoordinator:
                     return {"ok": True, "status": "sent", "routeId": route_id, "application": "notification", "attempts": attempts}
             else:
                 attempts.append({"application": "notification", "sent": False, "ambiguous": False, "status": "unroutable_identity"})
+        if is_notification_topic:
+            return {"ok": False, "status": "undeliverable", "routeId": route_id, "attempts": attempts}
         if self._configured(chat_config) and record.get("feishuChatId"):
             fallback = self._attempt(
                 record,

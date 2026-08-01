@@ -96,6 +96,29 @@ def _string(value: Any, limit: int = 300) -> str:
     return _compact_text(value, limit)
 
 
+def _normalize_topic_context(raw: Any) -> dict[str, str]:
+    """Bounded metadata that can relate an outbound notification to a VO turn."""
+    value = raw if isinstance(raw, dict) else {}
+    limits = {
+        "classification": 80,
+        "conversationId": 240,
+        "agentId": 160,
+        "requestId": 240,
+        "responseId": 240,
+        "title": 500,
+        "summary": 2000,
+        "requestText": 8000,
+        "responseText": 8000,
+        "goal": 4000,
+    }
+    result = {}
+    for key, limit in limits.items():
+        text = _string(value.get(key), limit)
+        if text:
+            result[key] = text
+    return result
+
+
 def _preserve_text(value: Any, limit: int = 12000) -> str:
     if value is None:
         return ""
@@ -388,6 +411,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
         })
 
     audit = intent.get("audit") if isinstance(intent.get("audit"), dict) else {}
+    topic_context = _normalize_topic_context(intent.get("topicContext"))
     return {
         "id": _string(intent.get("id") or str(uuid.uuid4()), 120),
         "type": kind,
@@ -408,6 +432,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
             for key in ("routeId", "attemptId", "application", "operation")
             if audit.get(key)
         },
+        "topicContext": topic_context,
     }
 
 
@@ -521,6 +546,7 @@ def record_feishu_notification(intent: dict[str, Any], result: dict[str, Any], s
         "attemptId": _string((normalized.get("audit") or {}).get("attemptId") or "", 240),
         "application": _string((normalized.get("audit") or {}).get("application") or "", 80),
         "operation": _string((normalized.get("audit") or {}).get("operation") or "send", 80),
+        "topicContext": dict(normalized.get("topicContext") or {}),
     }
     path = _record_path(status_dir)
     os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -1082,6 +1108,156 @@ def send_feishu_text_message(
             "error": redact_sensitive(str(exc)),
             "appFingerprint": _secret_fingerprint(app_id),
         }
+
+
+def reply_feishu_message(
+    message_id: str,
+    content: Any,
+    *,
+    content_type: str = "markdown",
+    reply_in_thread: bool = True,
+    app_config: dict[str, Any] | None = None,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    """Reply with the notification App identity while preserving topic placement."""
+    app_cfg = app_config or {}
+    app_id = _string(app_cfg.get("appId"), 160)
+    target_message_id = _string(message_id, 300)
+    normalized_type = _string(content_type or "markdown", 40).lower()
+    if not app_id or not app_cfg.get("appSecret") or not target_message_id:
+        return {
+            "ok": False,
+            "status": "missing_app_config",
+            "channel": "app_reply",
+            "error": "appId, appSecret, and message_id are required",
+            "messageId": target_message_id,
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+    if normalized_type == "text":
+        msg_type = "text"
+        payload_content = {"text": _string(content, 4000)}
+    elif normalized_type == "interactive":
+        msg_type = "interactive"
+        payload_content = content.get("card") if isinstance(content, dict) and isinstance(content.get("card"), dict) else content
+        if not isinstance(payload_content, dict):
+            return {
+                "ok": False,
+                "status": "invalid_content",
+                "channel": "app_reply",
+                "error": "interactive reply content must be a card object",
+                "messageId": target_message_id,
+                "appFingerprint": _secret_fingerprint(app_id),
+            }
+    else:
+        msg_type = "interactive"
+        markdown = _preserve_text(content, 12000) or "处理完成，但没有可发送的文本回复。"
+        payload_content = {
+            "schema": "2.0",
+            "config": {"wide_screen_mode": True},
+            "body": {"elements": [{"tag": "markdown", "content": markdown}]},
+        }
+    opener = urlopen or urllib.request.urlopen
+    try:
+        token_result = _get_tenant_access_token(app_cfg, urlopen=opener, timeout=timeout)
+        if not token_result.get("ok"):
+            return token_result
+        parsed = _feishu_request(
+            "https://open.feishu.cn/open-apis/im/v1/messages/"
+            f"{urllib.parse.quote(target_message_id, safe='')}/reply",
+            {
+                "msg_type": msg_type,
+                "content": json.dumps(payload_content, ensure_ascii=False),
+                "reply_in_thread": bool(reply_in_thread),
+            },
+            headers={"Authorization": f"Bearer {token_result['token']}"},
+            urlopen=opener,
+            timeout=timeout,
+        )
+        success = parsed.get("code") == 0
+        data = parsed.get("data") if isinstance(parsed.get("data"), dict) else {}
+        return {
+            "ok": bool(success),
+            "status": "sent" if success else "feishu_error",
+            "channel": "app_reply",
+            "code": parsed.get("code", ""),
+            "message": redact_sensitive(parsed.get("msg") or parsed.get("message") or parsed.get("raw") or ""),
+            "messageId": _string(data.get("message_id") or data.get("messageId") or "", 300),
+            "replyToMessageId": target_message_id,
+            "replyInThread": bool(reply_in_thread),
+            "appFingerprint": token_result.get("appFingerprint") or _secret_fingerprint(app_id),
+        }
+    except urllib.error.HTTPError as exc:
+        try:
+            parsed = _parse_json_response(exc)
+            message = parsed.get("msg") or parsed.get("message") or parsed.get("raw") or str(exc)
+            code = parsed.get("code", exc.code)
+        except Exception:
+            message = str(exc)
+            code = getattr(exc, "code", "")
+        return {
+            "ok": False,
+            "status": "feishu_error",
+            "channel": "app_reply",
+            "code": code,
+            "message": redact_sensitive(message),
+            "replyToMessageId": target_message_id,
+            "replyInThread": bool(reply_in_thread),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        return {
+            "ok": False,
+            "status": "network_error",
+            "channel": "app_reply",
+            "error": redact_sensitive(str(exc)),
+            "replyToMessageId": target_message_id,
+            "replyInThread": bool(reply_in_thread),
+            "appFingerprint": _secret_fingerprint(app_id),
+        }
+
+
+def reply_feishu_notification(
+    message_id: str,
+    intent: dict[str, Any],
+    *,
+    app_config: dict[str, Any] | None = None,
+    status_dir: str | None = None,
+    dry_run: bool = False,
+    urlopen: Callable[..., Any] | None = None,
+    timeout: int = 10,
+) -> dict[str, Any]:
+    """Render a common notification card and reply inside the source topic."""
+    try:
+        payload = build_feishu_card(intent)
+        normalized = validate_notification_intent(intent)
+    except FeishuNotificationError as exc:
+        result = {"ok": False, "status": "invalid_intent", "error": str(exc), "messageId": _string(message_id, 300)}
+        result["record"] = _record_invalid_notification(intent or {}, result, status_dir)
+        return result
+    if dry_run:
+        result = {
+            "ok": True,
+            "status": "dry_run",
+            "channel": "app_reply",
+            "messageId": "",
+            "replyToMessageId": _string(message_id, 300),
+            "replyInThread": True,
+            "payload": payload,
+        }
+    else:
+        result = reply_feishu_message(
+            message_id,
+            payload,
+            content_type="interactive",
+            reply_in_thread=True,
+            app_config=app_config,
+            urlopen=urlopen,
+            timeout=timeout,
+        )
+    result["record"] = record_feishu_notification(normalized, result, status_dir)
+    return result
 
 
 def send_feishu_markdown_message(

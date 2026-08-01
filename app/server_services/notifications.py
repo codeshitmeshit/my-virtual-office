@@ -7,7 +7,7 @@ configuration while removing domain business bodies from server.py.
 
 import sys
 
-__all__ = ['_send_feishu_workflow_notification', '_vo_public_url', '_feishu_notification_marker', '_mark_feishu_notification', '_feishu_notification_config_response', '_save_feishu_notification_config', '_feishu_notification_test_intents', '_send_feishu_notification_test_cards', '_feishu_card_action_log_path', '_feishu_card_action_user', '_feishu_card_action_value', '_feishu_card_action_form_values', '_feishu_card_action_form_text', '_feishu_card_action_success', '_feishu_card_action_error', '_feishu_meeting_action_actor', '_handle_feishu_card_action']
+__all__ = ['_send_feishu_workflow_notification', '_vo_public_url', '_feishu_notification_marker', '_mark_feishu_notification', '_feishu_notification_config_response', '_save_feishu_notification_config', '_feishu_notification_topic_preflight', '_feishu_notification_test_intents', '_send_feishu_notification_test_cards', '_feishu_card_action_log_path', '_feishu_card_action_user', '_feishu_card_action_value', '_feishu_card_action_form_values', '_feishu_card_action_form_text', '_feishu_card_action_success', '_feishu_card_action_error', '_feishu_meeting_action_actor', '_handle_feishu_card_action']
 
 
 def _server_module():
@@ -100,6 +100,7 @@ def _mark_feishu_notification(container, key, result):
 def _feishu_notification_config_response():
     cfg = VO_CONFIG.get("notifications", {}) or {}
     receiver = _get_feishu_long_connection_receiver()
+    topic_service = globals().get("_FEISHU_NOTIFICATION_TOPIC_SERVICE")
     return {
         "ok": True,
         "feishuEnabled": cfg.get("feishuEnabled", True),
@@ -110,6 +111,12 @@ def _feishu_notification_config_response():
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
         "feishuCallbackMode": "long_connection",
         "feishuLongConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
+        "topicConversationsEnabled": bool(cfg.get("topicConversationsEnabled", False)),
+        "topicConversations": topic_service.status() if topic_service else {
+            "enabled": bool(cfg.get("topicConversationsEnabled", False)),
+            "counters": {},
+            "coordinator": {"activeTopics": 0, "pending": 0},
+        },
     }
 
 def _save_feishu_notification_config(body):
@@ -119,11 +126,20 @@ def _save_feishu_notification_config(body):
     app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
     receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
     receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
+    topic_conversations_enabled = (
+        bool((body or {}).get("topicConversationsEnabled"))
+        if "topicConversationsEnabled" in (body or {})
+        else bool((VO_CONFIG.get("notifications") or {}).get("topicConversationsEnabled", False))
+    )
     if webhook and not re.match(r"^https://open\.(feishu|larksuite)\.cn/open-apis/bot/v2/hook/[A-Za-z0-9_-]+$", webhook):
         return {"ok": False, "error": "Invalid Feishu webhook URL", "code": "invalid_webhook", "_status": 400}
     if receive_id_type not in {"open_id", "user_id", "union_id", "email", "chat_id"}:
         return {"ok": False, "error": "Invalid Feishu receive ID type", "code": "invalid_receive_id_type", "_status": 400}
-    notifications = {"feishuEnabled": enabled, "feishuReceiveIdType": receive_id_type}
+    notifications = {
+        "feishuEnabled": enabled,
+        "feishuReceiveIdType": receive_id_type,
+        "topicConversationsEnabled": topic_conversations_enabled,
+    }
     if webhook or (body or {}).get("clearWebhook"):
         notifications["feishuWebhook"] = webhook
     if app_id or (body or {}).get("clearApp"):

@@ -31,6 +31,12 @@ def chat_source_metadata(body):
         ("sourceMessageId", "sourceMessageId"),
         ("feishuChatId", "feishuChatId"),
         ("representativeAgentId", "representativeAgentId"),
+        ("rootId", "rootId"),
+        ("threadId", "threadId"),
+        ("replyToMessageId", "replyToMessageId"),
+        ("topicConversationId", "topicConversationId"),
+        ("originConversationId", "originConversationId"),
+        ("inheritanceStatus", "inheritanceStatus"),
     )
     metadata = {}
     for source_key, target_key in mapping:
