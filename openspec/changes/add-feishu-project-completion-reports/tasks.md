@@ -1,7 +1,7 @@
 ## 1. 项目偏好模型与锁定规则
 
 - [x] 1.1 [MP-1] 在 `app/services/project_materialization.py` 的 `CANONICAL_PROJECT_BASE_FIELDS` 与 `materialize_project_base` 中加入 `feishuCompletionReportEnabled: bool`，缺省为 `True`，并扩展 `tests/test_project_materialization.py` 覆盖缺省开启、显式关闭以及 canonical exact-field contract；验证：运行该测试文件；提交：`feat(projects): add completion report preference default`。
-- [ ] 1.2 [MP-1][MP-2] 在 `app/project_store.py` 的 `_write_project`/`_read_project_dir` 持久化该 scalar，历史项目缺失时读取为 `True`；在 `app/services/project_commands.py::update_project` 增加字段白名单和基于 `orchestration.completedAt` 的锁定校验，返回 `feishu_completion_report_preference_locked`；新增或扩展 command/store 测试覆盖首次完成前修改、完成后拒绝、相同值幂等和旧数据兼容；提交：`feat(projects): persist and lock report preference`。
+- [x] 1.2 [MP-1][MP-2] 在 `app/project_store.py` 的 `_write_project`/`_read_project_dir` 持久化该 scalar，历史项目缺失时读取为 `True`；在 `app/services/project_commands.py::update_project` 增加字段白名单和基于 `orchestration.completedAt` 的锁定校验，返回 `feishu_completion_report_preference_locked`；新增或扩展 command/store 测试覆盖首次完成前修改、完成后拒绝、相同值幂等和旧数据兼容；提交：`feat(projects): persist and lock report preference`。
 - [ ] 1.3 [MP-2] 在 `app/projects.js::showFormModal`、`submitNewProject`、`submitEditProject` 增加默认勾选的“项目完成后发送飞书汇报”控件与请求字段，完成后显示锁定态；扩展现有前端静态/浏览器测试，验证创建默认值、编辑 payload、完成后禁用及服务端错误展示；提交：`feat(projects-ui): expose completion report preference`。
 
 ## 2. 完成 occurrence 与版本化 outbox

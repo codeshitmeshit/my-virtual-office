@@ -110,6 +110,28 @@ def test_stage_pipeline_project_and_task_fields_round_trip(tmp_path):
     assert "orchestrationSkip_json:" in task_frontmatter
 
 
+def test_feishu_completion_report_preference_round_trips_and_legacy_projects_default_enabled(tmp_path):
+    project = _project()
+    project["feishuCompletionReportEnabled"] = False
+    store = MarkdownProjectStore(str(tmp_path))
+    store.save_all({"projects": [project], "templates": []})
+
+    loaded = MarkdownProjectStore(str(tmp_path)).load_all()["projects"][0]
+    assert loaded["feishuCompletionReportEnabled"] is False
+
+    project_file = _project_file(store)
+    text = open(project_file, encoding="utf-8").read()
+    text = "\n".join(
+        line for line in text.splitlines()
+        if not line.startswith("feishuCompletionReportEnabled:")
+    ) + "\n"
+    with open(project_file, "w", encoding="utf-8") as stream:
+        stream.write(text)
+
+    legacy = MarkdownProjectStore(str(tmp_path)).load_all()["projects"][0]
+    assert legacy["feishuCompletionReportEnabled"] is True
+
+
 def test_task_final_result_metadata_and_markdown_sidecar_round_trip(tmp_path):
     project = _project(tasks=[
         {

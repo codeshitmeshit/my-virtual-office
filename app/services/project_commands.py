@@ -339,6 +339,17 @@ def update_project(
         return CommandOutcome(ServiceResult(404, {"error": "Project not found"}))
     if current_project is None:
         return CommandOutcome(ServiceResult(404, {"error": "Project not found"}))
+    if (
+        "feishuCompletionReportEnabled" in mutable_body
+        and mutable_body.get("feishuCompletionReportEnabled")
+        != current_project.get("feishuCompletionReportEnabled", True)
+        and isinstance(current_project.get("orchestration"), Mapping)
+        and current_project["orchestration"].get("completedAt")
+    ):
+        return CommandOutcome(ServiceResult(409, {
+            "error": "Feishu completion report preference is locked after first successful completion",
+            "code": "feishu_completion_report_preference_locked",
+        }))
     validated_workspace = None
     workspace_basis = current_project.get("workspacePath")
     if mutable_body.get("projectExecutionEnabled") or (execution_enabled(current_project) and "workspacePath" in mutable_body):
@@ -352,7 +363,7 @@ def update_project(
         if validated_workspace is not None and "workspacePath" not in body and project.get("workspacePath") != workspace_basis:
             raise ProjectConflictError("Workspace changed during validation")
         old_status = project.get("status"); by = mutable_body.get("by", "user")
-        fields = ["title", "description", "status", "priority", "dueDate", "tags", "branch", "longTermProject", "highPriorityAiMeetingAutoApprove", "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus", "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode", "executionPolicy", "scheduledCronPaused", "archiveMaintenanceEnabled", "archiveMaintenance"]
+        fields = ["title", "description", "status", "priority", "dueDate", "tags", "branch", "longTermProject", "highPriorityAiMeetingAutoApprove", "feishuCompletionReportEnabled", "projectExecutionEnabled", "workspacePath", "workspaceKind", "workspaceStatus", "defaultExecutorAgentId", "defaultReviewerAgentId", "projectExecutionStartMode", "executionPolicy", "scheduledCronPaused", "archiveMaintenanceEnabled", "archiveMaintenance"]
         for field in fields:
             if field in mutable_body:
                 old = project.get(field); project[field] = mutable_body[field]

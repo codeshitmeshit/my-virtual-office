@@ -504,6 +504,49 @@ def test_project_update_cannot_forge_execution_flow_state():
     assert "projectExecutionFlowStopReason" not in stored
 
 
+def test_project_update_changes_feishu_report_preference_before_first_completion():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+
+    outcome = project_commands.update_project(
+        project["id"],
+        {"feishuCompletionReportEnabled": False},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        validate_workspace=lambda value: {"ok": True, "path": value},
+        log_activity=common["log_activity"],
+        now=common["now"],
+    )
+
+    assert outcome.result.status == 200
+    assert repo.get(project["id"])["feishuCompletionReportEnabled"] is False
+
+
+def test_project_update_rejects_feishu_report_preference_change_after_first_completion():
+    _, repo, common = dependencies()
+    project = create_project(repo, common).result.payload["project"]
+    repo.update(
+        project["id"],
+        lambda value: value["orchestration"].update({"completedAt": "2026-08-03T00:00:00+00:00"}),
+    )
+
+    outcome = project_commands.update_project(
+        project["id"],
+        {"feishuCompletionReportEnabled": False},
+        repository=repo,
+        system_agent_assignment_error=common["system_agent_assignment_error"],
+        execution_enabled=lambda _value: False,
+        validate_workspace=lambda value: {"ok": True, "path": value},
+        log_activity=common["log_activity"],
+        now=common["now"],
+    )
+
+    assert outcome.result.status == 409
+    assert outcome.result.payload["code"] == "feishu_completion_report_preference_locked"
+    assert repo.get(project["id"])["feishuCompletionReportEnabled"] is True
+
+
 def test_invalid_project_ids_keep_not_found_contract():
     _, repo, common = dependencies()
     for project_id in (" ", "../escape", "bad\x01id", "x" * 257):
