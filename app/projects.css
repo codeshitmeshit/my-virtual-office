@@ -1407,6 +1407,49 @@
     padding-bottom: 6px;
     border-bottom: 1px solid #2a2a4e;
 }
+.proj-completion-report-list {
+    display: grid;
+    gap: 10px;
+}
+.proj-completion-report-card {
+    padding: 12px;
+    border: 1px solid #2a2a4e;
+    border-left: 3px solid #888;
+    border-radius: 8px;
+    background: #12122a;
+}
+.proj-completion-report-card.status-delivered { border-left-color: #4caf50; }
+.proj-completion-report-card.status-failed { border-left-color: #f87171; }
+.proj-completion-report-card.status-pending { border-left-color: #ffc107; }
+.proj-completion-report-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    color: #e8e8f0;
+}
+.proj-completion-report-status {
+    padding: 2px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    background: #292942;
+}
+.proj-completion-report-status.status-delivered { color: #7ee787; }
+.proj-completion-report-status.status-failed { color: #ff8b8b; }
+.proj-completion-report-status.status-pending { color: #ffd866; }
+.proj-completion-report-meta {
+    margin-bottom: 4px;
+    color: #999;
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+.proj-completion-report-error {
+    margin: 8px 0;
+    color: #ff9b9b;
+    font-size: 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
 .proj-bar-chart {
     display: flex;
     flex-direction: column;

@@ -32,7 +32,7 @@
 
 - [x] 6.1 [MP-3][MP-5] 在新的聚焦 wiring/factory 模块中组装 worker ports，并在 `app/server.py` 仅增加薄依赖注入、完成 callback wakeup、启动和停止注册；移除或薄委托旧 `_send_project_execution_project_complete_notification` 的成功完成卡片路径，保留失败/取消通知；扩展 server wiring 测试验证 normal/skip/recovery 共用新入口且 chat bot transport 不参与；提交：`feat(reporting): wire completion report runtime`。
 - [x] 6.2 [MP-5] 新建聚焦的 completion-report query/resend service 与 handler，向 `GET /api/projects/{id}/report` 增加清理后的逐版本状态，并提供 `POST /api/projects/{projectId}/completion-reports/{occurrenceId}/resend`；只允许 failed occurrence、拒绝请求体覆盖 Agent/版本/内容/recipient，返回稳定 404/409 错误码；新增 API 测试覆盖列表清理、pending/delivered/failed、owner access boundary、并发处理中和同版本重发；提交：`feat(reporting): expose report status and resend API`。
-- [ ] 6.3 [MP-5] 扩展 `app/projects.js::renderReportView`，按版本倒序展示 pending/delivered/failed、完成/送达时间、可读错误和仅失败态可见的“重新发送”按钮；调用 resend API 后刷新状态并防重复点击；扩展前端测试覆盖三种状态、多个版本、错误转义、按钮条件和重发交互；提交：`feat(projects-ui): show Feishu report delivery status`。
+- [x] 6.3 [MP-5] 扩展 `app/projects.js::renderReportView`，按版本倒序展示 pending/delivered/failed、完成/送达时间、可读错误和仅失败态可见的“重新发送”按钮；调用 resend API 后刷新状态并防重复点击；扩展前端测试覆盖三种状态、多个版本、错误转义、按钮条件和重发交互；提交：`feat(projects-ui): show Feishu report delivery status`。
 
 ## 7. 集成验证与交付
 

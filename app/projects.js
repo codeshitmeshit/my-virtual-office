@@ -368,6 +368,15 @@
             const r = await fetch(`/api/projects/${projectId}/report`);
             return r.json();
         },
+        async resendCompletionReport(projectId, occurrenceId) {
+            const path = `/api/projects/${encodeURIComponent(projectId)}/completion-reports/${encodeURIComponent(occurrenceId)}/resend`;
+            const r = await projectMutationFetch(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            return parseProjectJson(r, '飞书汇报重新发送失败');
+        },
         async getAgents() {
             const r = await fetch('/agents-list');
             return r.json();
@@ -4355,6 +4364,67 @@
         }
     }
 
+    function completionReportStatusLabel(status) {
+        return {
+            pending: '处理中',
+            delivered: '已送达',
+            failed: '发送失败',
+        }[status] || '处理中';
+    }
+
+    function completionReportTime(value) {
+        if (!value) return '—';
+        const parsed = new Date(value);
+        return Number.isNaN(parsed.getTime()) ? escHtml(value) : escHtml(parsed.toLocaleString());
+    }
+
+    function renderCompletionReports(projectId, reports) {
+        const items = (Array.isArray(reports) ? reports : [])
+            .slice()
+            .sort((a, b) => Number(b.version || 0) - Number(a.version || 0));
+        if (!items.length) return '';
+        return `
+            <div class="proj-chart-section proj-completion-reports">
+                <div class="proj-chart-title">飞书完成汇报</div>
+                <div class="proj-completion-report-list">
+                    ${items.map(item => {
+                        const status = ['pending', 'delivered', 'failed'].includes(item.status) ? item.status : 'pending';
+                        const error = item.lastError || {};
+                        const canResend = status === 'failed' && item.canResend === true;
+                        return `
+                        <div class="proj-completion-report-card status-${status}">
+                            <div class="proj-completion-report-head">
+                                <strong>v${Number(item.version || 0)}</strong>
+                                <span class="proj-completion-report-status status-${status}">${completionReportStatusLabel(status)}</span>
+                            </div>
+                            <div class="proj-completion-report-meta">完成时间：${completionReportTime(item.completedAt)}</div>
+                            ${item.deliveredAt ? `<div class="proj-completion-report-meta">送达时间：${completionReportTime(item.deliveredAt)}</div>` : ''}
+                            ${item.reportMarkdownPath ? `<div class="proj-completion-report-meta">报告文件：${escHtml(item.reportMarkdownPath)}</div>` : ''}
+                            ${error.message ? `<div class="proj-completion-report-error">${escHtml(error.message)}${error.code ? ` (${escHtml(error.code)})` : ''}</div>` : ''}
+                            ${canResend ? `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.resendCompletionReport(${jsArg(projectId)}, ${jsArg(item.occurrenceId)}, { event })">重新发送</button>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>`;
+    }
+
+    async function resendCompletionReportAction(projectId, occurrenceId, opts = {}) {
+        const key = `completion-report-resend:${projectId}:${occurrenceId}`;
+        return runActionOnce(key, async () => {
+            const result = await api.resendCompletionReport(projectId, occurrenceId);
+            if (!result.ok) throw new Error(result.error || '飞书汇报重新发送失败');
+            toast('已加入重新发送队列', 'success');
+            await showReport(projectId);
+            return result;
+        }, {
+            ...opts,
+            busyText: '重新发送中...',
+        }).catch(error => {
+            toast(String(error && error.message || error), 'error');
+            return { ok: false, error: String(error && error.message || error) };
+        });
+    }
+
     function renderReportView(r) {
         const { stats, columns, agentWorkload, timeline, title } = r;
         const finalReport = r.finalReport || null;
@@ -4384,6 +4454,8 @@
                 <div class="proj-artifact-content">${renderMarkdownPreview(finalReportContent)}</div>
                 ${finalReport.truncated ? `<div class="proj-artifact-warn">文件较大，内容已截断。</div>` : ''}
             </div>` : ''}
+
+            ${renderCompletionReports(r.projectId, r.completionReports)}
 
             <div class="proj-stats-grid">
                 <div class="proj-stat-card">
@@ -5896,6 +5968,7 @@
         filterChange,
         showTemplatesView,
         showReport,
+        resendCompletionReport: resendCompletionReportAction,
         showArtifacts,
         openArtifact,
         switchArtifactMode,
