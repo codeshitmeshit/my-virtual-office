@@ -1175,6 +1175,7 @@ def _feishu_chat_config_response(include_ok=True):
         "groupChatEffective": group_enabled,
         "groupChatStatus": "enabled" if group_enabled else ("unsupported_transport" if group_requested else "disabled"),
         "representativeAgentId": cfg.get("representativeAgentId") or "",
+        "completionReportFallbackConfigured": bool(cfg.get("completionReportFallbackChatId")),
         "requireBoundVoUser": False,
         "allowedChatTypes": _feishu_allowed_chat_types(cfg),
         "replyMode": "same_chat",
@@ -13393,6 +13394,7 @@ def _save_feishu_chat_config(body):
     app_id = str(body.get("appId") or "").strip()
     app_secret = str(body.get("appSecret") or "").strip()
     representative_agent_id = str(body.get("representativeAgentId") or "").strip()
+    fallback_chat_id = str(body.get("completionReportFallbackChatId") or "").strip()[:300]
     transport = str(body.get("transportImplementation") or "").strip().lower()
     if transport and transport not in {"channel-sdk-node", "legacy-python"}:
         return {"ok": False, "error": "Invalid Feishu Chat transport implementation", "code": "invalid_transport", "_status": 400}
@@ -13427,6 +13429,8 @@ def _save_feishu_chat_config(body):
         chat_app["appSecret"] = app_secret
     if "representativeAgentId" in body or body.get("clearRepresentativeAgent"):
         chat_app["representativeAgentId"] = representative_agent_id
+    if "completionReportFallbackChatId" in body or body.get("clearCompletionReportFallback"):
+        chat_app["completionReportFallbackChatId"] = fallback_chat_id
     if "transportImplementation" in body:
         chat_app["transportImplementation"] = transport or "channel-sdk-node"
     payload = {"feishu": {"chatApp": chat_app}, "_preferStatusDir": True}

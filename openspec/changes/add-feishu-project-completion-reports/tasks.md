@@ -43,4 +43,4 @@
 
 - [x] 8.1 新建聚焦的 completion-report fallback 与 audit 模块：notification app 成功直接返回，确定失败时向固定主人 chat ID 发送同一份有界 Markdown，未知结果不降级；日志记录两通道状态并脱敏；测试先覆盖成功、缺配置、明确失败、未知结果和双失败；提交：`feat(reporting): fall back to Feishu chat app`。
 - [x] 8.2 在 runtime/server 薄接线中注入固定 chat ID、聊天发送 port 和 audit port；occurrence/API/UI 保存并展示 `notification_app` 或 `chat_app_fallback`；扩展状态机、worker、API、server wiring 与 Node UI 测试；提交：`feat(reporting): expose completion report delivery channel`。
-- [ ] 8.3 使用 fake ports 完成降级端到端测试，再把本地唯一 P2P 主人会话配置为固定目标，重启服务并创建模拟完成项目，验证聊天机器人真实送达、occurrence delivered、审计可回溯且无敏感正文；运行相关回归与 OpenSpec 校验；提交：`test(reporting): verify live chat fallback flow`。
+- [x] 8.3 使用 fake ports 完成降级端到端测试，再把本地唯一 P2P 主人会话配置为固定目标，重启服务并创建模拟完成项目，验证聊天机器人真实送达、occurrence delivered、审计可回溯且无敏感正文；运行相关回归与 OpenSpec 校验；提交：`test(reporting): verify live chat fallback flow`。

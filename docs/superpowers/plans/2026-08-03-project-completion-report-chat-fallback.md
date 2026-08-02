@@ -156,7 +156,7 @@ git commit -m "feat(reporting): expose completion report delivery channel"
 - Uses the configured single owner P2P chat as `completionReportFallbackChatId`.
 - Uses the running worker and real local project repository for the acceptance occurrence.
 
-- [ ] **Step 1: Add failing end-to-end fallback tests**
+- [x] **Step 1: Add failing end-to-end fallback tests**
 
 ```python
 def test_unconfigured_notification_app_delivers_once_through_chat_fallback():
@@ -164,25 +164,25 @@ def test_unconfigured_notification_app_delivers_once_through_chat_fallback():
     # Assert delivered, chat_app_fallback, one Agent generation, and redacted audit metadata.
 ```
 
-- [ ] **Step 2: Run the end-to-end test and verify RED, then complete minimal wiring**
+- [x] **Step 2: Run the end-to-end test and verify RED, then complete minimal wiring**
 
 Run: `.venv/bin/pytest -q tests/test_project_completion_report_e2e.py`
 
 Expected RED before final runtime plumbing, then PASS after it is connected.
 
-- [ ] **Step 3: Configure the sole local P2P owner chat and restart the service**
+- [x] **Step 3: Configure the sole local P2P owner chat and restart the service**
 
 Persist the discovered sole P2P chat ID as `feishu.chatApp.completionReportFallbackChatId` without printing it, restart with `scripts/restart-local-8090.sh`, and verify `/health` returns HTTP 200.
 
-- [ ] **Step 4: Create and complete the demo project**
+- [x] **Step 4: Create and complete the demo project**
 
 Create `飞书汇报降级验收项目` with one final Markdown artifact and a staged completion occurrence. Wake the live worker, poll the report API until terminal, and assert `status=delivered` plus `deliveryChannel=chat_app_fallback`.
 
-- [ ] **Step 5: Verify logs and regressions**
+- [x] **Step 5: Verify logs and regressions**
 
 Run the completion-report, stage-dispatch, Feishu notification, periodic timer, API, and UI tests. Inspect the newest audit record for primary failure, fallback success, IDs, channel, and absence of secret/report content. Run `openspec validate add-feishu-project-completion-reports`.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add tests/test_project_completion_report_e2e.py openspec/changes/add-feishu-project-completion-reports/tasks.md

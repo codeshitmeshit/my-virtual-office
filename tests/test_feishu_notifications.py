@@ -811,6 +811,7 @@ def test_feishu_chat_config_is_separate_from_notification_app():
             "enabled": True,
             "appId": "cli_chat",
             "appSecret": "chat-secret",
+            "completionReportFallbackChatId": "owner-chat",
         })
     finally:
         server.FeishuChatWorkerProcess = previous_worker_cls
@@ -828,6 +829,8 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     assert saved["notifications"]["feishuAppSecret"] == "notification-secret"
     assert saved["feishu"]["chatApp"]["appId"] == "cli_chat"
     assert saved["feishu"]["chatApp"]["appSecret"] == "chat-secret"
+    assert saved["feishu"]["chatApp"]["completionReportFallbackChatId"] == "owner-chat"
+    assert result["completionReportFallbackConfigured"] is True
 
 
 def test_feishu_group_chat_config_switch_overrides_and_legacy_guard():

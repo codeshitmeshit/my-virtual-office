@@ -64,7 +64,19 @@ def _project(workspace: Path, project_id="p1"):
     }
 
 
-def _runtime(projects, clock, agent_calls, notification_calls, notification_results):
+def _runtime(
+    projects,
+    clock,
+    agent_calls,
+    notification_calls,
+    notification_results,
+    *,
+    notification_config=None,
+    fallback_chat_id="owner-chat",
+    chat_calls=None,
+    chat_results=None,
+    audit_events=None,
+):
     store = _Store(projects)
     repository = ProjectRepository(load_projects=store.load, save_projects=store.save)
 
@@ -89,18 +101,37 @@ def _runtime(projects, clock, agent_calls, notification_calls, notification_resu
         notification_calls.append((intent, options))
         return notification_results.pop(0) if notification_results else {"ok": True, "messageId": "message"}
 
+    chat_calls = chat_calls if chat_calls is not None else []
+    chat_results = chat_results if chat_results is not None else []
+    audit_events = audit_events if audit_events is not None else []
+
+    def send_chat(chat_id, markdown):
+        chat_calls.append((chat_id, markdown))
+        return chat_results.pop(0) if chat_results else {
+            "ok": True,
+            "status": "sent",
+            "messageId": "chat-message",
+        }
+
+    resolved_notification_config = notification_config
+    if resolved_notification_config is None:
+        resolved_notification_config = {
+            "appId": "notification-app",
+            "appSecret": "notification-secret",
+            "receiveIdType": "open_id",
+            "receiveId": "owner-open-id",
+        }
+
     dependencies = CompletionReportRuntimeDependencies(
         reporting_agent_id=lambda: "feishu-main-agent",
         artifact_context=lambda project: {"ok": True, "root": project["workspacePath"]},
         read_artifact=read_artifact,
         generate_agent=generate_agent,
-        notification_app_config=lambda: {
-            "appId": "notification-app",
-            "appSecret": "notification-secret",
-            "receiveIdType": "open_id",
-            "receiveId": "owner-open-id",
-        },
+        notification_app_config=lambda: resolved_notification_config,
         send_notification=send_notification,
+        completion_report_fallback_chat_id=lambda: fallback_chat_id,
+        send_chat=send_chat,
+        audit_delivery=audit_events.append,
         project_url=lambda project_id: f"https://office/#projects?projectId={project_id}",
         now=clock.now,
         new_token=(lambda counter=iter(range(100)): f"token-{next(counter)}"),
@@ -145,6 +176,43 @@ def test_explicitly_disabled_project_creates_no_delivery_intent(tmp_path):
     assert project["orchestration"]["completionReports"] == []
 
 
+def test_unconfigured_notification_app_delivers_once_through_chat_fallback(tmp_path):
+    (tmp_path / "FINAL.md").write_text("Final result")
+    (tmp_path / "task-result.md").write_text("Task result")
+    project = _project(tmp_path)
+    stage_completion_report_occurrence(
+        project,
+        run_id="run-fallback",
+        completed_at="2026-08-03T00:00:00+00:00",
+    )
+    clock = _Clock()
+    agent_calls, notification_calls, chat_calls, audit_events = [], [], [], []
+    worker, _repository, store = _runtime(
+        [project],
+        clock,
+        agent_calls,
+        notification_calls,
+        [],
+        notification_config={},
+        chat_calls=chat_calls,
+        audit_events=audit_events,
+    )
+
+    result = worker.run_once()
+
+    occurrence = store.data["projects"][0]["orchestration"]["completionReports"][0]
+    assert result["delivered"] == 1
+    assert occurrence["state"] == "delivered"
+    assert occurrence["deliveryChannel"] == "chat_app_fallback"
+    assert len(agent_calls) == 1
+    assert notification_calls == []
+    assert len(chat_calls) == 1
+    assert chat_calls[0][0] == "owner-chat"
+    assert audit_events[-1]["primaryStatus"] == "project_owner_feishu_destination_missing"
+    assert audit_events[-1]["fallbackStatus"] == "sent"
+    assert audit_events[-1]["finalChannel"] == "chat_app_fallback"
+
+
 def test_retry_exhaustion_and_manual_resend_keep_project_completed_and_reuse_same_report(tmp_path):
     (tmp_path / "FINAL.md").write_text("Final result")
     (tmp_path / "task-result.md").write_text("Task result")
@@ -158,7 +226,18 @@ def test_retry_exhaustion_and_manual_resend_keep_project_completed_and_reuse_sam
         {"ok": False, "status": "feishu_error", "code": 500, "error": "temporary"},
         {"ok": True, "status": "sent", "messageId": "manual-success"},
     ]
-    worker, repository, store = _runtime([project], clock, agent_calls, notification_calls, failures)
+    worker, repository, store = _runtime(
+        [project],
+        clock,
+        agent_calls,
+        notification_calls,
+        failures,
+        chat_results=[
+            {"ok": False, "status": "feishu_error", "code": 500, "error": "temporary"},
+            {"ok": False, "status": "feishu_error", "code": 500, "error": "temporary"},
+            {"ok": False, "status": "feishu_error", "code": 500, "error": "temporary"},
+        ],
+    )
 
     assert worker.run_once()["failed"] == 1
     clock.advance(31)
