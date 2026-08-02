@@ -6,7 +6,7 @@
 
 ## 2. 完成 occurrence 与版本化 outbox
 
-- [ ] 2.1 [MP-3] 新建 `app/services/project_completion_reporting.py`，实现纯状态函数 `stage_completion_report_occurrence`：以 `stage-run:<run_id>` 为 `occurrenceId`，维护递增 `version`、`state`、`visibleStatus`、claim/attempt 元数据，并在关闭偏好时不创建 intent；新建 `tests/test_project_completion_reporting.py` 覆盖同 run 幂等、新 run 新版本、关闭跳过、完成锁定和输入异常；提交：`feat(reporting): model completion report occurrences`。
+- [x] 2.1 [MP-3] 新建 `app/services/project_completion_reporting.py`，实现纯状态函数 `stage_completion_report_occurrence`：以 `stage-run:<run_id>` 为 `occurrenceId`，维护递增 `version`、`state`、`visibleStatus`、claim/attempt 元数据，并在关闭偏好时不创建 intent；新建 `tests/test_project_completion_reporting.py` 覆盖同 run 幂等、新 run 新版本、关闭跳过、完成锁定和输入异常；提交：`feat(reporting): model completion report occurrences`。
 - [ ] 2.2 [MP-3] 在 `app/services/project_stage_dispatch.py::reconcile_stage` 的最终完成事务内调用 occurrence staging，并将事务后 callback 缩减为 worker wakeup；更新持久化 helper，使 pending occurrence 随项目状态可靠保存；扩展 `tests/test_project_stage_dispatch.py` 覆盖正常完成、skip、recovery、重复 reconcile、callback 异常和项目完成不回滚；提交：`feat(reporting): stage outbox with project completion`。
 - [ ] 2.3 [MP-3] 新建 `app/services/project_completion_report_storage.py`，安全、原子写入 `.vo/project-completion-reports/v<version>-<occurrence>/FEISHU_COMPLETION_REPORT.md`，保存相对路径与 SHA-256，不覆盖历史版本；新建聚焦测试覆盖路径穿越、缺失 workspace、重复写入、不同版本和 digest；提交：`feat(reporting): persist versioned report sidecars`。
 
