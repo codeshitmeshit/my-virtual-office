@@ -25,7 +25,7 @@
 ## 5. 通知机器人投递与恢复
 
 - [x] 5.1 [MP-5] 在 `app/feishu_notifications.py::send_feishu_notification` 增加默认兼容的 `allow_webhook=True` 参数；新建 `app/services/project_completion_report_delivery.py`，强制校验 notification app 的 appId/appSecret/receiveIdType/receiveId，调用时设置 `allow_webhook=False`，把结构化报告映射到现有卡片长度边界且不接受 recipient 覆盖；扩展飞书通知测试覆盖 app 定向发送、缺配置失败、禁止 webhook fallback、chat bot 未调用和其他通知兼容；提交：`feat(reporting): deliver through notification app only`。
-- [ ] 5.2 [MP-3][MP-5] 在 `project_completion_reporting.py` 完成原子 claim/finish/fail/manual-resend 状态转换：内部状态映射为 pending/delivered/failed，claim token 与 expiry 防并发，attempt history 每 occurrence 保留 20 条；实现每周期最多 3 次及 0/30/120 秒退避，并把 stale delivering/发送结果未知标记为 `delivery_outcome_unknown` 而非自动重试；扩展状态机测试覆盖竞争 claim、确定失败、未知结果、重试耗尽和同版本手动重发；提交：`feat(reporting): add bounded delivery state machine`。
+- [x] 5.2 [MP-3][MP-5] 在 `project_completion_reporting.py` 完成原子 claim/finish/fail/manual-resend 状态转换：内部状态映射为 pending/delivered/failed，claim token 与 expiry 防并发，attempt history 每 occurrence 保留 20 条；实现每周期最多 3 次及 0/30/120 秒退避，并把 stale delivering/发送结果未知标记为 `delivery_outcome_unknown` 而非自动重试；扩展状态机测试覆盖竞争 claim、确定失败、未知结果、重试耗尽和同版本手动重发；提交：`feat(reporting): add bounded delivery state machine`。
 - [ ] 5.3 [MP-5] 新建 `app/services/project_completion_report_worker.py`，使用 `services.periodic_timer.PeriodicTimer` 每 15 秒扫描、每批最多 claim 10 条，串联 artifact collector、generation、storage 与 delivery ports；测试立即扫描、due filter、批量上限、进程重启恢复、单条异常隔离和 stop 行为；提交：`feat(reporting): add persistent completion report worker`。
 
 ## 6. 服务装配、API 与项目页面
