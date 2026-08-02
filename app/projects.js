@@ -3300,6 +3300,13 @@
                 </div>
                 <div class="proj-form-group">
                     <label class="proj-form-label">
+                        <input type="checkbox" id="pf-feishu-completion-report" checked>
+                        项目完成后发送飞书汇报
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">首次成功完成前可修改，完成后将锁定该选择。</div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">
                         <input type="checkbox" id="pf-long-term-project">
                         ${_t('proj_long_term_project')}
                     </label>
@@ -3340,6 +3347,8 @@
             document.getElementById('pf-title').focus();
 
         } else if (type === 'edit-project') {
+            const completionReportEnabled = data.feishuCompletionReportEnabled !== false;
+            const completionReportLocked = !!(data.orchestration && data.orchestration.completedAt);
             overlay.innerHTML = `
             <div class="proj-form-modal" style="position:static;padding:0;background:transparent" onclick="event.stopPropagation()">
             <div class="proj-form-box">
@@ -3388,6 +3397,13 @@
                         ${_t('proj_long_term_project')}
                     </label>
                     <div style="font-size:10px;color:#888;margin-top:4px">${_t('proj_long_term_project_hint')}</div>
+                </div>
+                <div class="proj-form-group">
+                    <label class="proj-form-label">
+                        <input type="checkbox" id="pf-feishu-completion-report" ${completionReportEnabled ? 'checked' : ''} ${completionReportLocked ? 'disabled' : ''}>
+                        项目完成后发送飞书汇报
+                    </label>
+                    <div style="font-size:10px;color:#888;margin-top:4px">${completionReportLocked ? '项目已成功完成，该选择已锁定。' : '首次成功完成前可修改，完成后将锁定该选择。'}</div>
                 </div>
                 <div class="proj-form-group">
                     <label class="proj-form-label">
@@ -3799,6 +3815,7 @@
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
             longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
             highPriorityAiMeetingAutoApprove: !!((document.getElementById('pf-high-priority-ai-meeting-auto-approve') || {}).checked),
+            feishuCompletionReportEnabled: (document.getElementById('pf-feishu-completion-report') || { checked: true }).checked,
             projectExecutionEnabled,
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
@@ -3841,6 +3858,7 @@
             tags: ((document.getElementById('pf-tags') || {}).value || '').split(',').map(t => t.trim()).filter(Boolean),
             longTermProject: !!((document.getElementById('pf-long-term-project') || {}).checked),
             highPriorityAiMeetingAutoApprove: !!((document.getElementById('pf-high-priority-ai-meeting-auto-approve') || {}).checked),
+            feishuCompletionReportEnabled: (document.getElementById('pf-feishu-completion-report') || { checked: true }).checked,
             workspacePath: ((document.getElementById('pf-workspace') || {}).value || '').trim() || null,
             defaultExecutorAgentId: (document.getElementById('pf-executor') || {}).value || null,
             defaultReviewerAgentId: (document.getElementById('pf-reviewer') || {}).value || null,
