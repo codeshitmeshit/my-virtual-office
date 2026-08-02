@@ -1248,6 +1248,31 @@ def test_reconcile_stage_completes_orchestration_when_final_stage_is_accepted_te
     assert final_report["markdownPath"] == "PROJECT_FINAL_REPORT.md"
     assert final_report["taskCount"] == 2
     assert final_report["completedTaskCount"] == 2
+    assert saved["orchestration"]["completionReports"][0]["occurrenceId"] == "stage-run:run-1"
+    assert saved["orchestration"]["completionReports"][0]["visibleStatus"] == "pending"
+
+
+def test_reconcile_stage_does_not_stage_report_when_project_reporting_is_disabled():
+    project = _project(tasks=[
+        _task("a", 1, stageRunId="run-1", executionState="done", completedAt="done-at"),
+    ])
+    project["feishuCompletionReportEnabled"] = False
+    project["orchestration"].update({"state": "running", "currentStage": 1, "currentRunId": "run-1"})
+    store, repo = _repo(project)
+
+    outcome = reconcile_stage(
+        "project-1",
+        "run-1",
+        repository=repo,
+        now=lambda: "completed-at",
+        new_run_id=lambda: "unused",
+    )
+
+    assert outcome.result.payload["status"] == "project_completed"
+    saved = store.data["projects"][0]
+    assert saved["status"] == "completed"
+    assert saved["orchestration"]["completedAt"] == "completed-at"
+    assert saved["orchestration"]["completionReports"] == []
 
 
 def test_reconcile_stage_notifies_once_when_final_project_completes():

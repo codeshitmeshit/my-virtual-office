@@ -38,6 +38,7 @@ from .project_orchestration_observability import (
 )
 from .project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from .project_final_report import ensure_project_final_report
+from .project_completion_reporting import stage_completion_report_occurrence
 from .project_task_final_result import record_stage_handoff
 
 
@@ -1333,6 +1334,11 @@ def reconcile_stage(
             project["status"] = "completed"
             project["updatedAt"] = timestamp
             ensure_project_final_report(project, now=timestamp)
+            stage_completion_report_occurrence(
+                project,
+                run_id=run_id,
+                completed_at=timestamp,
+            )
             state = project["orchestration"]
             diagnostics = stage_advancement_diagnostics(
                 project_id=str(project.get("id") or project_id),
