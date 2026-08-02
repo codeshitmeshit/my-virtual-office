@@ -46,8 +46,9 @@ def test_completion_report_prompt_has_required_sections_and_strict_json_contract
 
     root = ET.fromstring(prompt)
     assert [child.tag for child in root] == [
-        "role", "task", "rules", "context", "final_artifacts", "output",
+        "bridge", "role", "task", "rules", "context", "final_artifacts", "output",
     ]
+    assert root.findtext("bridge/domain") == "project_completion_report"
     output = json.loads(root.findtext("output"))
     assert output == {
         "format": "json_only",

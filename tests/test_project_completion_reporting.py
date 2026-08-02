@@ -20,6 +20,7 @@ from services.project_completion_reporting import (
     claim_due_completion_report,
     fail_completion_report_attempt,
     finish_completion_report_delivery,
+    stage_completed_project_report,
     finish_completion_report_generation,
     request_manual_resend,
     stage_completion_report_occurrence,
@@ -67,6 +68,19 @@ def test_successful_completion_stages_one_pending_report_occurrence():
         "attempts": [],
     }
     assert project["orchestration"]["completionReports"] == [result["occurrence"]]
+
+
+def test_legacy_completed_project_stages_once_from_latest_task_completion():
+    project = _project()
+    project["tasks"] = [{"id": "task-1", "completedAt": COMPLETED_AT}]
+
+    first = stage_completed_project_report(project, now="2026-08-03T03:00:00+00:00")
+    duplicate = stage_completed_project_report(project, now="2026-08-03T03:01:00+00:00")
+
+    assert first["created"] is True
+    assert duplicate["created"] is False
+    assert first["occurrence"]["completedAt"] == COMPLETED_AT
+    assert len(project["orchestration"]["completionReports"]) == 1
 
 
 def test_repeated_completion_signal_for_same_run_is_idempotent():

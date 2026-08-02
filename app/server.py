@@ -70,6 +70,7 @@ from services import periodic_timer as periodic_timer_service
 from services import project_completion_report_runtime as project_completion_report_runtime_service
 from services import project_completion_report_api as project_completion_report_api_service
 from services import project_completion_report_audit as project_completion_report_audit_service
+from services import project_completion_reporting as project_completion_reporting_service
 from services import project_authoring_observability as project_authoring_observability_service
 from services import project_reset as project_reset_service
 from services import meeting_repository as meeting_repository_service
@@ -17913,11 +17914,28 @@ def _project_completion_report_worker():
 def _wake_project_completion_report_worker(project, reason=""):
     if not isinstance(project, dict) or not str(project.get("id") or "").strip():
         return {"ok": True, "status": "skipped_invalid_project"}
+    project_id = str(project.get("id") or "")
+    staged = {}
+
+    def stage(latest):
+        staged.update(
+            project_completion_reporting_service.stage_completed_project_report(
+                latest,
+                now=_proj_now(),
+            )
+        )
+
+    try:
+        _PROJECT_REPOSITORY.update(project_id, stage)
+    except ProjectNotFoundError:
+        return {"ok": True, "status": "skipped_missing_project", "projectId": project_id}
+    if str(staged.get("status") or "").startswith("skipped_"):
+        return {"ok": True, "projectId": project_id, **staged}
     _project_completion_report_worker().wake()
     return {
         "ok": True,
         "status": "queued",
-        "projectId": str(project.get("id") or ""),
+        "projectId": project_id,
         "reason": str(reason or ""),
     }
 

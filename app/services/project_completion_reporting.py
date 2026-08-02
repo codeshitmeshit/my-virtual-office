@@ -125,6 +125,34 @@ def stage_completion_report_occurrence(
     return {"created": True, "status": "pending", "occurrence": occurrence}
 
 
+def stage_completed_project_report(
+    project: dict[str, Any],
+    *,
+    now: str,
+) -> dict[str, Any]:
+    """Stage a legacy completion callback without duplicating stage-pipeline reports."""
+
+    tasks = [item for item in project.get("tasks") or [] if isinstance(item, Mapping)]
+    completed_times = [str(item.get("completedAt") or "").strip() for item in tasks]
+    completed_times = [value for value in completed_times if value]
+    if not completed_times:
+        return {"created": False, "status": "skipped_without_completed_tasks", "occurrence": None}
+
+    orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), Mapping) else {}
+    completed_at = str(orchestration.get("completedAt") or max(completed_times) or now)
+    reports = orchestration.get("completionReports") if isinstance(orchestration, Mapping) else []
+    for item in reports or []:
+        if isinstance(item, Mapping) and str(item.get("completedAt") or "") == completed_at:
+            return {"created": False, "status": "existing", "occurrence": item}
+
+    run_id = str(orchestration.get("currentRunId") or f"legacy-completion:{completed_at}")
+    return stage_completion_report_occurrence(
+        project,
+        run_id=run_id,
+        completed_at=completed_at,
+    )
+
+
 def claim_due_completion_report(
     project: dict[str, Any],
     *,

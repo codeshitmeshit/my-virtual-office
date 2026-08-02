@@ -28,7 +28,19 @@ class _Worker:
 
 def test_completion_callbacks_share_the_durable_worker_wakeup(monkeypatch):
     worker = _Worker()
+    project = {
+        "id": "p1",
+        "feishuCompletionReportEnabled": True,
+        "tasks": [{"id": "t1", "completedAt": "2026-08-03T00:00:00+00:00"}],
+    }
+
+    class Repository:
+        def update(self, project_id, mutator):
+            assert project_id == "p1"
+            return mutator(project)
+
     monkeypatch.setattr(server, "_PROJECT_COMPLETION_REPORT_WORKER", worker)
+    monkeypatch.setattr(server, "_PROJECT_REPOSITORY", Repository())
 
     direct = server._wake_project_completion_report_worker({"id": "p1"}, "normal")
     compatibility = server._send_project_execution_project_complete_notification(

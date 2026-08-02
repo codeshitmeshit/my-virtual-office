@@ -2456,8 +2456,16 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
     with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
         old = with_store(status_dir)
         old_send = server.send_feishu_notification
+        old_report_worker = server._PROJECT_COMPLETION_REPORT_WORKER
         feishu_calls = []
+        report_wakes = []
+
+        class ReportWorker:
+            def wake(self):
+                report_wakes.append("wake")
+
         server.send_feishu_notification = fake_feishu_sender(feishu_calls)
+        server._PROJECT_COMPLETION_REPORT_WORKER = ReportWorker()
         try:
             empty = server._handle_project_create({
                 "title": "Empty",
@@ -2483,14 +2491,17 @@ def test_project_level_start_skips_done_columns_and_reports_no_eligible_task():
             no_eligible = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert no_eligible["_status"] == 409
             assert no_eligible["code"] == "no_eligible_task"
-            complete_calls = [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]
-            assert len(complete_calls) == 1
-            assert complete_calls[0]["intent"]["type"] == "notification"
+            saved = server._handle_project_get(project["id"])["project"]
+            assert len(saved["orchestration"]["completionReports"]) == 1
+            assert report_wakes == ["wake"]
+            assert not [c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]
             repeated = server._handle_project_execution_project_start(project["id"], {"mode": "continuous"})
             assert repeated["code"] == "no_eligible_task"
-            assert len([c for c in feishu_calls if c["intent"]["target"] == "feishu-project-execution-complete"]) == 1
+            saved = server._handle_project_get(project["id"])["project"]
+            assert len(saved["orchestration"]["completionReports"]) == 1
         finally:
             server.send_feishu_notification = old_send
+            server._PROJECT_COMPLETION_REPORT_WORKER = old_report_worker
             restore_store(old)
 
 
