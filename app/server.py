@@ -69,6 +69,7 @@ from services import project_recurrence as project_recurrence_service
 from services import periodic_timer as periodic_timer_service
 from services import project_completion_report_runtime as project_completion_report_runtime_service
 from services import project_completion_report_api as project_completion_report_api_service
+from services import project_completion_report_audit as project_completion_report_audit_service
 from services import project_authoring_observability as project_authoring_observability_service
 from services import project_reset as project_reset_service
 from services import meeting_repository as meeting_repository_service
@@ -911,6 +912,10 @@ def _load_vo_config():
                 "appSecret": _env_or("VO_FEISHU_CHAT_APP_SECRET", feishu_chat_cfg.get("appSecret", "")),
                 "receiveMode": "long_connection",
                 "representativeAgentId": _env_or("VO_FEISHU_CHAT_AGENT_ID", feishu_chat_cfg.get("representativeAgentId", "")),
+                "completionReportFallbackChatId": _env_or(
+                    "VO_FEISHU_COMPLETION_REPORT_FALLBACK_CHAT_ID",
+                    feishu_chat_cfg.get("completionReportFallbackChatId", ""),
+                ),
                 "transportImplementation": feishu_chat_transport,
                 "groupChatEnabled": feishu_group_chat_requested,
                 "requireBoundVoUser": False,
@@ -17857,6 +17862,22 @@ def _project_completion_report_send_notification(intent, **options):
     return send_feishu_notification(intent, status_dir=STATUS_DIR, **options)
 
 
+def _project_completion_report_fallback_chat_id():
+    return str(_feishu_chat_app_config().get("completionReportFallbackChatId") or "").strip()
+
+
+def _project_completion_report_chat_delivery(chat_id, markdown):
+    return _feishu_chat_app_text_send(chat_id, markdown)
+
+
+def _project_completion_report_audit(event):
+    return project_completion_report_audit_service.append_completion_report_delivery_audit(
+        STATUS_DIR,
+        event,
+        now=_proj_now,
+    )
+
+
 def _project_completion_report_worker():
     global _PROJECT_COMPLETION_REPORT_WORKER
     with _PROJECT_COMPLETION_REPORT_WORKER_LOCK:
@@ -17868,6 +17889,9 @@ def _project_completion_report_worker():
                 generate_agent=_project_completion_report_generate_agent,
                 notification_app_config=lambda: _feishu_app_send_config(VO_CONFIG.get("notifications", {})),
                 send_notification=_project_completion_report_send_notification,
+                completion_report_fallback_chat_id=_project_completion_report_fallback_chat_id,
+                send_chat=_project_completion_report_chat_delivery,
+                audit_delivery=_project_completion_report_audit,
                 project_url=lambda project_id: _project_execution_open_url(project_id, ""),
                 now=_proj_now,
                 new_token=_proj_uuid,

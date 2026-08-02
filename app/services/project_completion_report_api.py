@@ -14,6 +14,7 @@ _SECRET_VALUE_RE = re.compile(
     r"(?i)(authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|webhook)\s*[:=]\s*([^\s,;]+)"
 )
 _PUBLIC_STATUSES = frozenset({"pending", "delivered", "failed"})
+_PUBLIC_DELIVERY_CHANNELS = frozenset({"notification_app", "chat_app_fallback"})
 
 
 def _safe_error(value: Any) -> dict[str, str] | None:
@@ -32,6 +33,9 @@ def _summary(occurrence: Mapping[str, Any]) -> dict[str, Any]:
     status = str(occurrence.get("visibleStatus") or "pending")
     if status not in _PUBLIC_STATUSES:
         status = "pending"
+    delivery_channel = str(occurrence.get("deliveryChannel") or "")
+    if delivery_channel not in _PUBLIC_DELIVERY_CHANNELS:
+        delivery_channel = ""
     return {
         "occurrenceId": str(occurrence.get("occurrenceId") or ""),
         "version": int(occurrence.get("version") or 0),
@@ -40,6 +44,7 @@ def _summary(occurrence: Mapping[str, Any]) -> dict[str, Any]:
         "completedAt": str(occurrence.get("completedAt") or ""),
         "generatedAt": str(occurrence.get("generatedAt") or ""),
         "deliveredAt": str(occurrence.get("deliveredAt") or ""),
+        "deliveryChannel": delivery_channel,
         "reportMarkdownPath": str(occurrence.get("reportMarkdownPath") or ""),
         "attemptCount": max(0, int(occurrence.get("attemptCount") or 0)),
         "nextAttemptAt": str(occurrence.get("nextAttemptAt") or ""),

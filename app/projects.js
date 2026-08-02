@@ -4378,6 +4378,13 @@
         return Number.isNaN(parsed.getTime()) ? escHtml(value) : escHtml(parsed.toLocaleString());
     }
 
+    function completionReportDeliveryChannelLabel(channel) {
+        return {
+            notification_app: '通知机器人送达',
+            chat_app_fallback: '聊天机器人降级送达',
+        }[channel] || '';
+    }
+
     function renderCompletionReports(projectId, reports) {
         const items = (Array.isArray(reports) ? reports : [])
             .slice()
@@ -4391,6 +4398,9 @@
                         const status = ['pending', 'delivered', 'failed'].includes(item.status) ? item.status : 'pending';
                         const error = item.lastError || {};
                         const canResend = status === 'failed' && item.canResend === true;
+                        const deliveryChannel = status === 'delivered'
+                            ? completionReportDeliveryChannelLabel(item.deliveryChannel)
+                            : '';
                         return `
                         <div class="proj-completion-report-card status-${status}">
                             <div class="proj-completion-report-head">
@@ -4399,6 +4409,7 @@
                             </div>
                             <div class="proj-completion-report-meta">完成时间：${completionReportTime(item.completedAt)}</div>
                             ${item.deliveredAt ? `<div class="proj-completion-report-meta">送达时间：${completionReportTime(item.deliveredAt)}</div>` : ''}
+                            ${deliveryChannel ? `<div class="proj-completion-report-meta">投递渠道：${deliveryChannel}</div>` : ''}
                             ${item.reportMarkdownPath ? `<div class="proj-completion-report-meta">报告文件：${escHtml(item.reportMarkdownPath)}</div>` : ''}
                             ${error.message ? `<div class="proj-completion-report-error">${escHtml(error.message)}${error.code ? ` (${escHtml(error.code)})` : ''}</div>` : ''}
                             ${canResend ? `<button class="proj-btn proj-btn-sm" onclick="ProjMgr.resendCompletionReport(${jsArg(projectId)}, ${jsArg(item.occurrenceId)}, { event })">重新发送</button>` : ''}

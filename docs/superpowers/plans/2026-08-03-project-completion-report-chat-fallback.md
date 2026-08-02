@@ -102,7 +102,7 @@ git commit -m "feat(reporting): fall back to Feishu chat app"
 - Produces: occurrence `deliveryChannel` and public summary `deliveryChannel`.
 - Injects chat delivery through `_feishu_chat_app_text_send(chat_id, markdown)` and audit through the focused audit writer.
 
-- [ ] **Step 1: Write failing persistence, wiring, and UI tests**
+- [x] **Step 1: Write failing persistence, wiring, and UI tests**
 
 ```python
 finish_completion_report_delivery(
@@ -114,13 +114,13 @@ assert occurrence["deliveryChannel"] == "chat_app_fallback"
 
 The server test must prove the fixed chat ID and channel sender are injected without invoking the inbound chat dispatcher. The Node test must assert the report card contains `聊天机器人降级送达`.
 
-- [ ] **Step 2: Run tests and verify RED**
+- [x] **Step 2: Run tests and verify RED**
 
 Run: `.venv/bin/pytest -q tests/test_project_completion_reporting.py tests/test_project_completion_report_server_wiring.py && node tests/check_project_completion_report_status_ui.mjs`
 
 Expected: failures for the missing delivery-channel parameter/configuration/UI label.
 
-- [ ] **Step 3: Add thin configuration and state plumbing**
+- [x] **Step 3: Add thin configuration and state plumbing**
 
 ```python
 occurrence.update({
@@ -133,13 +133,13 @@ occurrence.update({
 
 Expose only the bounded channel enum in the report API and render the corresponding Chinese label on delivered cards.
 
-- [ ] **Step 4: Run focused tests**
+- [x] **Step 4: Run focused tests**
 
 Run: `.venv/bin/pytest -q tests/test_project_completion_reporting.py tests/test_project_completion_report_worker.py tests/test_project_completion_report_server_wiring.py tests/test_project_completion_report_api.py && node tests/check_project_completion_report_status_ui.mjs`
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/server.py app/services/project_completion_reporting.py app/services/project_completion_report_worker.py app/services/project_completion_report_api.py app/projects.js tests/test_project_completion_report_server_wiring.py tests/test_project_completion_reporting.py tests/check_project_completion_report_status_ui.mjs

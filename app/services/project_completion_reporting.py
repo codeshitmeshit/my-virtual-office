@@ -242,6 +242,7 @@ def finish_completion_report_delivery(
     token: str,
     now: str,
     message_id: str,
+    delivery_channel: str = "notification_app",
 ) -> dict[str, Any]:
     occurrence = _occurrence(project, occurrence_id)
     _owned(occurrence, token)
@@ -250,6 +251,11 @@ def finish_completion_report_delivery(
         "visibleStatus": "delivered",
         "deliveredAt": now,
         "messageId": message_id,
+        "deliveryChannel": (
+            delivery_channel
+            if delivery_channel in {"notification_app", "chat_app_fallback"}
+            else "notification_app"
+        ),
         "lastError": None,
         "nextAttemptAt": None,
         "claim": None,

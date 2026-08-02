@@ -76,7 +76,12 @@ def _worker(projects, *, generate=None, deliver=None, timer_factory=None, batch_
 
     def default_deliver(project, occurrence, report):
         events.append(("deliver", project["id"], occurrence["occurrenceId"]))
-        return {"ok": True, "status": "sent", "messageId": f"message-{project['id']}"}
+        return {
+            "ok": True,
+            "status": "sent",
+            "messageId": f"message-{project['id']}",
+            "deliveryChannel": "chat_app_fallback",
+        }
 
     ports = CompletionReportWorkerPorts(
         repository=repository,
@@ -105,6 +110,7 @@ def test_worker_processes_pending_occurrence_to_delivered_state():
     assert occurrence["state"] == "delivered"
     assert occurrence["visibleStatus"] == "delivered"
     assert occurrence["messageId"] == "message-project-1"
+    assert occurrence["deliveryChannel"] == "chat_app_fallback"
     assert occurrence["reportMarkdownPath"] == "report.md"
     assert [event[0] for event in events] == ["collect", "generate", "store", "deliver"]
 

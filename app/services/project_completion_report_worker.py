@@ -238,6 +238,7 @@ class ProjectCompletionReportWorker:
                     token=token,
                     now=self._ports.now(),
                     message_id=str(delivery.get("messageId") or ""),
+                    delivery_channel=str(delivery.get("deliveryChannel") or "notification_app"),
                 ),
             )
             return True

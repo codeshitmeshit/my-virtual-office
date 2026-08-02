@@ -52,7 +52,14 @@ def _occurrence(occurrence_id, version, state, **values):
 def test_query_returns_newest_first_sanitized_visible_states():
     project = {
         "orchestration": {"completionReports": [
-            _occurrence("o1", 1, "delivered", deliveredAt="2026-08-01T01:00:00+00:00", reportMarkdownPath="v1.md"),
+            _occurrence(
+                "o1",
+                1,
+                "delivered",
+                deliveredAt="2026-08-01T01:00:00+00:00",
+                reportMarkdownPath="v1.md",
+                deliveryChannel="chat_app_fallback",
+            ),
             _occurrence("o2", 2, "retry", nextAttemptAt="2026-08-02T01:00:00+00:00"),
             _occurrence("o3", 3, "failed", lastError={
                 "code": "send_failed",
@@ -70,6 +77,7 @@ def test_query_returns_newest_first_sanitized_visible_states():
     assert "super-secret" not in result[0]["lastError"]["message"]
     assert result[1]["canResend"] is False
     assert result[2]["deliveredAt"] == "2026-08-01T01:00:00+00:00"
+    assert result[2]["deliveryChannel"] == "chat_app_fallback"
     forbidden = {"claim", "attempts", "generatedReport", "reportingAgentId", "reportDigest", "messageId"}
     assert forbidden.isdisjoint(result[0])
 

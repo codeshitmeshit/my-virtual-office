@@ -47,7 +47,7 @@ const ui = context.window.__completionReportStatusTest;
 const html = ui.renderReportView({
   ...report,
   completionReports: [
-    { occurrenceId: 'o1', version: 1, status: 'delivered', completedAt: '2026-08-01T00:00:00Z', deliveredAt: '2026-08-01T01:00:00Z', canResend: false },
+    { occurrenceId: 'o1', version: 1, status: 'delivered', completedAt: '2026-08-01T00:00:00Z', deliveredAt: '2026-08-01T01:00:00Z', deliveryChannel: 'chat_app_fallback', canResend: false },
     { occurrenceId: 'o3', version: 3, status: 'failed', completedAt: '2026-08-03T00:00:00Z', canResend: true, lastError: { code: 'send_failed', message: '<img src=x onerror=alert(1)>' } },
     { occurrenceId: 'o2', version: 2, status: 'pending', completedAt: '2026-08-02T00:00:00Z', canResend: false },
   ],
@@ -55,6 +55,7 @@ const html = ui.renderReportView({
 assert.ok(html.indexOf('v3') < html.indexOf('v2') && html.indexOf('v2') < html.indexOf('v1'), 'versions render newest first');
 assert.match(html, /处理中/);
 assert.match(html, /已送达/);
+assert.match(html, /聊天机器人降级送达/);
 assert.match(html, /发送失败/);
 assert.doesNotMatch(html, /<img src=x/);
 assert.match(html, /&lt;img src=x onerror=alert\(1\)&gt;/);

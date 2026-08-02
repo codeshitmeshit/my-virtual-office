@@ -68,6 +68,32 @@ def test_reporting_agent_adapter_uses_provider_directly_not_feishu_chat_transpor
     assert captured[0]["conversationId"] == "project-completion-report:p1:o1"
 
 
+def test_completion_report_chat_fallback_uses_fixed_owner_chat_and_outbound_sender(monkeypatch):
+    monkeypatch.setitem(
+        server.VO_CONFIG,
+        "feishu",
+        {"chatApp": {"completionReportFallbackChatId": "owner-chat"}},
+    )
+    calls = []
+    monkeypatch.setattr(
+        server,
+        "_feishu_chat_app_text_send",
+        lambda chat_id, markdown: calls.append((chat_id, markdown))
+        or {"ok": True, "status": "sent", "messageId": "chat-message"},
+    )
+    monkeypatch.setattr(
+        server,
+        "_dispatch_representative_agent_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("inbound dispatcher called")),
+    )
+
+    result = server._project_completion_report_chat_delivery("owner-chat", "## Report")
+
+    assert server._project_completion_report_fallback_chat_id() == "owner-chat"
+    assert result["messageId"] == "chat-message"
+    assert calls == [("owner-chat", "## Report")]
+
+
 def test_project_report_handler_exposes_only_sanitized_completion_report_versions(monkeypatch):
     monkeypatch.setattr(server, "_load_projects", lambda: {"projects": [{
         "id": "p1",

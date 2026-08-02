@@ -197,12 +197,14 @@ def test_generation_and_delivery_finish_only_for_claim_owner():
         token="claim-1",
         now="2026-08-03T02:00:04+00:00",
         message_id="message-1",
+        delivery_channel="chat_app_fallback",
     )
 
     occurrence = project["orchestration"]["completionReports"][0]
     assert occurrence["state"] == "delivered"
     assert occurrence["visibleStatus"] == "delivered"
     assert occurrence["messageId"] == "message-1"
+    assert occurrence["deliveryChannel"] == "chat_app_fallback"
     assert occurrence["claim"] is None
 
 
