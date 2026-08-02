@@ -36,5 +36,5 @@
 
 ## 7. 集成验证与交付
 
-- [ ] 7.1 [MP-1..MP-5] 运行新增聚焦测试以及受影响的 `test_project_materialization.py`、project command/store、`test_project_stage_dispatch.py`、`test_feishu_notifications.py`、periodic timer 和项目 API/UI 测试；修复仅由本变更引入的回归，记录命令、通过数与任何环境限制；提交：`test(reporting): verify completion report integration`（仅在确有测试修正或新夹具时提交）。
+- [x] 7.1 [MP-1..MP-5] 运行新增聚焦测试以及受影响的 `test_project_materialization.py`、project command/store、`test_project_stage_dispatch.py`、`test_feishu_notifications.py`、periodic timer 和项目 API/UI 测试；修复仅由本变更引入的回归，记录命令、通过数与任何环境限制；提交：`test(reporting): verify completion report integration`（仅在确有测试修正或新夹具时提交）。
 - [ ] 7.2 [MP-1..MP-5] 使用 fake Agent 和 fake notification app 完成端到端场景：默认开启成功送达、显式关闭不建 intent、失败项目仍走原 VO 通知、同 run 不重复、成功重跑生成 v2、敏感产物不进入 Agent、自动重试耗尽、手动重发成功、项目状态始终 completed；保存可复现测试证据并运行 `openspec validate add-feishu-project-completion-reports`；提交：`test(reporting): add end-to-end completion report coverage`。

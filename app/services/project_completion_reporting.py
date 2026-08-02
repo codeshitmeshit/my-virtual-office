@@ -164,8 +164,12 @@ def claim_due_completion_report(
         occurrence.update({"state": "failed", "visibleStatus": "failed", "nextAttemptAt": None, "claim": None})
         return {"claimed": False, "status": "attempts_exhausted", "occurrence": None}
     mode = str(occurrence.pop("nextAttemptMode", "automatic") or "automatic")
+    resume_delivery = bool(
+        occurrence.get("reportMarkdownPath")
+        and isinstance(occurrence.get("generatedReport"), Mapping)
+    )
     occurrence.update({
-        "state": "generating",
+        "state": "ready" if resume_delivery else "generating",
         "visibleStatus": "pending",
         "attemptCount": attempts + 1,
         "nextAttemptAt": None,
@@ -178,12 +182,17 @@ def claim_due_completion_report(
     _append_attempt(occurrence, {
         "attempt": attempts + 1,
         "mode": mode,
-        "phase": "generation",
+        "phase": "delivery" if resume_delivery else "generation",
         "status": "processing",
         "startedAt": now,
         "claimToken": token,
     })
-    return {"claimed": True, "status": "generating", "occurrence": occurrence}
+    return {
+        "claimed": True,
+        "status": "ready" if resume_delivery else "generating",
+        "resumeDelivery": resume_delivery,
+        "occurrence": occurrence,
+    }
 
 
 def finish_completion_report_generation(

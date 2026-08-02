@@ -117,7 +117,12 @@ class ProjectCompletionReportWorker:
                 if not claim.get("claimed"):
                     result["skipped"] += 1
                     continue
-                if self._process_claim(project_id, occurrence_id, token):
+                if self._process_claim(
+                    project_id,
+                    occurrence_id,
+                    token,
+                    resume_delivery=bool(claim.get("resumeDelivery")),
+                ):
                     result["delivered"] += 1
                 else:
                     result["failed"] += 1
@@ -151,7 +156,14 @@ class ProjectCompletionReportWorker:
                     candidates.append((project_id, occurrence_id))
         return candidates
 
-    def _process_claim(self, project_id: str, occurrence_id: str, token: str) -> bool:
+    def _process_claim(
+        self,
+        project_id: str,
+        occurrence_id: str,
+        token: str,
+        *,
+        resume_delivery: bool,
+    ) -> bool:
         delivery_started = False
         try:
             project = self._ports.repository.get(project_id)
@@ -160,29 +172,40 @@ class ProjectCompletionReportWorker:
             occurrence = _find_occurrence(project, occurrence_id)
             if occurrence is None:
                 raise CompletionReportStateError("completion_report_not_found", "Occurrence not found")
-            collected = self._ports.collect(project)
-            generated = self._ports.generate(project, occurrence, collected)
-            storage = self._ports.store(project, occurrence, str(generated.get("markdown") or ""))
-
-            def persist_generation(latest: dict[str, Any]) -> None:
-                finish_completion_report_generation(
-                    latest,
-                    occurrence_id=occurrence_id,
-                    token=token,
-                    now=self._ports.now(),
-                    reporting_agent_id=str(generated.get("reportingAgentId") or ""),
-                    markdown_path=str(storage.get("markdownPath") or ""),
-                    digest=str(storage.get("digest") or ""),
-                    report=generated.get("report") if isinstance(generated.get("report"), Mapping) else {},
+            if resume_delivery:
+                self._ports.repository.update(
+                    project_id,
+                    lambda latest: begin_completion_report_delivery(
+                        latest,
+                        occurrence_id=occurrence_id,
+                        token=token,
+                        now=self._ports.now(),
+                    ),
                 )
-                begin_completion_report_delivery(
-                    latest,
-                    occurrence_id=occurrence_id,
-                    token=token,
-                    now=self._ports.now(),
-                )
+            else:
+                collected = self._ports.collect(project)
+                generated = self._ports.generate(project, occurrence, collected)
+                storage = self._ports.store(project, occurrence, str(generated.get("markdown") or ""))
 
-            self._ports.repository.update(project_id, persist_generation)
+                def persist_generation(latest: dict[str, Any]) -> None:
+                    finish_completion_report_generation(
+                        latest,
+                        occurrence_id=occurrence_id,
+                        token=token,
+                        now=self._ports.now(),
+                        reporting_agent_id=str(generated.get("reportingAgentId") or ""),
+                        markdown_path=str(storage.get("markdownPath") or ""),
+                        digest=str(storage.get("digest") or ""),
+                        report=generated.get("report") if isinstance(generated.get("report"), Mapping) else {},
+                    )
+                    begin_completion_report_delivery(
+                        latest,
+                        occurrence_id=occurrence_id,
+                        token=token,
+                        now=self._ports.now(),
+                    )
+
+                self._ports.repository.update(project_id, persist_generation)
             delivery_started = True
             project = self._ports.repository.get(project_id)
             occurrence = _find_occurrence(project or {}, occurrence_id)

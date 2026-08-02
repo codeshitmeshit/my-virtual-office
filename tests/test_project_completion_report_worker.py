@@ -18,7 +18,7 @@ from services.project_completion_report_worker import (
     CompletionReportWorkerPorts,
     ProjectCompletionReportWorker,
 )
-from services.project_completion_reporting import stage_completion_report_occurrence
+from services.project_completion_reporting import request_manual_resend, stage_completion_report_occurrence
 from services.project_repository import ProjectRepository
 
 
@@ -167,6 +167,33 @@ def test_worker_recovers_expired_generation_claim_after_process_restart():
     recovered = store.data["projects"][0]["orchestration"]["completionReports"][0]
     assert recovered["state"] == "delivered"
     assert recovered["attemptCount"] == 1
+
+
+def test_manual_resend_reuses_the_same_versioned_report_without_regeneration():
+    project = _project()
+    occurrence = project["orchestration"]["completionReports"][0]
+    occurrence.update({
+        "state": "failed",
+        "visibleStatus": "failed",
+        "reportMarkdownPath": ".vo/project-completion-reports/v1-stage-run-run-1/FEISHU_COMPLETION_REPORT.md",
+        "reportDigest": "digest",
+        "generatedReport": {
+            "goal": "Goal", "conclusion": "Done", "keyResults": [],
+            "nonFatalExceptions": [], "followUps": [], "importantArtifacts": [],
+        },
+        "reportingAgentId": "agent",
+        "lastError": {"code": "send_failed", "message": "failed"},
+    })
+    request_manual_resend(project, occurrence_id=occurrence["occurrenceId"], now=NOW, owner_authorized=True)
+    worker, store, events = _worker([project])
+
+    result = worker.run_once()
+
+    saved = store.data["projects"][0]["orchestration"]["completionReports"][0]
+    assert result["delivered"] == 1
+    assert saved["version"] == 1
+    assert saved["state"] == "delivered"
+    assert [event[0] for event in events] == ["deliver"]
 
 
 def test_worker_start_uses_fifteen_second_periodic_timer_and_stop_delegates():
