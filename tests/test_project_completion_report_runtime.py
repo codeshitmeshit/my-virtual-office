@@ -29,10 +29,7 @@ def test_runtime_factory_connects_final_artifacts_agent_storage_and_notification
         ) or {"ok": True, "artifact": {"content": "done", "kind": "markdown"}},
         generate_agent=lambda **options: calls.append(("agent", options)) or {
             "ok": True,
-            "reply": (
-                '{"goal":"Ship","conclusion":"Done","keyResults":[],"nonFatalExceptions":[],'
-                '"followUps":[],"importantArtifacts":[]}'
-            ),
+            "reply": '{"title":"Demo conclusion","summary":"Done","conclusions":["Shipped"],"organizationalAdvice":["Reuse the delivery model"]}',
         },
         notification_app_config=lambda: {
             "appId": "app",
@@ -129,8 +126,8 @@ def test_runtime_falls_back_to_chat_when_notification_destination_is_missing():
         {"id": "p1", "title": "Demo"},
         {"occurrenceId": "o1", "version": 1},
         {
-            "goal": "Ship", "conclusion": "Done", "keyResults": [],
-            "nonFatalExceptions": [], "followUps": [], "importantArtifacts": [],
+            "title": "Demo conclusion", "summary": "Done", "conclusions": ["Shipped"],
+            "organizationalAdvice": ["Reuse the delivery model"],
         },
     )
 

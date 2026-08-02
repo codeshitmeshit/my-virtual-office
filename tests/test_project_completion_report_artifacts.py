@@ -73,24 +73,61 @@ def test_collector_reads_only_explicit_final_result_references_in_stable_order()
     result = collect_completion_report_artifacts(project, read_artifact=_reader(files, calls))
 
     assert [item["path"] for item in result["artifacts"]] == [
-        "PROJECT_FINAL_REPORT.md",
-        "task-1/TASK_FINAL_RESULT.md",
         "deliverables/result.json",
         "media/final.pdf",
-        "task-2/TASK_FINAL_RESULT.md",
     ]
     assert [item[0] for item in calls] == [
-        "PROJECT_FINAL_REPORT.md",
-        "task-1/TASK_FINAL_RESULT.md",
         "deliverables/result.json",
-        "task-2/TASK_FINAL_RESULT.md",
     ]
     assert all(allow_text and associated_only for _, allow_text, associated_only in calls)
     assert "internal/debug.log" not in repr(result)
     assert "internal/evidence.md" not in repr(result)
+    assert "PROJECT_FINAL_REPORT.md" not in repr(result)
+    assert "TASK_FINAL_RESULT.md" not in repr(result)
     pdf = next(item for item in result["artifacts"] if item["path"] == "media/final.pdf")
     assert pdf["inline"] is False
     assert pdf["content"] == ""
+
+
+def test_collector_prefers_business_outputs_and_relativizes_workspace_paths():
+    workspace = "/tmp/project-workspace"
+    project = {
+        "workspacePath": workspace,
+        "orchestration": {
+            "finalReport": {"markdownPath": "PROJECT_FINAL_REPORT.md"},
+        },
+        "tasks": [{
+            "id": "task-1",
+            "executionStage": 1,
+            "finalResult": {
+                "markdownPath": "internal/TASK_FINAL_RESULT.md",
+                "artifactRefs": [
+                    {"kind": "file", "path": f"{workspace}/FINAL.md"},
+                    {"kind": "file", "path": f"{workspace}/supporting-data.json"},
+                ],
+            },
+        }],
+    }
+    files = {
+        "FINAL.md": "# Market analysis\nThe business conclusion is demand growth.",
+        "supporting-data.json": '{"growth": true}',
+        "internal/TASK_FINAL_RESULT.md": "Task execution summary",
+        "PROJECT_FINAL_REPORT.md": "Project status and task counts",
+    }
+    calls = []
+
+    result = collect_completion_report_artifacts(
+        project,
+        read_artifact=_reader(files, calls),
+    )
+
+    assert [item["path"] for item in result["artifacts"]] == [
+        "FINAL.md",
+        "supporting-data.json",
+    ]
+    assert [item[0] for item in calls] == ["FINAL.md", "supporting-data.json"]
+    assert "business conclusion" in result["artifacts"][0]["content"]
+    assert "Project status and task counts" not in repr(result)
 
 
 def test_collector_reports_missing_artifact_without_substituting_process_data():

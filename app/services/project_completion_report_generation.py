@@ -5,18 +5,16 @@ from __future__ import annotations
 import json
 from typing import Any, Callable, Mapping, Sequence
 
+from .project_completion_report_content import render_content_markdown
 from .project_completion_report_prompt import render_completion_report_prompt
 
 
 REPORT_KEYS = frozenset({
-    "goal",
-    "conclusion",
-    "keyResults",
-    "nonFatalExceptions",
-    "followUps",
-    "importantArtifacts",
+    "title",
+    "summary",
+    "conclusions",
+    "organizationalAdvice",
 })
-ARTIFACT_KEYS = frozenset({"label", "path", "note"})
 
 
 class CompletionReportGenerationError(RuntimeError):
@@ -53,38 +51,19 @@ def _normalize_report(value: Any) -> dict[str, Any]:
             "Completion report output does not match the required schema",
             recoverable=True,
         )
-    raw_artifacts = value.get("importantArtifacts")
-    if not isinstance(raw_artifacts, list):
+    report = {
+        "title": _text(value.get("title"), 300),
+        "summary": _text(value.get("summary"), 5000),
+        "conclusions": _text_list(value.get("conclusions")),
+        "organizationalAdvice": _text_list(value.get("organizationalAdvice")),
+    }
+    if not all(report[field] for field in REPORT_KEYS):
         raise CompletionReportGenerationError(
             "reporting_agent_invalid_output",
-            "importantArtifacts must be an array",
+            "Completion report title, summary, conclusions, and organizational advice must be non-empty",
             recoverable=True,
         )
-    artifacts = []
-    for item in raw_artifacts[:10]:
-        if not isinstance(item, Mapping) or set(item) != ARTIFACT_KEYS:
-            raise CompletionReportGenerationError(
-                "reporting_agent_invalid_output",
-                "importantArtifacts entries do not match the required schema",
-                recoverable=True,
-            )
-        artifacts.append({
-            "label": _text(item.get("label"), 200),
-            "path": _text(item.get("path"), 500),
-            "note": _text(item.get("note"), 500),
-        })
-    return {
-        "goal": _text(value.get("goal"), 2000),
-        "conclusion": _text(value.get("conclusion"), 4000),
-        "keyResults": _text_list(value.get("keyResults")),
-        "nonFatalExceptions": _text_list(value.get("nonFatalExceptions")),
-        "followUps": _text_list(value.get("followUps")),
-        "importantArtifacts": artifacts,
-    }
-
-
-def _bullets(items: Sequence[str], empty: str) -> list[str]:
-    return [f"- {item}" for item in items] or [f"- {empty}"]
+    return report
 
 
 def render_completion_report_markdown(
@@ -92,41 +71,8 @@ def render_completion_report_markdown(
     occurrence: Mapping[str, Any],
     report: Mapping[str, Any],
 ) -> str:
-    lines = [
-        f"# Project Completion Report — {str(project.get('title') or project.get('id') or 'Project')}",
-        "",
-        "## Execution",
-        f"- Project ID: {str(project.get('id') or '')}",
-        f"- Version: v{occurrence.get('version') or 1}",
-        f"- Run: {str(occurrence.get('runId') or '')}",
-        f"- Completed at: {str(occurrence.get('completedAt') or '')}",
-        "",
-        "## Goal",
-        str(report.get("goal") or "No goal was provided."),
-        "",
-        "## Conclusion",
-        str(report.get("conclusion") or "No conclusion was provided."),
-        "",
-        "## Key Results",
-        *_bullets(report.get("keyResults") or [], "No key results were reported."),
-        "",
-        "## Non-fatal Exceptions",
-        *_bullets(report.get("nonFatalExceptions") or [], "No non-fatal exceptions were reported."),
-        "",
-        "## Follow-ups",
-        *_bullets(report.get("followUps") or [], "No follow-up was recommended."),
-        "",
-        "## Important Artifacts",
-    ]
-    artifacts = report.get("importantArtifacts") or []
-    if artifacts:
-        for item in artifacts:
-            lines.append(f"- **{item.get('label') or 'Artifact'}**: `{item.get('path') or ''}`")
-            if item.get("note"):
-                lines.append(f"  - {item.get('note')}")
-    else:
-        lines.append("- No important artifacts were reported.")
-    return "\n".join(lines).rstrip() + "\n"
+    del occurrence
+    return render_content_markdown(project, report)
 
 
 def generate_completion_report(
@@ -144,6 +90,16 @@ def generate_completion_report(
         raise CompletionReportGenerationError(
             "reporting_agent_missing",
             "No reporting Agent is configured",
+            recoverable=False,
+        )
+    if not any(
+        artifact.get("inline") is True and str(artifact.get("content") or "").strip()
+        for artifact in artifacts
+        if isinstance(artifact, Mapping)
+    ):
+        raise CompletionReportGenerationError(
+            "final_report_content_missing",
+            "No readable final artifact content is available for completion reporting",
             recoverable=False,
         )
     prompt = render_completion_report_prompt(

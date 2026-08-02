@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
+from .project_completion_report_content import (
+    report_conclusions,
+    report_organizational_advice,
+    report_summary,
+    report_title,
+)
+
 
 REQUIRED_DESTINATION_FIELDS = ("appId", "appSecret", "receiveIdType", "receiveId")
 
@@ -18,20 +25,6 @@ class CompletionReportDeliveryError(RuntimeError):
 def _joined(items: Any, empty: str, *, limit: int = 500) -> str:
     values = [str(item).strip() for item in (items or []) if str(item).strip()]
     return ("\n".join(f"• {item}" for item in values) or empty)[:limit]
-
-
-def _artifact_details(items: Any) -> list[tuple[str, str]]:
-    details = []
-    for item in (items or [])[:10]:
-        if not isinstance(item, Mapping):
-            continue
-        label = str(item.get("label") or "Artifact").strip()
-        path = str(item.get("path") or "").strip()
-        note = str(item.get("note") or "").strip()
-        value = " — ".join(part for part in (path, note) if part)[:500]
-        if value:
-            details.append(("重要产物", f"{label}: {value}"[:500]))
-    return details
 
 
 def deliver_completion_report(
@@ -53,23 +46,19 @@ def deliver_completion_report(
             "The project owner has no configured Feishu notification destination",
             recoverable=False,
         )
-    goal = str(report.get("goal") or "").strip()
-    conclusion = str(report.get("conclusion") or "").strip()
-    summary = "\n".join(part for part in (goal, conclusion) if part)[:1800] or "项目已完成。"
-    details: list[tuple[str, str]] = [
-        ("执行版本", f"v{occurrence.get('version') or 1}"),
-        ("关键结果", _joined(report.get("keyResults"), "无")),
-        ("非致命异常", _joined(report.get("nonFatalExceptions"), "无")),
-        ("后续建议", _joined(report.get("followUps"), "无")),
-    ]
-    details.extend(_artifact_details(report.get("importantArtifacts")))
+    summary = report_summary(report)[:1800] or "暂无结论摘要。"
+    conclusions = _joined(report_conclusions(report), "无", limit=245)
+    advice = report_organizational_advice(report)
+    if advice:
+        conclusions = f"{conclusions}\n\n---\n\n{_joined(advice, '无', limit=245)}"
+    details: list[tuple[str, str]] = [("核心结论", conclusions)]
     intent = {
         "id": (
             f"project-completion-report:{str(project.get('id') or '')}:"
             f"{str(occurrence.get('occurrenceId') or '')}"
         ),
         "type": "notification",
-        "title": f"项目执行完成：{str(project.get('title') or project.get('id') or 'Project')}",
+        "title": report_title(project, report),
         "summary": summary,
         "related": {
             "type": "project",

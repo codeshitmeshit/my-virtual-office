@@ -6,11 +6,12 @@ Project owners currently need to return to Virtual Office to discover a successf
 
 - Add a per-project Feishu reporting choice that defaults to enabled and remains editable until the project completes.
 - On each successful project completion or successful rerun, submit only the project's final artifacts for report generation and deliver the structured result to the project owner through the Feishu notification bot.
-- Structure the report around the project goal, outcome, key results, non-fatal exceptions, recommended follow-ups, and important final artifacts, with an execution/version marker for reruns.
+- Structure the owner-facing report around a content title, a standalone conclusion summary, core conclusions, and a horizontal divider followed by the reporting Agent's unlabeled organizational reflections.
 - Track project execution status separately from report delivery status so delivery failure never reverses successful completion.
 - Expose report-delivery failure, perform bounded automatic recovery, and allow the owner to request a manual resend.
-- Preserve the existing VO failure notification path for unsuccessful projects; do not send completion reports through the Feishu chat bot.
+- Preserve the existing VO failure notification path for unsuccessful projects; when the notification bot deterministically fails, fall back once to the configured owner conversation through the Feishu chat bot.
 - Exclude execution logs, intermediate files, and internal-only information from report input and delivery.
+- Exclude project lifecycle status, versions, exceptions, follow-up task lists, and artifact paths from the owner-facing report content.
 
 ## Capabilities
 

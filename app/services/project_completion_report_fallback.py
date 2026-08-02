@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
+from .project_completion_report_content import render_content_markdown
 from .project_completion_report_delivery import CompletionReportDeliveryError
 
 
@@ -19,31 +20,8 @@ def render_chat_fallback_markdown(
     occurrence: Mapping[str, Any],
     report: Mapping[str, Any],
 ) -> str:
-    lines = [
-        f"## 项目完成汇报：{_text(project.get('title') or project.get('id') or 'Project', 200)}",
-        "",
-        f"**执行版本：** v{occurrence.get('version') or 1}",
-        f"**目标：** {_text(report.get('goal'), 1200) or '未提供'}",
-        f"**结论：** {_text(report.get('conclusion'), 2000) or '项目已完成'}",
-        "",
-        "### 关键结果",
-    ]
-    results = [_text(item) for item in (report.get("keyResults") or [])[:10] if _text(item)]
-    lines.extend(f"- {item}" for item in results or ["无"])
-    exceptions = [_text(item) for item in (report.get("nonFatalExceptions") or [])[:10] if _text(item)]
-    lines.extend(["", "### 非致命异常", *(f"- {item}" for item in exceptions or ["无"])])
-    followups = [_text(item) for item in (report.get("followUps") or [])[:10] if _text(item)]
-    lines.extend(["", "### 后续建议", *(f"- {item}" for item in followups or ["无"])])
-    artifacts = []
-    for item in (report.get("importantArtifacts") or [])[:10]:
-        if not isinstance(item, Mapping):
-            continue
-        label = _text(item.get("label"), 200) or "产物"
-        path = _text(item.get("path"), 500)
-        note = _text(item.get("note"), 500)
-        artifacts.append(f"- **{label}**：{' — '.join(value for value in (path, note) if value)}")
-    lines.extend(["", "### 重要产物", *(artifacts or ["- 无"])])
-    return "\n".join(lines)[:12000]
+    del occurrence
+    return render_content_markdown(project, report, title_level=2).rstrip()[:12000]
 
 
 def _delivery_error_result(exc: CompletionReportDeliveryError) -> dict[str, Any]:

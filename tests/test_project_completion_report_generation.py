@@ -29,18 +29,59 @@ OCCURRENCE = {
     "completedAt": "2026-08-03T02:00:00+08:00",
 }
 REPORT = {
-    "goal": "Ship the release",
-    "conclusion": "Release completed successfully.",
-    "keyResults": ["Package published", "Smoke tests passed"],
-    "nonFatalExceptions": ["Metrics dashboard was delayed"],
-    "followUps": ["Review adoption next week"],
-    "importantArtifacts": [
-        {"label": "Release notes", "path": "release/notes.md", "note": "Owner-facing summary"},
+    "title": "Release conclusion",
+    "summary": "Release completed successfully.",
+    "conclusions": ["Package published", "Smoke tests passed"],
+    "organizationalAdvice": ["Reuse the release playbook across teams"],
+}
+ARTIFACTS = [{
+    "path": "release/notes.md",
+    "kind": "markdown",
+    "inline": True,
+    "content": "# Release result\nThe package is published.",
+}]
+CONCLUSION_REPORT = {
+    "title": "张雪机车分析结论",
+    "summary": "张雪机车正从话题品牌向性能品牌跃迁。",
+    "conclusions": [
+        "赛事成绩为品牌提供了性能背书。",
+        "长期价值取决于量产质量和售后能力。",
+    ],
+    "organizationalAdvice": [
+        "把赛事能力沉淀为可复用的产品验证与品牌资产。",
     ],
 }
 
 
-def test_generate_completion_report_validates_reply_and_renders_versioned_markdown():
+def test_generate_completion_report_outputs_only_final_content_conclusions():
+    result = generate_completion_report(
+        {"id": "project-1", "title": "张雪机车的分析"},
+        OCCURRENCE,
+        artifacts=ARTIFACTS,
+        omissions=[],
+        reporting_agent_id="agent",
+        generate=lambda **_request: {
+            "ok": True,
+            "status": "completed",
+            "reply": json.dumps(CONCLUSION_REPORT, ensure_ascii=False),
+        },
+    )
+
+    assert result["report"] == CONCLUSION_REPORT
+    assert result["markdown"] == (
+        "# 张雪机车分析结论\n\n"
+        "张雪机车正从话题品牌向性能品牌跃迁。\n\n"
+        "## 核心结论\n"
+        "- 赛事成绩为品牌提供了性能背书。\n"
+        "- 长期价值取决于量产质量和售后能力。\n\n"
+        "---\n\n"
+        "- 把赛事能力沉淀为可复用的产品验证与品牌资产。\n"
+    )
+    for lifecycle_label in ("Execution", "Goal", "Exceptions", "Follow-ups", "Artifacts"):
+        assert lifecycle_label not in result["markdown"]
+
+
+def test_generate_completion_report_validates_reply_and_renders_content_markdown():
     calls = []
 
     def provider(**request):
@@ -62,11 +103,15 @@ def test_generate_completion_report_validates_reply_and_renders_versioned_markdo
     assert calls[0]["conversation_id"] == "project-completion-report:project-1:stage-run:run-2"
     assert calls[0]["timeout_seconds"] == 600
     assert calls[0]["prompt"].startswith("<project_completion_report_prompt>")
-    assert "# Project Completion Report — Launch" in result["markdown"]
-    assert "- Version: v2" in result["markdown"]
-    assert "- Run: run-2" in result["markdown"]
-    assert "## Non-fatal Exceptions" in result["markdown"]
-    assert "release/notes.md" in result["markdown"]
+    assert result["markdown"] == (
+        "# Release conclusion\n\n"
+        "Release completed successfully.\n\n"
+        "## 核心结论\n"
+        "- Package published\n"
+        "- Smoke tests passed\n\n"
+        "---\n\n"
+        "- Reuse the release playbook across teams\n"
+    )
 
 
 def test_generate_completion_report_rejects_missing_agent_without_calling_provider():
@@ -74,7 +119,7 @@ def test_generate_completion_report_rejects_missing_agent_without_calling_provid
         generate_completion_report(
             PROJECT,
             OCCURRENCE,
-            artifacts=[],
+            artifacts=ARTIFACTS,
             omissions=[],
             reporting_agent_id="",
             generate=lambda **_request: (_ for _ in ()).throw(AssertionError("provider called")),
@@ -84,13 +129,33 @@ def test_generate_completion_report_rejects_missing_agent_without_calling_provid
     assert raised.value.recoverable is False
 
 
+def test_generate_completion_report_rejects_missing_final_artifact_content():
+    with pytest.raises(CompletionReportGenerationError) as raised:
+        generate_completion_report(
+            PROJECT,
+            OCCURRENCE,
+            artifacts=[{
+                "path": "release/final.pdf",
+                "kind": "reference",
+                "inline": False,
+                "content": "",
+            }],
+            omissions=[],
+            reporting_agent_id="agent",
+            generate=lambda **_request: {"ok": True, "reply": json.dumps(REPORT)},
+        )
+
+    assert raised.value.code == "final_report_content_missing"
+    assert raised.value.recoverable is False
+
+
 @pytest.mark.parametrize("status", ["busy", "timeout"])
 def test_generate_completion_report_classifies_transient_provider_failures(status):
     with pytest.raises(CompletionReportGenerationError) as raised:
         generate_completion_report(
             PROJECT,
             OCCURRENCE,
-            artifacts=[],
+            artifacts=ARTIFACTS,
             omissions=[],
             reporting_agent_id="agent",
             generate=lambda **_request: {"ok": False, "status": status, "error": status},
@@ -106,7 +171,7 @@ def test_generate_completion_report_rejects_empty_invalid_or_extra_agent_output(
         generate_completion_report(
             PROJECT,
             OCCURRENCE,
-            artifacts=[],
+            artifacts=ARTIFACTS,
             omissions=[],
             reporting_agent_id="agent",
             generate=lambda **_request: {"ok": True, "status": "completed", "reply": reply},
@@ -118,29 +183,24 @@ def test_generate_completion_report_rejects_empty_invalid_or_extra_agent_output(
 
 def test_generate_completion_report_bounds_agent_fields_and_list_sizes():
     oversized = {
-        "goal": "g" * 5000,
-        "conclusion": "c" * 5000,
-        "keyResults": [str(index) * 1000 for index in range(20)],
-        "nonFatalExceptions": [],
-        "followUps": [],
-        "importantArtifacts": [
-            {"label": "l" * 1000, "path": "p" * 1000, "note": "n" * 2000}
-            for _ in range(20)
-        ],
+        "title": "t" * 1000,
+        "summary": "s" * 10000,
+        "conclusions": [str(index) * 1000 for index in range(20)],
+        "organizationalAdvice": [str(index) * 1000 for index in range(20)],
     }
 
     result = generate_completion_report(
         PROJECT,
         OCCURRENCE,
-        artifacts=[],
+        artifacts=ARTIFACTS,
         omissions=[],
         reporting_agent_id="agent",
         generate=lambda **_request: {"ok": True, "status": "completed", "reply": json.dumps(oversized)},
     )["report"]
 
-    assert len(result["goal"]) == 2000
-    assert len(result["conclusion"]) == 4000
-    assert len(result["keyResults"]) == 10
-    assert all(len(item) <= 500 for item in result["keyResults"])
-    assert len(result["importantArtifacts"]) == 10
-    assert len(result["importantArtifacts"][0]["path"]) == 500
+    assert len(result["title"]) == 300
+    assert len(result["summary"]) == 5000
+    assert len(result["conclusions"]) == 10
+    assert all(len(item) <= 500 for item in result["conclusions"])
+    assert len(result["organizationalAdvice"]) == 10
+    assert all(len(item) <= 500 for item in result["organizationalAdvice"])

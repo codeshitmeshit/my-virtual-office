@@ -39,6 +39,37 @@ REPORT = {
 }
 
 
+def test_delivery_card_contains_only_final_report_conclusions():
+    calls = []
+    report = {
+        "title": "张雪机车分析结论",
+        "summary": "张雪机车正从话题品牌向性能品牌跃迁。",
+        "conclusions": ["赛事成绩提供性能背书。", "长期价值取决于质量与售后。"],
+        "organizationalAdvice": ["将赛事验证体系沉淀为组织级能力。"],
+    }
+
+    deliver_completion_report(
+        {"id": "project-1", "title": "张雪机车的分析"},
+        {"occurrenceId": "stage-run:run-2", "version": 2},
+        report,
+        app_config=APP_CONFIG,
+        send_notification=lambda intent, **_kwargs: calls.append(intent) or {"ok": True},
+        project_url="http://localhost:8090/#projects?projectId=project-1",
+    )
+
+    intent = calls[0]
+    assert intent["title"] == "张雪机车分析结论"
+    assert intent["summary"] == report["summary"]
+    assert intent["details"] == [(
+        "核心结论",
+        "• 赛事成绩提供性能背书。\n• 长期价值取决于质量与售后。\n\n---\n\n• 将赛事验证体系沉淀为组织级能力。",
+    )]
+    assert "组织型 AI 建议" not in repr(intent)
+    assert "后续建议" not in repr(intent)
+    assert "非致命异常" not in repr(intent)
+    assert "重要产物" not in repr(intent)
+
+
 def test_delivery_builds_bounded_card_and_forces_notification_app_transport():
     calls = []
 
@@ -66,8 +97,13 @@ def test_delivery_builds_bounded_card_and_forces_notification_app_transport():
         "text": "打开项目报告",
         "url": "http://localhost:8090/#projects?projectId=project-1",
     }]
-    assert any(label == "执行版本" and value == "v2" for label, value in intent["details"])
-    assert any(label == "重要产物" and "release/notes.md" in value for label, value in intent["details"])
+    assert intent["title"] == "Launch"
+    assert not any(label == "执行版本" for label, _value in intent["details"])
+    assert intent["summary"] == "Release completed successfully."
+    assert intent["details"] == [("核心结论", "• Package published\n• Smoke tests passed")]
+    assert "Dashboard delayed" not in repr(intent)
+    assert "Review adoption" not in repr(intent)
+    assert "release/notes.md" not in repr(intent)
 
 
 @pytest.mark.parametrize("missing", ["appId", "appSecret", "receiveIdType", "receiveId"])

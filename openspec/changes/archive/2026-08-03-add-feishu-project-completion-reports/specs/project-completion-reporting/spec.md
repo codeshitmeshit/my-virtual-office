@@ -44,17 +44,18 @@ The system SHALL create one completion-report delivery intent for each distinct 
 - **THEN** the system SHALL retain one completion-report delivery intent for that occurrence
 - **AND** automatic processing SHALL NOT deliver duplicate reports for that occurrence
 
-### Requirement: Successful reruns produce distinguishable reports
-Each successful rerun of an enabled project SHALL be eligible for a new completion report, and every report MUST identify the completion occurrence with a user-readable execution or version marker.
+### Requirement: Successful reruns produce distinguishable delivery records
+Each successful rerun of an enabled project SHALL be eligible for a new completion report. The system SHALL distinguish occurrences in internal delivery records and the project report-status experience without inserting lifecycle metadata into the report's business-content body.
 
 #### Scenario: An enabled completed project succeeds again
 - **WHEN** the project reaches a new successful completion occurrence after a rerun
 - **THEN** the system SHALL create a new completion-report delivery intent
-- **AND** the new report SHALL carry an execution or version marker distinct from earlier reports
+- **AND** the new delivery record SHALL carry an occurrence or version marker distinct from earlier records
 
 #### Scenario: The owner compares reports from two successful runs
 - **WHEN** the owner views completion reports from two successful occurrences of the same project
-- **THEN** each report SHALL expose enough project and version context to identify which result is newer
+- **THEN** the project report-status experience SHALL expose enough occurrence and version context to identify which delivery is newer
+- **AND** the report body SHALL remain limited to the final business content
 
 ### Requirement: Report generation is limited to final project artifacts
 Completion-report generation MUST use only final project artifacts that are eligible for the project owner to receive. Execution logs, intermediate files, internal instructions, hidden reasoning, credentials, and other internal-only information MUST NOT be included in the report-generation input or delivered report.
@@ -66,20 +67,21 @@ Completion-report generation MUST use only final project artifacts that are elig
 
 #### Scenario: A final artifact is unavailable or ineligible
 - **WHEN** an expected final artifact is missing, unreadable, too large for supported reporting, or not eligible for owner delivery
-- **THEN** the report SHALL identify that the artifact could not be presented
-- **AND** the system SHALL NOT substitute excluded process or internal content
+- **THEN** report generation SHALL fail visibly for that occurrence
+- **AND** the system SHALL NOT substitute excluded process, lifecycle, or internal content
 
 ### Requirement: Reports are human-readable and use a bounded Feishu fallback
-The reporting agent SHALL transform eligible final artifacts into a human-readable report containing the project goal, execution conclusion, key results, non-fatal exceptions, recommended follow-ups, important final artifacts, and execution or version marker. The system SHALL first deliver that report to the project creator through the Feishu notification bot. If that primary channel returns a deterministic failure, the system SHALL fall back once to the configured owner conversation through the Feishu chat bot. It MUST NOT fall back when the primary result is unknown.
+The reporting agent SHALL transform eligible final artifacts into a human-readable business-content report containing a title, standalone conclusion summary, and core conclusions. The report SHALL then render a horizontal divider followed directly by the Agent's organizational reflections without a section title. It MUST NOT include project lifecycle status, execution versions, task counts, errors, exceptions, follow-up task lists, or artifact paths. The system SHALL first deliver that report through the Feishu notification bot. If that primary channel returns a deterministic failure, the system SHALL fall back once to the configured owner conversation through the Feishu chat bot. It MUST NOT fall back when the primary result is unknown.
 
 #### Scenario: A report is generated from eligible final artifacts
 - **WHEN** the reporting agent receives the eligible final artifacts for a completion occurrence
-- **THEN** it SHALL produce a structured report covering the required human-readable sections
-- **AND** it SHALL preserve references needed to inspect important final artifacts
+- **THEN** it SHALL produce a structured title, summary, conclusions, and organizational-reflections result
+- **AND** deterministic rendering SHALL place the reflections after `---` without an additional heading
+- **AND** lifecycle state and artifact references SHALL remain outside the owner-facing report body
 
 #### Scenario: The report is ready for delivery
 - **WHEN** a generated completion report is ready
-- **THEN** the Feishu notification bot SHALL send it to the project creator's mapped Feishu identity
+- **THEN** the Feishu notification bot SHALL send it to the configured project-owner destination
 - **AND** the chat bot SHALL NOT be called when the notification bot succeeds
 
 #### Scenario: The notification bot has a deterministic failure
@@ -106,7 +108,7 @@ The system MUST represent report delivery independently from project execution. 
 - **AND** the project experience SHALL expose that report delivery is pending
 
 #### Scenario: Report delivery succeeds
-- **WHEN** the notification bot confirms successful delivery
+- **WHEN** the notification bot or bounded chat fallback confirms successful delivery
 - **THEN** the report delivery state SHALL become delivered for that completion occurrence
 - **AND** the project SHALL remain completed
 

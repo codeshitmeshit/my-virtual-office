@@ -129,22 +129,20 @@ Provider prompt 必须由 `services.bridge_input_output_formatting.render_docume
 
 ```json
 {
-  "goal": "...",
-  "conclusion": "...",
-  "keyResults": ["..."],
-  "nonFatalExceptions": ["..."],
-  "followUps": ["..."],
-  "importantArtifacts": [{"label": "...", "path": "...", "note": "..."}]
+  "title": "...",
+  "summary": "...",
+  "conclusions": ["..."],
+  "organizationalAdvice": ["..."]
 }
 ```
 
-生成服务解析并限制字段数量与长度，拒绝额外的内部推理字段；再由确定性 renderer 添加项目名、项目 ID、`vN`、完成时间和 run marker，生成本地 Markdown 与飞书 card intent。Agent 不负责选择接收人或调用飞书。
+生成服务解析并限制字段数量与长度，拒绝额外的内部推理字段；确定性 renderer 只呈现业务内容：标题、摘要、核心结论，以及 `---` 分隔线后的组织型思考。分隔线后的内容不另起标题。项目名、项目 ID、`vN`、完成时间、run marker、异常、后续任务和产物路径只保留在内部 occurrence/UI 元数据中，不进入 owner-facing 报告正文。Agent 不负责选择接收人或调用飞书。
 
 选择结构化 JSON 再确定性渲染，而不是让 Agent 直接输出任意卡片，是为了稳定满足必需章节、长度和安全约束。
 
-### 6. 飞书投递只允许 notification app 的定向接收人
+### 6. 飞书投递优先使用 notification app 的定向接收人
 
-新增 `app/services/project_completion_report_delivery.py`。它将结构化报告映射为 notification card：summary 放目标与结论，details 依次承载版本、关键结果、非致命异常、后续建议和重要产物，所有字段遵守现有卡片的 1800/500/20 项上限，并提供“打开项目报告” jump action。
+新增 `app/services/project_completion_report_delivery.py`。它将结构化报告映射为 notification card：title/summary 呈现报告标题与结论摘要，单个“核心结论” detail 在结论列表后使用 `---` 分隔并直接展示无标题的组织型思考。所有字段遵守现有卡片的 1800/500/20 项上限，并提供“打开项目报告” jump action。
 
 目的地 resolver 在单用户部署中只读取：
 
@@ -155,7 +153,7 @@ notifications.feishuReceiveIdType
 notifications.feishuReceiveId
 ```
 
-它不读取 `project.createdBy` 作为飞书 ID，不使用 chat app，不接受请求体覆盖 recipient。任一 notification app 定向字段缺失时，occurrence 进入 `failed`，错误码为 `project_owner_feishu_destination_missing`，且不回退到 webhook、群或其他接收人。
+它不读取 `project.createdBy` 作为飞书 ID，不接受请求体覆盖 recipient。任一 notification app 定向字段缺失时返回稳定的确定失败，错误码为 `project_owner_feishu_destination_missing`；禁止回退到 webhook、群或任意接收人，但允许第 10 节定义的固定主人聊天机器人降级。
 
 为保持其他通知兼容，给 `send_feishu_notification` 增加默认值为 `True` 的薄参数 `allow_webhook`；本服务调用时传 `False`。其他调用点行为不变。
 

@@ -30,6 +30,40 @@ REPORT = {
 }
 
 
+def test_chat_fallback_renders_only_final_report_content():
+    chats = []
+    report = {
+        "title": "张雪机车分析结论",
+        "summary": "张雪机车正从话题品牌向性能品牌跃迁。",
+        "conclusions": ["赛事成绩提供性能背书。", "长期价值取决于质量与售后。"],
+        "organizationalAdvice": ["将赛事验证体系沉淀为组织级能力。"],
+    }
+
+    deliver_with_chat_fallback(
+        PROJECT,
+        OCCURRENCE,
+        report,
+        primary_delivery=lambda: {"ok": False, "status": "notification_app_required"},
+        chat_delivery=lambda chat_id, markdown: chats.append((chat_id, markdown)) or {
+            "ok": True,
+            "status": "sent",
+            "messageId": "chat-message",
+        },
+        owner_chat_id="owner-chat",
+        audit=lambda _event: None,
+    )
+
+    assert chats[0][1] == (
+        "## 张雪机车分析结论\n\n"
+        "张雪机车正从话题品牌向性能品牌跃迁。\n\n"
+        "### 核心结论\n"
+        "- 赛事成绩提供性能背书。\n"
+        "- 长期价值取决于质量与售后。\n\n"
+        "---\n\n"
+        "- 将赛事验证体系沉淀为组织级能力。"
+    )
+
+
 def test_primary_success_returns_notification_channel_without_chat_fallback():
     chats = []
     events = []
@@ -90,11 +124,34 @@ def test_missing_notification_app_falls_back_once_to_fixed_owner_chat():
         "primaryStatus": "notification_app_required",
     }
     assert chats[0][0] == "owner-chat"
-    assert "项目完成汇报：Demo" in chats[0][1]
+    assert "## Demo" in chats[0][1]
     assert "Artifact ready" in chats[0][1]
     assert events[-1]["fallbackDecision"] == "attempted"
     assert events[-1]["fallbackStatus"] == "sent"
     assert events[-1]["finalChannel"] == "chat_app_fallback"
+
+
+def test_chat_fallback_presents_final_result_instead_of_execution_status():
+    chats = []
+
+    deliver_with_chat_fallback(
+        PROJECT,
+        OCCURRENCE,
+        REPORT,
+        primary_delivery=lambda: {"ok": False, "status": "notification_app_required"},
+        chat_delivery=lambda chat_id, markdown: chats.append((chat_id, markdown)) or {
+            "ok": True,
+            "status": "sent",
+            "messageId": "chat-message",
+        },
+        owner_chat_id="owner-chat",
+        audit=lambda _event: None,
+    )
+
+    markdown = chats[0][1]
+    assert "## Demo" in markdown
+    assert "执行版本" not in markdown
+    assert "Artifact ready" in markdown
 
 
 def test_primary_configuration_exception_is_a_deterministic_fallback_trigger():

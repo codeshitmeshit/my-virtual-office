@@ -53,12 +53,10 @@ def test_completion_report_prompt_has_required_sections_and_strict_json_contract
     assert output == {
         "format": "json_only",
         "schema": {
-            "goal": "string",
-            "conclusion": "string",
-            "keyResults": ["string"],
-            "nonFatalExceptions": ["string"],
-            "followUps": ["string"],
-            "importantArtifacts": [{"label": "string", "path": "string", "note": "string"}],
+            "title": "string",
+            "summary": "string",
+            "conclusions": ["string"],
+            "organizationalAdvice": ["string"],
         },
     }
 
@@ -72,7 +70,4 @@ def test_completion_report_prompt_bounds_project_context_fields():
     )
 
     context = json.loads(ET.fromstring(prompt).findtext("context"))
-    assert len(context["projectId"]) == 240
-    assert len(context["title"]) == 500
-    assert len(context["description"]) == 4000
-    assert len(context["occurrenceId"]) == 240
+    assert context == {"projectTitle": "t" * 500}

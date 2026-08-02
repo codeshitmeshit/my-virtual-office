@@ -44,3 +44,9 @@
 - [x] 8.1 新建聚焦的 completion-report fallback 与 audit 模块：notification app 成功直接返回，确定失败时向固定主人 chat ID 发送同一份有界 Markdown，未知结果不降级；日志记录两通道状态并脱敏；测试先覆盖成功、缺配置、明确失败、未知结果和双失败；提交：`feat(reporting): fall back to Feishu chat app`。
 - [x] 8.2 在 runtime/server 薄接线中注入固定 chat ID、聊天发送 port 和 audit port；occurrence/API/UI 保存并展示 `notification_app` 或 `chat_app_fallback`；扩展状态机、worker、API、server wiring 与 Node UI 测试；提交：`feat(reporting): expose completion report delivery channel`。
 - [x] 8.3 使用 fake ports 完成降级端到端测试，再把本地唯一 P2P 主人会话配置为固定目标，重启服务并创建模拟完成项目，验证聊天机器人真实送达、occurrence delivered、审计可回溯且无敏感正文；运行相关回归与 OpenSpec 校验；提交：`test(reporting): verify live chat fallback flow`。
+
+## 9. 最终产物结论化汇报
+
+- [x] 9.1 将报告 Agent 的严格输出协议收敛为 `title`、`summary`、`conclusions`、`organizationalAdvice`，只读取可用最终业务产物；缺少可读最终产物时终止生成，不用执行状态或异常信息替代。
+- [x] 9.2 新建聚焦的 content renderer，正文只呈现标题、摘要、核心结论，并在 `---` 后直接呈现 Agent 阅读报告后的组织型思考，不显示建议标题、版本、任务状态、异常、后续任务或产物路径。
+- [x] 9.3 让通知机器人卡片与聊天机器人降级文本保持同一内容语义，完成真实项目重跑和聊天机器人降级送达验收；运行 completion-report 专项回归。

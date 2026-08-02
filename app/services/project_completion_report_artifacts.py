@@ -23,12 +23,22 @@ _PRIVATE_KEY_RE = re.compile(
     r"-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
     re.IGNORECASE | re.DOTALL,
 )
+_EXECUTION_SUMMARY_NAMES = frozenset({"PROJECT_FINAL_REPORT.MD", "TASK_FINAL_RESULT.MD"})
 
 
-def _path_from_ref(value: Any) -> str:
+def _path_from_ref(value: Any, *, workspace_path: Any = "") -> str:
     if isinstance(value, Mapping):
         value = value.get("path")
-    return normalize_relative_path(value)
+    raw = str(value or "").strip()
+    workspace = os.path.realpath(os.path.expanduser(str(workspace_path or "").strip()))
+    if raw and os.path.isabs(os.path.expanduser(raw)):
+        absolute = os.path.realpath(os.path.expanduser(raw))
+        if not workspace or (
+            absolute != workspace and not absolute.startswith(workspace + os.sep)
+        ):
+            return ""
+        raw = os.path.relpath(absolute, workspace)
+    return normalize_relative_path(raw)
 
 
 def scrub_sensitive_text(value: Any) -> str:
@@ -43,13 +53,14 @@ def _sensitive_path(path: str) -> bool:
     return bool(_SENSITIVE_BASENAME_RE.search(os.path.basename(path)))
 
 
+def _execution_summary_path(path: str) -> bool:
+    return os.path.basename(path).upper() in _EXECUTION_SUMMARY_NAMES
+
+
 def _candidate_paths(project: Mapping[str, Any]) -> list[str]:
-    candidates: list[str] = []
-    orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), Mapping) else {}
-    final_report = orchestration.get("finalReport") if isinstance(orchestration.get("finalReport"), Mapping) else {}
-    project_report = _path_from_ref(final_report.get("markdownPath"))
-    if project_report:
-        candidates.append(project_report)
+    workspace_path = project.get("workspacePath")
+    business_outputs: list[str] = []
+    task_summaries: list[str] = []
 
     tasks = [task for task in project.get("tasks") or [] if isinstance(task, Mapping)]
     tasks.sort(key=lambda task: (
@@ -58,13 +69,32 @@ def _candidate_paths(project: Mapping[str, Any]) -> list[str]:
     ))
     for task in tasks:
         final_result = task.get("finalResult") if isinstance(task.get("finalResult"), Mapping) else {}
-        markdown_path = _path_from_ref(final_result.get("markdownPath"))
-        if markdown_path:
-            candidates.append(markdown_path)
         for ref in final_result.get("artifactRefs") or []:
-            path = _path_from_ref(ref)
-            if path:
-                candidates.append(path)
+            path = _path_from_ref(ref, workspace_path=workspace_path)
+            if path and not _execution_summary_path(path):
+                business_outputs.append(path)
+        markdown_path = _path_from_ref(
+            final_result.get("markdownPath"),
+            workspace_path=workspace_path,
+        )
+        if markdown_path and not _execution_summary_path(markdown_path):
+            task_summaries.append(markdown_path)
+
+    orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), Mapping) else {}
+    final_report = orchestration.get("finalReport") if isinstance(orchestration.get("finalReport"), Mapping) else {}
+    project_report = _path_from_ref(
+        final_report.get("markdownPath"),
+        workspace_path=workspace_path,
+    )
+    if _execution_summary_path(project_report):
+        project_report = ""
+
+    # Explicit task artifactRefs and a genuinely authored project final report
+    # are business deliverables. Known lifecycle summaries are deliberately
+    # excluded so they cannot replace the result the owner asked to receive.
+    candidates = [*business_outputs, *([project_report] if project_report else [])]
+    if not candidates:
+        candidates = task_summaries
 
     seen: set[str] = set()
     unique: list[str] = []

@@ -89,12 +89,10 @@ def _runtime(
     def generate_agent(**options):
         agent_calls.append(options)
         return {"ok": True, "reply": json.dumps({
-            "goal": "Ship the project",
-            "conclusion": "The project completed successfully",
-            "keyResults": ["Final artifact generated"],
-            "nonFatalExceptions": [],
-            "followUps": ["Review the result"],
-            "importantArtifacts": [{"label": "Final", "path": "FINAL.md", "note": "Primary result"}],
+            "title": "Completion Demo conclusion",
+            "summary": "The final artifact confirms the release result.",
+            "conclusions": ["The release is complete."],
+            "organizationalAdvice": ["Reuse the validated release model."],
         })}
 
     def send_notification(intent, **options):
