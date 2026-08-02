@@ -134,6 +134,7 @@ def test_materialize_project_base_supplies_complete_canonical_defaults():
             "updatedAt": NOW,
             "updatedBy": "user",
         },
+        "feishuCompletionReportEnabled": True,
         "projectExecutionEnabled": False,
         "workspacePath": None,
         "workspaceKind": None,
@@ -151,6 +152,19 @@ def test_materialize_project_base_supplies_complete_canonical_defaults():
         "activity": [],
         "template": False,
     }
+
+
+def test_materialize_project_base_preserves_explicitly_disabled_feishu_completion_report():
+    project = materialize_project_base(
+        {"title": "Silent Project", "feishuCompletionReportEnabled": False},
+        columns=[],
+        tasks=[],
+        workspace=None,
+        new_id=_ids("project-2"),
+        now=lambda: NOW,
+    )
+
+    assert project["feishuCompletionReportEnabled"] is False
 
 
 def test_materialize_project_base_uses_resolved_values_and_copies_mutables():
