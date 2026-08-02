@@ -31,7 +31,7 @@
 - Produces: `deliver_with_chat_fallback(..., primary_delivery, chat_delivery, owner_chat_id, audit) -> dict` with `deliveryChannel` equal to `notification_app` or `chat_app_fallback`.
 - Produces: `append_completion_report_delivery_audit(status_dir, event) -> None` with bounded redacted JSONL output.
 
-- [ ] **Step 1: Write failing routing and audit tests**
+- [x] **Step 1: Write failing routing and audit tests**
 
 ```python
 def test_missing_notification_app_falls_back_once_to_fixed_owner_chat():
@@ -49,13 +49,13 @@ def test_unknown_primary_result_does_not_fall_back():
     # Repeat for network_error and timeout; assert chat_delivery is never called.
 ```
 
-- [ ] **Step 2: Run the focused test and verify RED**
+- [x] **Step 2: Run the focused test and verify RED**
 
 Run: `.venv/bin/pytest -q tests/test_project_completion_report_fallback.py`
 
 Expected: collection fails because `services.project_completion_report_fallback` does not exist.
 
-- [ ] **Step 3: Implement the minimal `if` and redacted audit writer**
+- [x] **Step 3: Implement the minimal `if` and redacted audit writer**
 
 ```python
 UNKNOWN_PRIMARY_STATUSES = {"network_error", "timeout", "delivery_timeout"}
@@ -72,13 +72,13 @@ return ({**fallback, "deliveryChannel": "chat_app_fallback"}
 
 Audit only IDs, channel statuses, bounded error codes, final message ID, and fallback decision.
 
-- [ ] **Step 4: Run focused and existing delivery/runtime tests**
+- [x] **Step 4: Run focused and existing delivery/runtime tests**
 
 Run: `.venv/bin/pytest -q tests/test_project_completion_report_fallback.py tests/test_project_completion_report_delivery.py tests/test_project_completion_report_runtime.py`
 
 Expected: all pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add app/services/project_completion_report_fallback.py app/services/project_completion_report_audit.py app/services/project_completion_report_runtime.py tests/test_project_completion_report_fallback.py

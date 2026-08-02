@@ -255,3 +255,9 @@ sequenceDiagram
 ## Open Questions
 
 无阻塞问题。以下参数作为首版固定常量并通过测试锁定：worker 15 秒轮询、每批 10 条、每个自动周期最多 3 次、退避 0/30/120 秒、最多 20 个最终产物引用、Agent 总文本 512 KiB、每个 occurrence 最多保留 20 条 attempt 审计。后续如需配置化，应作为独立需求评审。
+
+### 10. 通知机器人确定失败时降级到固定主人聊天
+
+验收阶段确认通知机器人可能未配置，因此完成报告投递在原 notification-app 调用之后增加一个最小条件分支：notification app 成功则直接结束；`network_error`、`timeout`、`delivery_timeout` 等结果未知时保持 `delivery_outcome_unknown` 且不降级；其余明确失败调用聊天机器人，目标只允许 `feishu.chatApp.completionReportFallbackChatId` 配置的固定主人会话。
+
+降级逻辑放在新的聚焦 service 中，`server.py` 只注入聊天发送 port、固定 chat ID 和 audit port。成功 occurrence 保存 `deliveryChannel=notification_app|chat_app_fallback`，API/UI 只公开这个受限枚举。每次主通道失败、降级决定和聊天结果写入独立 JSONL 审计，字段仅包含 project/occurrence ID、状态、错误码、最终通道和 message ID；正文、prompt、产物与凭据不得写入。

@@ -8,6 +8,7 @@ from typing import Any, Callable, Mapping
 from .project_completion_report_artifacts import collect_completion_report_artifacts
 from .project_completion_report_delivery import deliver_completion_report
 from .project_completion_report_generation import generate_completion_report
+from .project_completion_report_fallback import deliver_with_chat_fallback
 from .project_completion_report_storage import write_completion_report
 from .project_completion_report_worker import (
     CompletionReportWorkerPorts,
@@ -24,6 +25,9 @@ class CompletionReportRuntimeDependencies:
     generate_agent: Callable[..., Mapping[str, Any]]
     notification_app_config: Callable[[], Mapping[str, Any]]
     send_notification: Callable[..., dict[str, Any]]
+    completion_report_fallback_chat_id: Callable[[], str]
+    send_chat: Callable[[str, str], Mapping[str, Any]]
+    audit_delivery: Callable[[Mapping[str, Any]], None]
     project_url: Callable[[str], str]
     now: Callable[[], str]
     new_token: Callable[[], str]
@@ -70,13 +74,21 @@ def build_completion_report_worker(
         occurrence: Mapping[str, Any],
         report: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        return deliver_completion_report(
+        return deliver_with_chat_fallback(
             project,
             occurrence,
             report,
-            app_config=dependencies.notification_app_config(),
-            send_notification=dependencies.send_notification,
-            project_url=dependencies.project_url(str(project.get("id") or "")),
+            primary_delivery=lambda: deliver_completion_report(
+                project,
+                occurrence,
+                report,
+                app_config=dependencies.notification_app_config(),
+                send_notification=dependencies.send_notification,
+                project_url=dependencies.project_url(str(project.get("id") or "")),
+            ),
+            chat_delivery=dependencies.send_chat,
+            owner_chat_id=dependencies.completion_report_fallback_chat_id(),
+            audit=dependencies.audit_delivery,
         )
 
     return ProjectCompletionReportWorker(

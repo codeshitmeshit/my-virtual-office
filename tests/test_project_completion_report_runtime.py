@@ -41,6 +41,9 @@ def test_runtime_factory_connects_final_artifacts_agent_storage_and_notification
             "receiveId": "owner",
         },
         send_notification=lambda intent, **options: calls.append(("notify", intent, options)) or {"ok": True},
+        completion_report_fallback_chat_id=lambda: "owner-chat",
+        send_chat=lambda *_args: (_ for _ in ()).throw(AssertionError("chat fallback must not run")),
+        audit_delivery=lambda event: calls.append(("audit", event)),
         project_url=lambda project_id: f"https://office/projects/{project_id}",
         now=lambda: "2026-08-03T00:00:00+00:00",
         new_token=lambda: "token",
@@ -67,7 +70,8 @@ def test_runtime_factory_connects_final_artifacts_agent_storage_and_notification
     assert calls[2][0] == "notify"
     assert calls[2][2]["allow_webhook"] is False
     assert calls[2][2]["app_config"]["receiveId"] == "owner"
-    assert delivered == {"ok": True}
+    assert calls[3][0] == "audit"
+    assert delivered == {"ok": True, "deliveryChannel": "notification_app"}
 
 
 def test_runtime_factory_turns_invalid_artifact_context_into_omissions():
@@ -78,6 +82,9 @@ def test_runtime_factory_turns_invalid_artifact_context_into_omissions():
         generate_agent=lambda **_options: {"ok": False},
         notification_app_config=lambda: {},
         send_notification=lambda *_args, **_kwargs: {"ok": False},
+        completion_report_fallback_chat_id=lambda: "owner-chat",
+        send_chat=lambda *_args: {"ok": True},
+        audit_delivery=lambda _event: None,
         project_url=lambda _project_id: "",
         now=lambda: "2026-08-03T00:00:00+00:00",
         new_token=lambda: "token",
@@ -95,3 +102,38 @@ def test_runtime_factory_turns_invalid_artifact_context_into_omissions():
         "reason": "unavailable",
         "detail": "workspace unavailable",
     }]
+
+
+def test_runtime_falls_back_to_chat_when_notification_destination_is_missing():
+    chat_calls = []
+    audit_events = []
+    dependencies = CompletionReportRuntimeDependencies(
+        reporting_agent_id=lambda: "agent-reporting",
+        artifact_context=lambda _project: {"ok": True, "root": "/tmp"},
+        read_artifact=lambda *_args, **_kwargs: {"ok": False},
+        generate_agent=lambda **_options: {"ok": False},
+        notification_app_config=lambda: {},
+        send_notification=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("missing config is validated first")),
+        completion_report_fallback_chat_id=lambda: "owner-chat",
+        send_chat=lambda chat_id, markdown: chat_calls.append((chat_id, markdown)) or {
+            "ok": True, "status": "sent", "messageId": "chat-message",
+        },
+        audit_delivery=audit_events.append,
+        project_url=lambda _project_id: "https://office/#projects",
+        now=lambda: "2026-08-03T00:00:00+00:00",
+        new_token=lambda: "token",
+    )
+    worker = build_completion_report_worker(_Repository(), dependencies)
+
+    delivered = worker._ports.deliver(
+        {"id": "p1", "title": "Demo"},
+        {"occurrenceId": "o1", "version": 1},
+        {
+            "goal": "Ship", "conclusion": "Done", "keyResults": [],
+            "nonFatalExceptions": [], "followUps": [], "importantArtifacts": [],
+        },
+    )
+
+    assert delivered["deliveryChannel"] == "chat_app_fallback"
+    assert chat_calls[0][0] == "owner-chat"
+    assert audit_events[0]["primaryStatus"] == "project_owner_feishu_destination_missing"

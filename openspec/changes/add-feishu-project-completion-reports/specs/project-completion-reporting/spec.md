@@ -69,8 +69,8 @@ Completion-report generation MUST use only final project artifacts that are elig
 - **THEN** the report SHALL identify that the artifact could not be presented
 - **AND** the system SHALL NOT substitute excluded process or internal content
 
-### Requirement: Reports are human-readable and delivered by the notification bot
-The reporting agent SHALL transform eligible final artifacts into a human-readable report containing the project goal, execution conclusion, key results, non-fatal exceptions, recommended follow-ups, important final artifacts, and execution or version marker. The system SHALL deliver that report only to the project creator through the Feishu notification bot and MUST NOT use the Feishu chat bot for this flow.
+### Requirement: Reports are human-readable and use a bounded Feishu fallback
+The reporting agent SHALL transform eligible final artifacts into a human-readable report containing the project goal, execution conclusion, key results, non-fatal exceptions, recommended follow-ups, important final artifacts, and execution or version marker. The system SHALL first deliver that report to the project creator through the Feishu notification bot. If that primary channel returns a deterministic failure, the system SHALL fall back once to the configured owner conversation through the Feishu chat bot. It MUST NOT fall back when the primary result is unknown.
 
 #### Scenario: A report is generated from eligible final artifacts
 - **WHEN** the reporting agent receives the eligible final artifacts for a completion occurrence
@@ -80,12 +80,22 @@ The reporting agent SHALL transform eligible final artifacts into a human-readab
 #### Scenario: The report is ready for delivery
 - **WHEN** a generated completion report is ready
 - **THEN** the Feishu notification bot SHALL send it to the project creator's mapped Feishu identity
-- **AND** no project participant, group, alternate recipient, or chat-bot conversation SHALL receive it through this capability
+- **AND** the chat bot SHALL NOT be called when the notification bot succeeds
 
-#### Scenario: The project creator has no usable Feishu destination
-- **WHEN** the report is ready but the project creator has no valid Feishu notification destination
-- **THEN** delivery SHALL enter a visible failed state
-- **AND** the report SHALL NOT be redirected to another recipient
+#### Scenario: The notification bot has a deterministic failure
+- **WHEN** the notification bot is unconfigured or explicitly rejects the report
+- **THEN** the chat bot SHALL send the same bounded report once to the fixed owner conversation
+- **AND** the occurrence SHALL record `chat_app_fallback` as the successful delivery channel
+
+#### Scenario: The notification result is unknown
+- **WHEN** the notification attempt times out, loses its network response, or otherwise may have delivered without confirmation
+- **THEN** the chat bot SHALL NOT send the report
+- **AND** the occurrence SHALL enter the existing delivery-outcome-unknown state to avoid duplicate delivery
+
+#### Scenario: Both deterministic channels fail
+- **WHEN** the notification bot deterministically fails and the chat fallback also fails
+- **THEN** the occurrence SHALL enter the existing visible retry or failed state
+- **AND** bounded redacted audit metadata SHALL identify both channel outcomes without including report content or credentials
 
 ### Requirement: Project completion and report delivery have separate states
 The system MUST represent report delivery independently from project execution. Report processing SHALL expose user-visible pending, delivered, and failed outcomes, and no report-generation or delivery failure SHALL reverse, delay, or misrepresent successful project completion.
