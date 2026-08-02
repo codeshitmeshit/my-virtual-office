@@ -14,7 +14,7 @@
 
 ## 3. 最终产物安全收集
 
-- [ ] 3.1 [MP-4] 新建 `app/services/project_completion_report_artifacts.py`，只枚举 `task.finalResult.markdownPath`、`task.finalResult.artifactRefs` 和当前项目 `finalReport.markdownPath`，稳定去重并通过注入的 `read_artifact(..., allow_text=True, associated_only=True)` 读取；限制 20 个引用、单文件 512 KiB、总文本 512 KiB，并为缺失/不支持/超限项生成 omission；提交：`feat(reporting): collect final project artifacts safely`。
+- [x] 3.1 [MP-4] 新建 `app/services/project_completion_report_artifacts.py`，只枚举 `task.finalResult.markdownPath`、`task.finalResult.artifactRefs` 和当前项目 `finalReport.markdownPath`，稳定去重并通过注入的 `read_artifact(..., allow_text=True, associated_only=True)` 读取；限制 20 个引用、单文件 512 KiB、总文本 512 KiB，并为缺失/不支持/超限项生成 omission；提交：`feat(reporting): collect final project artifacts safely`。
 - [ ] 3.2 [MP-4] 在同一聚焦模块加入敏感 basename denylist 与 Agent 前 scrubber，覆盖 authorization、API key、token、password、secret、webhook 和私钥块；新建 `tests/test_project_completion_report_artifacts.py`，直接观察 collector/Agent-port 边界，证明日志、evidence、changedFiles、越界路径、符号链接、敏感文件和未脱敏正文不会进入 Agent；提交：`security(reporting): enforce final artifact data boundary`。
 
 ## 4. Agent 报告生成
