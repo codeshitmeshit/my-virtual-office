@@ -92,3 +92,22 @@ def test_project_report_handler_exposes_only_sanitized_completion_report_version
     assert item["canResend"] is True
     assert "claim" not in item
     assert "generatedReport" not in item
+
+
+def test_failed_or_blocked_task_keeps_the_existing_vo_intervention_notification(monkeypatch):
+    intents = []
+    monkeypatch.setattr(
+        server,
+        "_send_feishu_workflow_notification",
+        lambda intent: intents.append(intent) or {"ok": True, "status": "sent"},
+    )
+    project = {"id": "p1", "title": "Demo"}
+    task = {"id": "t1", "title": "Failed task", "executionState": "blocked", "lastError": "failed"}
+
+    result = server._send_project_execution_intervention_notification(
+        project, task, "execution failed", "attempt-1", event="failed", kind="error"
+    )
+
+    assert result["ok"] is True
+    assert intents[0]["target"] == "feishu-project-execution-intervention"
+    assert intents[0]["type"] == "error"
