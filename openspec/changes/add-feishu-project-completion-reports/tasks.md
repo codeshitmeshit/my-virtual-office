@@ -19,7 +19,7 @@
 
 ## 4. Agent 报告生成
 
-- [ ] 4.1 [MP-4] 新建 `app/services/project_completion_report_prompt.py`，只通过 `services.bridge_input_output_formatting` 生成 XML 外层 prompt，使用 `<role>`、`<task>`、`<rules>`、`<context>`、`<final_artifacts>` 和最终 `<output>`，动态项目/产物数据全部使用不可信文本或 JSON boundary；新建 prompt 测试覆盖 XML 闭合注入、特殊字符、超长输入和稳定 JSON output schema；提交：`feat(reporting): add secure XML report prompt`。
+- [x] 4.1 [MP-4] 新建 `app/services/project_completion_report_prompt.py`，只通过 `services.bridge_input_output_formatting` 生成 XML 外层 prompt，使用 `<role>`、`<task>`、`<rules>`、`<context>`、`<final_artifacts>` 和最终 `<output>`，动态项目/产物数据全部使用不可信文本或 JSON boundary；新建 prompt 测试覆盖 XML 闭合注入、特殊字符、超长输入和稳定 JSON output schema；提交：`feat(reporting): add secure XML report prompt`。
 - [ ] 4.2 [MP-4][MP-5] 新建 `app/services/project_completion_report_generation.py`，通过注入 provider port 调用 `VO_CONFIG.feishu.chatApp.representativeAgentId` 对应 Agent，严格解析 `goal/conclusion/keyResults/nonFatalExceptions/followUps/importantArtifacts`，限制字段长度与数量，并确定性渲染带项目、版本、run marker 的 Markdown；新建测试覆盖成功、Agent 缺失、busy/timeout、空回复、非法 JSON、额外内部字段和 schema 截断；提交：`feat(reporting): generate structured human-readable reports`。
 
 ## 5. 通知机器人投递与恢复
