@@ -4571,6 +4571,21 @@ def test_feishu_long_connection_response_uses_plain_toast_dict():
     assert "操作已收到" in serialized
 
 
+def test_notification_sender_can_disable_webhook_fallback(tmp_path, monkeypatch):
+    monkeypatch.setenv("VO_FEISHU_NOTIFICATION_WEBHOOK", "https://example.invalid/hook/secret")
+
+    result = send_feishu_notification(
+        base_intent(),
+        app_config={},
+        allow_webhook=False,
+        status_dir=str(tmp_path),
+        urlopen=lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("webhook called")),
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "notification_app_required"
+
+
 if __name__ == "__main__":
     test_four_notification_types_render_interactive_cards()
     test_application_form_actions_and_states_are_validated()

@@ -585,6 +585,7 @@ def send_feishu_notification(
     app_config: dict[str, Any] | None = None,
     status_dir: str | None = None,
     dry_run: bool = False,
+    allow_webhook: bool = True,
     urlopen: Callable[..., Any] | None = None,
     timeout: int = 10,
 ) -> dict[str, Any]:
@@ -603,7 +604,7 @@ def send_feishu_notification(
         return result
 
     opener = urlopen or urllib.request.urlopen
-    webhook = webhook_url or os.environ.get("VO_FEISHU_NOTIFICATION_WEBHOOK") or ""
+    webhook = (webhook_url or os.environ.get("VO_FEISHU_NOTIFICATION_WEBHOOK") or "") if allow_webhook else ""
     fingerprint = _webhook_fingerprint(webhook)
     if dry_run:
         result = {"ok": True, "status": "dry_run", "payload": payload, "webhookFingerprint": fingerprint}
@@ -618,6 +619,16 @@ def send_feishu_notification(
             urlopen=opener,
             timeout=timeout,
         )
+        result["record"] = record_feishu_notification(normalized, result, status_dir)
+        return result
+
+    if not allow_webhook:
+        result = {
+            "ok": False,
+            "status": "notification_app_required",
+            "error": "A configured notification app destination is required",
+            "webhookFingerprint": "",
+        }
         result["record"] = record_feishu_notification(normalized, result, status_dir)
         return result
 
