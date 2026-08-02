@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Any, Callable, Mapping
 
 from .artifacts import normalize_relative_path
@@ -11,12 +12,35 @@ from .artifacts import normalize_relative_path
 MAX_ARTIFACT_REFS = 20
 MAX_AGENT_TEXT_BYTES = 512 * 1024
 INLINE_TEXT_EXTENSIONS = frozenset({".md", ".txt", ".json", ".yaml", ".yml", ".csv", ".html"})
+_SENSITIVE_BASENAME_RE = re.compile(
+    r"(^\.env(?:\.|$)|credential|client[-_]?secret|secret|token|private[-_]?key|id_rsa|id_ed25519)",
+    re.IGNORECASE,
+)
+_SENSITIVE_ASSIGNMENT_RE = re.compile(
+    r"(?im)^(\s*[\"']?(?:authorization|api[_-]?key|access[_-]?token|refresh[_-]?token|password|secret|webhook)[\"']?\s*[:=]\s*).*$"
+)
+_PRIVATE_KEY_RE = re.compile(
+    r"-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
+    re.IGNORECASE | re.DOTALL,
+)
 
 
 def _path_from_ref(value: Any) -> str:
     if isinstance(value, Mapping):
         value = value.get("path")
     return normalize_relative_path(value)
+
+
+def scrub_sensitive_text(value: Any) -> str:
+    """Remove common credential assignments before text reaches an Agent."""
+
+    text = str(value or "")
+    text = _PRIVATE_KEY_RE.sub("[REDACTED]", text)
+    return _SENSITIVE_ASSIGNMENT_RE.sub(lambda match: match.group(1) + "[REDACTED]", text)
+
+
+def _sensitive_path(path: str) -> bool:
+    return bool(_SENSITIVE_BASENAME_RE.search(os.path.basename(path)))
 
 
 def _candidate_paths(project: Mapping[str, Any]) -> list[str]:
@@ -70,6 +94,13 @@ def collect_completion_report_artifacts(
             })
     remaining_bytes = MAX_AGENT_TEXT_BYTES
     for path in candidates[:MAX_ARTIFACT_REFS]:
+        if _sensitive_path(path):
+            omissions.append({
+                "path": path,
+                "reason": "sensitive_path",
+                "detail": "Sensitive credential files are not eligible for completion reporting",
+            })
+            continue
         extension = os.path.splitext(path)[1].lower()
         if extension not in INLINE_TEXT_EXTENSIONS:
             artifacts.append({
@@ -90,7 +121,7 @@ def collect_completion_report_artifacts(
             })
             continue
         source = result.get("artifact") if isinstance(result.get("artifact"), Mapping) else {}
-        content = str(source.get("content") or "")
+        content = scrub_sensitive_text(source.get("content") or "")
         raw = content.encode("utf-8")
         truncated = bool(source.get("truncated"))
         if len(raw) > remaining_bytes:

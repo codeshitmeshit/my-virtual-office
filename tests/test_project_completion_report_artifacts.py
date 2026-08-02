@@ -128,3 +128,47 @@ def test_collector_enforces_reference_and_total_text_limits():
     assert sum(len(item["content"].encode("utf-8")) for item in result["artifacts"]) <= MAX_AGENT_TEXT_BYTES
     assert any(item["reason"] == "reference_limit" for item in result["omissions"])
     assert any(item["reason"] == "text_limit" for item in result["omissions"])
+
+
+def test_collector_rejects_sensitive_paths_before_reading_them():
+    project = {"tasks": [{
+        "id": "task",
+        "executionStage": 1,
+        "finalResult": {"artifactRefs": [
+            {"path": ".env"},
+            {"path": "release/client-secret.json"},
+            {"path": "release/final.md"},
+        ]},
+    }]}
+    calls = []
+
+    result = collect_completion_report_artifacts(
+        project,
+        read_artifact=_reader({"release/final.md": "safe"}, calls),
+    )
+
+    assert [item[0] for item in calls] == ["release/final.md"]
+    assert [item["path"] for item in result["omissions"]] == [
+        ".env",
+        "release/client-secret.json",
+    ]
+    assert all(item["reason"] == "sensitive_path" for item in result["omissions"])
+
+
+def test_collector_scrubs_credentials_and_private_keys_before_returning_agent_input():
+    project = {"tasks": [{
+        "id": "task",
+        "executionStage": 1,
+        "finalResult": {"markdownPath": "release/final.md"},
+    }]}
+    sensitive = """# Final\napi_key = super-secret-value\nAuthorization: Bearer bearer-value\nwebhook=https://open.feishu.cn/open-apis/bot/v2/hook/hook-value\n-----BEGIN PRIVATE KEY-----\nprivate-material\n-----END PRIVATE KEY-----\n"""
+
+    result = collect_completion_report_artifacts(
+        project,
+        read_artifact=_reader({"release/final.md": sensitive}, []),
+    )
+
+    content = result["artifacts"][0]["content"]
+    assert content.count("[REDACTED]") >= 4
+    for secret in ("super-secret-value", "bearer-value", "hook-value", "private-material"):
+        assert secret not in content
