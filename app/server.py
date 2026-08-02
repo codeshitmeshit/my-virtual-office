@@ -3,6 +3,7 @@
 Serves static files, status JSON, and proxies WebSocket to the OpenClaw gateway.
 """
 import asyncio
+import atexit
 import base64
 import copy
 import http.server
@@ -66,6 +67,7 @@ from services import project_authoring_audit as project_authoring_audit_service
 from services import project_templates as project_templates_service
 from services import project_recurrence as project_recurrence_service
 from services import periodic_timer as periodic_timer_service
+from services import project_completion_report_runtime as project_completion_report_runtime_service
 from services import project_authoring_observability as project_authoring_observability_service
 from services import project_reset as project_reset_service
 from services import meeting_repository as meeting_repository_service
@@ -13297,35 +13299,8 @@ def _project_execution_completed_task_count(project):
 
 
 def _send_project_execution_project_complete_notification(project, reason=""):
-    if not isinstance(project, dict):
-        return {"ok": True, "status": "skipped_invalid_project"}
-    completed = _project_execution_completed_task_count(project)
-    if completed <= 0:
-        return {"ok": True, "status": "skipped_no_completed_tasks"}
-    key = f"project-complete:{project.get('id') or ''}:{completed}"
-    if _feishu_notification_marker(project, key):
-        return {"ok": True, "status": "skipped_duplicate", "dedupeKey": key}
-    intent = {
-        "id": key,
-        "type": "notification",
-        "title": f"项目执行完成: {project.get('title') or project.get('id') or 'Untitled project'}",
-        "summary": reason or f"Project Execution 已完成，当前没有可继续执行的任务。已完成任务数：{completed}。",
-        "related": {"type": "project", "id": project.get("id") or "", "title": project.get("title") or "Project"},
-        "details": [
-            ("项目", project.get("title") or project.get("id") or "-"),
-            ("已完成任务数", completed),
-            ("总任务数", len(project.get("tasks") or [])),
-        ],
-        "actions": [{
-            "category": "jump",
-            "text": "打开项目",
-            "url": _project_execution_open_url(project.get("id") or "", ""),
-        }],
-        "target": "feishu-project-execution-complete",
-    }
-    result = _send_feishu_workflow_notification(intent)
-    _mark_feishu_notification(project, key, result)
-    return result
+    """Compatibility delegate: completion now wakes the durable report worker."""
+    return _wake_project_completion_report_worker(project, reason)
 
 
 def _meeting_open_url(meeting_id):
@@ -17836,6 +17811,86 @@ _PROJECT_REPOSITORY = ProjectRepository(
     delete_project=lambda project_id: PROJECT_STORE.delete_project(project_id),
     cache_namespace=lambda: (PROJECT_STORE, PROJECT_STORE.revision()),
 )
+
+_PROJECT_COMPLETION_REPORT_WORKER = None
+_PROJECT_COMPLETION_REPORT_WORKER_LOCK = threading.Lock()
+
+
+def _project_completion_report_reporting_agent_id():
+    chat_app = ((VO_CONFIG.get("feishu") or {}).get("chatApp") or {})
+    return str(chat_app.get("representativeAgentId") or "").strip()
+
+
+def _project_completion_report_generate_agent(*, agent_id, prompt, conversation_id, timeout_seconds):
+    """Call the configured Agent provider directly, without either Feishu bot transport."""
+    body = {
+        "agentId": agent_id,
+        "message": prompt,
+        "conversationId": conversation_id,
+        "timeoutSec": timeout_seconds,
+        "fromType": "system",
+        "fromDisplayName": "Project Completion Reporter",
+    }
+    if _is_codex_agent(agent_id):
+        return _handle_codex_chat(body)
+    if _is_claude_code_agent(agent_id):
+        return _handle_claude_code_chat(body)
+    if _is_hermes_agent(agent_id):
+        return _handle_hermes_chat(body)
+    reply = _wf_call_agent(
+        agent_id,
+        prompt,
+        timeout=timeout_seconds,
+        project_id="",
+        task_id=conversation_id,
+        session_key=conversation_id,
+    )
+    if str(reply).startswith("[ERROR]"):
+        error = str(reply)[len("[ERROR]"):].strip()
+        status = "timeout" if "timeout" in error.lower() else "execution_failed"
+        return {"ok": False, "status": status, "error": error}
+    return {"ok": True, "reply": str(reply)}
+
+
+def _project_completion_report_send_notification(intent, **options):
+    return send_feishu_notification(intent, status_dir=STATUS_DIR, **options)
+
+
+def _project_completion_report_worker():
+    global _PROJECT_COMPLETION_REPORT_WORKER
+    with _PROJECT_COMPLETION_REPORT_WORKER_LOCK:
+        if _PROJECT_COMPLETION_REPORT_WORKER is None:
+            dependencies = project_completion_report_runtime_service.CompletionReportRuntimeDependencies(
+                reporting_agent_id=_project_completion_report_reporting_agent_id,
+                artifact_context=_project_artifact_context,
+                read_artifact=_artifact_context_read,
+                generate_agent=_project_completion_report_generate_agent,
+                notification_app_config=lambda: _feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+                send_notification=_project_completion_report_send_notification,
+                project_url=lambda project_id: _project_execution_open_url(project_id, ""),
+                now=_proj_now,
+                new_token=_proj_uuid,
+            )
+            _PROJECT_COMPLETION_REPORT_WORKER = (
+                project_completion_report_runtime_service.build_completion_report_worker(
+                    _PROJECT_REPOSITORY,
+                    dependencies,
+                )
+            )
+            atexit.register(_PROJECT_COMPLETION_REPORT_WORKER.stop)
+        return _PROJECT_COMPLETION_REPORT_WORKER
+
+
+def _wake_project_completion_report_worker(project, reason=""):
+    if not isinstance(project, dict) or not str(project.get("id") or "").strip():
+        return {"ok": True, "status": "skipped_invalid_project"}
+    _project_completion_report_worker().wake()
+    return {
+        "ok": True,
+        "status": "queued",
+        "projectId": str(project.get("id") or ""),
+        "reason": str(reason or ""),
+    }
 
 def _proj_uuid():
     """Generate a UUID4 string."""
@@ -24330,7 +24385,7 @@ def _project_stage_reconcile_terminal(project_id, task_id, attempt_id, reason):
         repository=_PROJECT_REPOSITORY,
         now=_proj_now,
         new_run_id=_proj_uuid,
-        on_project_completed=_send_project_execution_project_complete_notification,
+        on_project_completed=_wake_project_completion_report_worker,
     )
     continuation = None
     reconciliation = outcome.reconciliation
@@ -24368,7 +24423,7 @@ def _project_orchestration_skip_ports():
         now=_proj_now,
         management_authorize=lambda project, actor: {"ok": True},
         new_run_id=_proj_uuid,
-        on_project_completed=_send_project_execution_project_complete_notification,
+        on_project_completed=_wake_project_completion_report_worker,
     )
 
 
@@ -24464,7 +24519,7 @@ def _project_orchestration_recovery_ports():
             repository=_PROJECT_REPOSITORY,
             now=_proj_now,
             new_run_id=_proj_uuid,
-            on_project_completed=_send_project_execution_project_complete_notification,
+            on_project_completed=_wake_project_completion_report_worker,
         )
         payload = dict(outcome.result.payload)
         payload["_status"] = outcome.result.status
@@ -24629,7 +24684,7 @@ def _handle_project_execution_project_start(project_id, body=None):
         next_task=_project_execution_next_task,
         start_mode=_project_execution_start_mode,
         start_task_command=_handle_project_execution_start,
-        notify_complete=_send_project_execution_project_complete_notification,
+        notify_complete=_wake_project_completion_report_worker,
         now=_proj_now,
     )
 
@@ -37402,6 +37457,7 @@ if __name__ == "__main__":
     approval_reconcile_thread.start()
 
     _PROJECT_RECURRENCE_TIMER.start()
+    _project_completion_report_worker().start()
 
     # Start HTTP server in main thread
     start_http_server()
