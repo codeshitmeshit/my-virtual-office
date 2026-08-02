@@ -66,3 +66,29 @@ def test_reporting_agent_adapter_uses_provider_directly_not_feishu_chat_transpor
     assert result == {"ok": True, "reply": "{}"}
     assert captured[0]["fromType"] == "system"
     assert captured[0]["conversationId"] == "project-completion-report:p1:o1"
+
+
+def test_project_report_handler_exposes_only_sanitized_completion_report_versions(monkeypatch):
+    monkeypatch.setattr(server, "_load_projects", lambda: {"projects": [{
+        "id": "p1",
+        "title": "Demo",
+        "columns": [],
+        "tasks": [],
+        "orchestration": {"completionReports": [{
+            "occurrenceId": "o1",
+            "version": 1,
+            "state": "failed",
+            "visibleStatus": "failed",
+            "claim": {"token": "private"},
+            "generatedReport": {"goal": "private"},
+            "lastError": {"code": "failed", "message": "delivery failed"},
+        }]},
+    }]})
+
+    result = server._handle_project_report("p1")
+
+    item = result["report"]["completionReports"][0]
+    assert item["status"] == "failed"
+    assert item["canResend"] is True
+    assert "claim" not in item
+    assert "generatedReport" not in item

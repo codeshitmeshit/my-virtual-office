@@ -68,6 +68,7 @@ from services import project_templates as project_templates_service
 from services import project_recurrence as project_recurrence_service
 from services import periodic_timer as periodic_timer_service
 from services import project_completion_report_runtime as project_completion_report_runtime_service
+from services import project_completion_report_api as project_completion_report_api_service
 from services import project_authoring_observability as project_authoring_observability_service
 from services import project_reset as project_reset_service
 from services import meeting_repository as meeting_repository_service
@@ -18958,11 +18959,25 @@ def _handle_project_report(project_id):
         "title": p.get("title", ""),
         "generatedAt": now_str,
         "finalReport": final_report,
+        "completionReports": project_completion_report_api_service.completion_report_summaries(p),
         "stats": {"total": total, "done": done, "inProgress": in_progress, "overdue": overdue},
         "columns": col_stats,
         "agentWorkload": agent_load,
         "timeline": timeline,
     }}
+
+
+def _handle_project_completion_report_resend(project_id, occurrence_id, body):
+    outcome = project_completion_report_api_service.resend_completion_report(
+        project_id,
+        occurrence_id,
+        body,
+        repository=_PROJECT_REPOSITORY,
+        now=_proj_now,
+        owner_authorized=True,
+        wake=lambda: _project_completion_report_worker().wake(),
+    )
+    return {**outcome.payload, "_status": outcome.status}
 
 def _project_final_report_payload(project):
     orchestration = project.get("orchestration") if isinstance(project.get("orchestration"), dict) else {}
@@ -31629,6 +31644,36 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             and self._reject_untrusted_management_request()
         ):
+            return
+        if (
+            request_path.startswith("/api/projects/")
+            and "/completion-reports/" in request_path
+            and request_path.endswith("/resend")
+        ):
+            if self._reject_untrusted_management_request():
+                return
+            rest = request_path[len("/api/projects/"):].strip("/")
+            project_id, report_rest = rest.split("/completion-reports/", 1)
+            occurrence_id = report_rest.rsplit("/resend", 1)[0]
+            project_id = urllib.parse.unquote(project_id).strip("/")
+            occurrence_id = urllib.parse.unquote(occurrence_id).strip("/")
+            if not project_id or not occurrence_id or "/" in project_id or "/" in occurrence_id:
+                self._send_json({
+                    "ok": False,
+                    "code": "completion_report_not_found",
+                    "error": "Completion report occurrence was not found",
+                }, status=404, allow_origin="*")
+                return
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            result = _handle_project_completion_report_resend(project_id, occurrence_id, body)
+            self._send_json(
+                {key: value for key, value in result.items() if key != "_status"},
+                status=result.get("_status", 200),
+                allow_origin="*",
+            )
             return
         if server_routes.skill_library_organization.handle_post(self, parsed_url):
             return
