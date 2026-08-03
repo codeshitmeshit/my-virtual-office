@@ -81,6 +81,45 @@ class VOAgentCommunicationService:
         return "agent_communication_execution_failed"
 
     def send(self, body: Mapping[str, Any]) -> Result:
+        return self._send(body)
+
+    def send_trusted_resume(self, request: Any) -> Result:
+        """Dispatch an internally constructed resume prompt to an exact chat."""
+
+        agent_id = str(getattr(request, "agent_id", "") or "").strip()
+        conversation_id = str(getattr(request, "conversation_id", "") or "").strip()
+        prompt = str(getattr(request, "prompt", "") or "").strip()
+        source_message_id = str(getattr(request, "source_message_id", "") or "").strip()
+        source = str(getattr(request, "source", "") or "").strip()
+        if not agent_id or not conversation_id or not prompt or not source_message_id:
+            return {"ok": False, "error": "Trusted resume binding is incomplete", "_status": 400}
+        return self._send(
+            {
+                "fromType": "human",
+                "fromId": "vo-human-decision",
+                "fromDisplayName": "VO 人工决策中枢",
+                "toAgentId": agent_id,
+                "message": "人工决策已完成，正在根据最终决定继续执行。",
+                "conversationId": conversation_id,
+                "sourceApp": "virtual-office",
+                "sourceSurface": "human-decision-resume",
+                "sourceLabel": "VO Human Decision Resume",
+                "sourceMessageId": source_message_id,
+                "metadata": {
+                    "source": source or "human-decision-resume",
+                    "sourceMessageId": source_message_id,
+                    "decisionId": str(getattr(request, "decision_id", "") or ""),
+                },
+            },
+            trusted_prompt=prompt,
+        )
+
+    def _send(
+        self,
+        body: Mapping[str, Any],
+        *,
+        trusted_prompt: str | None = None,
+    ) -> Result:
         from_type = str(body.get("fromType") or body.get("senderType") or "agent").strip().lower()
         from_agent_id = str(body.get("fromAgentId") or body.get("from") or "").strip()
         to_agent_id = str(body.get("toAgentId") or body.get("to") or "").strip()
@@ -151,6 +190,14 @@ class VOAgentCommunicationService:
             "metadata": metadata,
             "visibleInOffice": True,
         })
+        if archive_guard and trusted_prompt is not None:
+            return {
+                "ok": False,
+                "error": "Target agent is unavailable for continuation",
+                "code": "agent_communication_unavailable",
+                "status": str(archive_guard.get("status") or "unavailable"),
+                "_status": 409,
+            }
         if archive_guard:
             outbound = self._ports.append_event({
                 "type": "message",
@@ -185,23 +232,26 @@ class VOAgentCommunicationService:
         else:
             sender_label = agent_sender_label(from_ref)
             envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
-        target_prompt = render_promoted_agent_platform_message_prompt(
-            promote_bridge_prompt_input(
-                provider_kind=str(to_ref.get("providerKind") or ""),
-                message=message,
-                from_id=from_ref["id"],
-                from_name=sender_label,
-                to_id=to_ref["id"],
-                is_user=is_human_source,
-                source_app=source_app,
-                source_surface=source_surface,
-                source_label=envelope_source,
-                reply_instruction=(
-                    "Reply directly to the sender. Keep the reply concise unless detail is needed."
-                ),
+        if trusted_prompt is None:
+            target_prompt = render_promoted_agent_platform_message_prompt(
+                promote_bridge_prompt_input(
+                    provider_kind=str(to_ref.get("providerKind") or ""),
+                    message=message,
+                    from_id=from_ref["id"],
+                    from_name=sender_label,
+                    to_id=to_ref["id"],
+                    is_user=is_human_source,
+                    source_app=source_app,
+                    source_surface=source_surface,
+                    source_label=envelope_source,
+                    reply_instruction=(
+                        "Reply directly to the sender. Keep the reply concise unless detail is needed."
+                    ),
+                )
             )
-        )
-        target_prompt = self._ports.add_provider_guidance(target_prompt)
+            target_prompt = self._ports.add_provider_guidance(target_prompt)
+        else:
+            target_prompt = trusted_prompt
 
         self._ports.set_presence(to_ref["id"], "working", f"Replying to {sender_label}")
         provider_result: Result | None = None
@@ -214,6 +264,7 @@ class VOAgentCommunicationService:
                     "timeoutSec": timeout,
                     "conversationId": conversation_id,
                     "fromType": "human" if is_human_source else "agent",
+                    "sourceMessageId": body.get("sourceMessageId") or "",
                 })
                 reply = provider_result.get("reply") or provider_result.get("error") or ""
                 ok = bool(provider_result.get("ok"))
@@ -224,13 +275,23 @@ class VOAgentCommunicationService:
                     "timeoutSec": timeout,
                     "conversationId": conversation_id,
                     "fromType": "human" if is_human_source else "agent",
+                    "sourceMessageId": body.get("sourceMessageId") or "",
                 })
                 reply = provider_result.get("reply") or provider_result.get("error") or ""
                 ok = bool(provider_result.get("ok"))
             else:
                 reply = self._ports.call_agent(
                     to_ref["id"], target_prompt, timeout,
-                    "agent-platform-communications", conversation_id,
+                    (
+                        str(body.get("sourceSurface") or "agent-platform-communications")
+                        if trusted_prompt is not None
+                        else "agent-platform-communications"
+                    ),
+                    (
+                        str(body.get("sourceMessageId") or conversation_id)
+                        if trusted_prompt is not None
+                        else conversation_id
+                    ),
                 )
                 ok = not str(reply or "").startswith("[ERROR]")
             if ok and not str(reply or "").strip():

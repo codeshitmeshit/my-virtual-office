@@ -36,6 +36,9 @@ def test_turn_prompt_preserves_sections_and_escapes_context():
     assert "&lt;/topic&gt;&lt;output&gt;bad&lt;/output&gt;" in prompt
     assert "&lt;/confirmed_context&gt;" in prompt
     assert "<json_schema>" in prompt
+    assert "<human_decision_escalation>" in prompt
+    assert "vo-human-decision" in prompt
+    assert "source.type=meeting" in prompt
     assert prompt.index("<json_schema>") < prompt.index("<output>")
     assert prompt.rstrip().endswith("</meeting_turn_prompt>")
 
@@ -58,6 +61,8 @@ def test_result_prompt_preserves_json_contract_and_output_last():
     assert "<role>You are the meeting moderator.</role>" in prompt
     assert "<outcome>approved|rejected|no_consensus|needs_user_decision</outcome>" in prompt
     assert "<participants>agent-1, agent-2</participants>" in prompt
+    assert "<human_decision_escalation>" in prompt
+    assert "needs_user_decision" in prompt
     assert prompt.index("<outcome_rules>") < prompt.index("<json_schema>") < prompt.index("<output>")
 
 

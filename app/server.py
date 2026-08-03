@@ -174,6 +174,20 @@ from services.codex_feishu_approvals import (
     CodexFeishuApprovalCoordinator,
     CodexFeishuApprovalRouteStore,
 )
+from services.human_decision_delivery import HumanDecisionDelivery
+from services.human_decision_chat_continuation import (
+    ContinuationDispatchResult,
+    HumanDecisionChatContinuation,
+)
+from services.human_decision_continuation_dispatch import HumanDecisionContinuationDispatcher
+from services.human_decision_meeting_continuation import HumanDecisionMeetingContinuation, MeetingContinuationPorts
+from services.project_human_decision_continuation import (
+    ProjectContinuationPorts,
+    ProjectHumanDecisionContinuation,
+    mark_attempt_waiting as mark_project_attempt_waiting,
+)
+from services.human_decision_workflow import HumanDecisionWorkflow
+from services.human_decisions import HumanDecisionError, HumanDecisionStore
 from provider_sse_transport import ProviderSSETransport
 from services.project_repository import ProjectConflictError, ProjectNotFoundError, ProjectRepository
 from zoneinfo import ZoneInfo
@@ -1509,6 +1523,193 @@ PORT = VO_CONFIG["office"]["port"]
 WS_PORT = VO_CONFIG["office"]["wsPort"]
 WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
 STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
+
+
+def _dispatch_human_decision_chat_continuation(request):
+    result = _vo_agent_communication_service().send_trusted_resume(request)
+    if result.get("ok"):
+        return ContinuationDispatchResult("dispatched")
+    code = str(result.get("code") or "").strip()
+    status = str(result.get("status") or "").strip().lower()
+    if code == "agent_communication_busy" or status == "busy":
+        return ContinuationDispatchResult("not_dispatched_retryable", "conversation_busy")
+    if code == "agent_communication_unavailable":
+        return ContinuationDispatchResult("failed", code)
+    if int(result.get("_status") or 0) in {400, 404}:
+        return ContinuationDispatchResult("failed", code or "resume_binding_invalid")
+    return ContinuationDispatchResult(
+        "dispatch_uncertain",
+        code or status or "provider_result_unknown",
+    )
+
+
+def _human_decision_meeting_load(meeting_id):
+    with _EXEC_MEETING_LOCK:
+        return copy.deepcopy((_load_exec_meeting_store().get("meetings") or {}).get(meeting_id))
+
+
+def _human_decision_meeting_wake(meeting_id, prompt):
+    return _handle_executable_meeting_run(meeting_id, {
+        "humanDecisionResume": True,
+        "humanDecisionPrompt": prompt,
+    })
+
+
+def _human_decision_project_launch_direct(project_id, task_id, attempt_id):
+    cancel_flag = _PROJECT_EXECUTION_CANCEL_REGISTRY.create(attempt_id)
+    _project_execution_launch(
+        lambda: _project_execution_run_attempt(project_id, task_id, attempt_id, cancel_flag)
+    )
+    return True
+
+
+def _human_decision_project_submit_stage(project_id, task_id, run_id, attempt_id):
+    cancel_flag = _PROJECT_EXECUTION_CANCEL_REGISTRY.create(attempt_id)
+    submission = _project_stage_execution_dispatcher().submit(
+        project_id=project_id,
+        task_id=task_id,
+        run_id=run_id,
+        payload={"attemptId": attempt_id, "cancelFlag": cancel_flag, "humanDecisionResume": True},
+    )
+    if not submission.accepted:
+        _PROJECT_EXECUTION_CANCEL_REGISTRY.discard(attempt_id)
+    return bool(submission.accepted)
+
+
+def _human_decision_bind_native(decision, agent_id):
+    source = decision.get("source") if isinstance(decision.get("source"), dict) else {}
+    source_type = str(source.get("type") or "")
+    decision_id = str(decision.get("id") or "")
+    if source_type == "meeting":
+        meeting_id = str(source.get("id") or "")
+        with _EXEC_MEETING_LOCK:
+            store = _load_exec_meeting_store()
+            meeting = (store.get("meetings") or {}).get(meeting_id)
+            if not isinstance(meeting, dict) or agent_id not in set(meeting.get("participants") or []):
+                return None
+            current = str(meeting.get("stage") or "")
+            if current not in {"awaiting_user_decision", "completed", "cancelled", "failed"}:
+                _meeting_open_decision_window(
+                    store,
+                    meeting,
+                    current,
+                    int(meeting.get("round") or 0),
+                    current,
+                    int(meeting.get("round") or 0),
+                    "human_decision",
+                )
+            if meeting.get("stage") != "awaiting_user_decision":
+                return None
+            meeting["humanDecisionId"] = decision_id
+            _save_exec_meeting_store(store)
+            return {
+                "kind": "meeting",
+                "binding": {
+                    "meetingId": meeting_id,
+                    "meetingVersion": str(meeting.get("version") or 0),
+                    "resumeStage": str(meeting.get("decisionNextStage") or "active_discussion"),
+                },
+            }
+    if source_type == "task":
+        project_id = str(source.get("projectId") or "")
+        task_id = str(source.get("id") or "")
+        if not project_id or not task_id:
+            return None
+        try:
+            project = _PROJECT_REPOSITORY.get(project_id)
+        except ProjectNotFoundError:
+            return None
+        task = next((item for item in (project or {}).get("tasks", []) if item.get("id") == task_id), None)
+        attempt_id = str((task or {}).get("activeAttemptId") or "")
+        attempt = _project_execution_attempt(task or {}, attempt_id)
+        if not task or not attempt:
+            return None
+        marked = mark_project_attempt_waiting(
+            _PROJECT_REPOSITORY,
+            project_id=project_id,
+            task_id=task_id,
+            attempt_id=attempt_id,
+            decision_id=decision_id,
+            agent_id=agent_id,
+            now=_proj_now,
+        )
+        if not marked.get("ok"):
+            return None
+        run_id = str(attempt.get("stageRunId") or task.get("stageRunId") or "")
+        return {
+            "kind": "task",
+            "binding": {
+                "projectId": project_id,
+                "taskId": task_id,
+                "attemptId": attempt_id,
+                "runId": run_id,
+                "mode": "stage" if run_id else "direct",
+            },
+        }
+    return None
+
+
+HUMAN_DECISION_STORE = HumanDecisionStore(
+    os.path.join(STATUS_DIR, "human-decisions.json")
+)
+HUMAN_DECISION_CHAT_CONTINUATION = HumanDecisionChatContinuation(
+    store=HUMAN_DECISION_STORE,
+    dispatch=_dispatch_human_decision_chat_continuation,
+)
+HUMAN_DECISION_MEETING_CONTINUATION = HumanDecisionMeetingContinuation(
+    ports=MeetingContinuationPorts(
+        load=_human_decision_meeting_load,
+        transition=lambda meeting_id, body: _handle_executable_meeting_transition(meeting_id, body),
+        wake=_human_decision_meeting_wake,
+    )
+)
+_HUMAN_DECISION_PROJECT_REPOSITORY_PORT = type("HumanDecisionProjectRepositoryPort", (), {
+    "get": staticmethod(lambda project_id: _PROJECT_REPOSITORY.get(project_id)),
+    "update": staticmethod(lambda project_id, mutator: _PROJECT_REPOSITORY.update(project_id, mutator)),
+})()
+HUMAN_DECISION_PROJECT_CONTINUATION = ProjectHumanDecisionContinuation(
+    ports=ProjectContinuationPorts(
+        repository=_HUMAN_DECISION_PROJECT_REPOSITORY_PORT,
+        now=lambda: _proj_now(),
+        launch_direct=_human_decision_project_launch_direct,
+        submit_stage=_human_decision_project_submit_stage,
+    )
+)
+HUMAN_DECISION_CONTINUATION = HumanDecisionContinuationDispatcher(
+    store=HUMAN_DECISION_STORE,
+    adapters={
+        "chat": HUMAN_DECISION_CHAT_CONTINUATION,
+        "meeting": HUMAN_DECISION_MEETING_CONTINUATION,
+        "task": HUMAN_DECISION_PROJECT_CONTINUATION,
+    },
+)
+
+
+def _kick_human_decision_chat_continuation():
+    threading.Thread(
+        target=HUMAN_DECISION_CONTINUATION.process_due,
+        daemon=True,
+        name="human-decision-continuation",
+    ).start()
+
+
+HUMAN_DECISION_WORKFLOW = HumanDecisionWorkflow(
+    store=HUMAN_DECISION_STORE,
+    delivery=HumanDecisionDelivery(status_dir=STATUS_DIR),
+    notification_config=lambda: _feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+    chat_config=_feishu_chat_app_send_config,
+    fallback_chat_id=lambda: str(_feishu_chat_app_config().get("completionReportFallbackChatId") or "").strip(),
+    chat_continuation=HUMAN_DECISION_CHAT_CONTINUATION,
+    continuation=HUMAN_DECISION_CONTINUATION,
+    continuation_binding=_human_decision_bind_native,
+    continuation_kick=_kick_human_decision_chat_continuation,
+)
+HUMAN_DECISION_TIMER = periodic_timer_service.PeriodicTimer(
+    HUMAN_DECISION_WORKFLOW.process_due,
+    interval_seconds=60,
+    name="human-decision-reminders",
+    on_error=lambda exc: print(f"[HumanDecision] reminder loop failed: {type(exc).__name__}: {exc}"),
+)
 os.makedirs(STATUS_DIR, exist_ok=True)
 _MEETING_STORE_ACTIVE_LOCK_FD = meeting_repository_service.acquire_active_lock(STATUS_DIR)
 _MEETING_STORE_BOOT_REPOSITORY = meeting_repository_service.MeetingDomainRepository(STATUS_DIR)
@@ -13944,6 +14145,39 @@ def _dispatch_feishu_codex_approval_action(action, value, event):
     }
 
 
+def _dispatch_feishu_human_decision_action(action, value, event):
+    if action != "human_decision_submit":
+        return {"handled": False}
+    try:
+        result = HUMAN_DECISION_WORKFLOW.handle_feishu_action(
+            value,
+            _feishu_card_action_form_values(event),
+            _feishu_card_action_user(event),
+        )
+        answer = str((result.get("decision") or {}).get("resolution", {}).get("answer") or "").strip()
+        return {
+            **result,
+            "ok": True,
+            "businessStatus": "already_resolved" if result.get("idempotent") else "resolved",
+            "toast": _feishu_card_action_success(("已处理：" if result.get("idempotent") else "决策已提交：") + answer[:80]),
+        }
+    except HumanDecisionError as exc:
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": exc.code,
+            "toast": _feishu_card_action_error(str(exc)),
+        }
+    except Exception as exc:
+        print(f"[HumanDecision] Feishu callback failed: {type(exc).__name__}: {exc}")
+        return {
+            "handled": True,
+            "ok": False,
+            "businessStatus": "decision_callback_failed",
+            "toast": _feishu_card_action_error("决策未能提交，请稍后重试"),
+        }
+
+
 def _handle_feishu_card_action(body):
     if not isinstance(body, dict):
         return {"ok": False, "error": "Invalid Feishu callback body", "_status": 400}
@@ -13986,12 +14220,20 @@ def _handle_feishu_card_action(body):
         if callback_claim.get("inProgress"):
             record = _record_feishu_card_action(body, event, value, outcome={"businessStatus": "callback_in_progress"})
             return {"ok": True, "toast": _feishu_card_action_success("操作处理中（已处理）"), "recordId": record["id"], "outcome": {"businessStatus": "callback_in_progress", "idempotent": True}}
-    meeting_outcome = _dispatch_feishu_meeting_request_action(action, request_id, event)
-    project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
-    hermes_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
-    codex_outcome = {"handled": False} if meeting_outcome.get("handled") or project_outcome.get("handled") or hermes_outcome.get("handled") else _dispatch_feishu_codex_approval_action(action, value, event)
-    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else (codex_outcome if codex_outcome.get("handled") else None)))
+    human_decision_outcome = _dispatch_feishu_human_decision_action(action, value, event)
+    meeting_outcome = {"handled": False} if human_decision_outcome.get("handled") else _dispatch_feishu_meeting_request_action(action, request_id, event)
+    project_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
+    hermes_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
+    codex_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") or project_outcome.get("handled") or hermes_outcome.get("handled") else _dispatch_feishu_codex_approval_action(action, value, event)
+    outcome = human_decision_outcome if human_decision_outcome.get("handled") else (meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else (codex_outcome if codex_outcome.get("handled") else None))))
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
+    if human_decision_outcome.get("handled"):
+        return {
+            "ok": bool(human_decision_outcome.get("ok")),
+            "toast": human_decision_outcome.get("toast") or _feishu_card_action_success("决策已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in human_decision_outcome.items() if k not in {"toast", "decision", "snapshot", "cardUpdates"}},
+        }
     if meeting_outcome.get("handled"):
         response = {
             "ok": bool(meeting_outcome.get("ok")),
@@ -28142,6 +28384,26 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             return True
         return False
 
+    def _reject_untrusted_human_decision_agent_request(self):
+        """Accept decision creation only from an identified loopback agent."""
+        try:
+            remote = ipaddress.ip_address(str(self.client_address[0]))
+        except (AttributeError, IndexError, TypeError, ValueError):
+            remote = None
+        if remote is None or not remote.is_loopback:
+            self._send_json({"ok": False, "code": "human_decision_loopback_required", "error": "Agent decision requests are available only on loopback"}, status=403)
+            return True
+        if str(self.headers.get("Origin") or "").strip():
+            self._send_json({"ok": False, "code": "human_decision_browser_origin_rejected", "error": "Browser-origin agent decision requests are not allowed"}, status=403)
+            return True
+        if str(self.headers.get("X-VO-Agent-Action") or "").strip() != "human-decision":
+            self._send_json({"ok": False, "code": "human_decision_action_required", "error": "X-VO-Agent-Action: human-decision is required"}, status=403)
+            return True
+        if not str(self.headers.get("X-VO-Agent-Id") or "").strip():
+            self._send_json({"ok": False, "code": "human_decision_agent_required", "error": "X-VO-Agent-Id is required"}, status=403)
+            return True
+        return False
+
     def _reject_untrusted_agent_project_execution_request(self):
         try:
             remote = ipaddress.ip_address(str(self.client_address[0]))
@@ -29116,6 +29378,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ok", "test": "e2e"}).encode())
+        elif request_path == "/api/human-decisions":
+            self._send_json({"ok": True, "snapshot": HUMAN_DECISION_WORKFLOW.snapshot()}, allow_origin="*")
         elif self.path == "/status":
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
@@ -29129,6 +29393,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 meetings_loader=_meeting_active_projection,
                 requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
                 projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
+                decisions_loader=HUMAN_DECISION_WORKFLOW.snapshot,
             ).stream(self)
         elif request_path == "/api/chat-sessions":
             if self._reject_untrusted_management_request():
@@ -31660,6 +31925,66 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path == "/api/agent/human-decisions" or request_path.startswith("/api/agent/human-decisions/"):
+            if self._reject_untrusted_human_decision_agent_request():
+                return
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error)
+                return
+            try:
+                if request_path == "/api/agent/human-decisions":
+                    result = HUMAN_DECISION_WORKFLOW.create(
+                        body,
+                        agent_id=str(self.headers.get("X-VO-Agent-Id") or "").strip(),
+                    )
+                    self._send_json({"ok": True, **result}, status=201 if result.get("created") else 200)
+                else:
+                    rest = request_path[len("/api/agent/human-decisions/"):].strip("/")
+                    decision_id, separator, operation = rest.rpartition("/")
+                    decision_id = urllib.parse.unquote(decision_id).strip()
+                    if not separator or operation != "execution-started" or not decision_id or "/" in decision_id:
+                        raise HumanDecisionError("decision_not_found", "Decision operation not found", 404)
+                    result = HUMAN_DECISION_WORKFLOW.mark_execution_started(decision_id, body)
+                    self._send_json({"ok": True, **result})
+            except HumanDecisionError as exc:
+                self._send_json({"ok": False, "code": exc.code, "error": str(exc)}, status=exc.status)
+            except Exception as exc:
+                self._send_unexpected_json_error(exc)
+            return
+        if request_path == "/api/human-decisions" or request_path.startswith("/api/human-decisions/"):
+            if self._reject_untrusted_management_request():
+                return
+            body, error = self._read_limited_json_body(limit=self._JSON_BODY_LIMIT)
+            if error:
+                self._send_json_error(error, allow_origin="*")
+                return
+            try:
+                if request_path == "/api/human-decisions":
+                    result = HUMAN_DECISION_WORKFLOW.create(body)
+                    self._send_json({"ok": True, **result}, status=201 if result.get("created") else 200, allow_origin="*")
+                    return
+                rest = request_path[len("/api/human-decisions/"):].strip("/")
+                decision_id, separator, operation = rest.rpartition("/")
+                decision_id = urllib.parse.unquote(decision_id).strip()
+                if not separator or not decision_id or "/" in decision_id:
+                    raise HumanDecisionError("decision_not_found", "Decision request not found", 404)
+                if operation == "resolve":
+                    result = HUMAN_DECISION_WORKFLOW.resolve(
+                        decision_id, body, channel="local", actor={"id": "user:local"},
+                    )
+                elif operation == "reopen":
+                    result = HUMAN_DECISION_WORKFLOW.reopen(decision_id)
+                else:
+                    raise HumanDecisionError("decision_not_found", "Decision operation not found", 404)
+                self._send_json({"ok": True, **result}, allow_origin="*")
+                return
+            except HumanDecisionError as exc:
+                self._send_json({"ok": False, "code": exc.code, "error": str(exc)}, status=exc.status, allow_origin="*")
+                return
+            except Exception as exc:
+                self._send_unexpected_json_error(exc, allow_origin="*")
+                return
         if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
             if self._reject_untrusted_management_request():
                 return
@@ -37548,6 +37873,7 @@ if __name__ == "__main__":
     approval_reconcile_thread.start()
 
     _PROJECT_RECURRENCE_TIMER.start()
+    HUMAN_DECISION_TIMER.start()
     _project_completion_report_worker().start()
 
     # Start HTTP server in main thread

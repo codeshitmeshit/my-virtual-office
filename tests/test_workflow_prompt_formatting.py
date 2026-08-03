@@ -29,6 +29,9 @@ def test_workflow_task_prompt_preserves_checklist_contract_and_escapes_data():
     assert "&lt;/item&gt;" in prompt
     assert "&lt;/previous_work_log&gt;" in prompt
     assert "checklistUpdates is REQUIRED" in prompt
+    assert "<human_decision_escalation>" in prompt
+    assert "vo-human-decision" in prompt
+    assert "source.type=task" in prompt
     assert prompt.index("<warning>") < prompt.index("<output>")
 
 

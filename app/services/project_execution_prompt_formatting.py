@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from services import business_prompt_bridge
+from services.human_decision_prompt_guidance import human_decision_section
 
 
 def render_project_execution_prompt(
@@ -38,6 +39,7 @@ def render_project_execution_prompt(
         {"name": "role", "value": "You are the execution agent for a Virtual Office project task.", "trusted": True},
         {"name": "workspace", "value": workspace},
         {"name": "boundary", "value": "Work only inside this workspace. Do not review or mark the task complete.", "trusted": True},
+        human_decision_section("task"),
         {
             "name": "workflow",
             "trusted": True,
@@ -81,6 +83,23 @@ def render_project_execution_prompt(
             ],
         },
     ]
+    decision_resume = attempt.get("decisionResume") if isinstance(attempt.get("decisionResume"), dict) else None
+    if decision_resume:
+        sections.insert(4, {
+            "name": "human_decision_resume",
+            "children": [
+                {
+                    "name": "rule",
+                    "trusted": True,
+                    "value": "Preserve completed work and continue only the branch authorized by the final human decision.",
+                },
+                {
+                    "name": "untrusted_decision_data",
+                    "format": "json",
+                    "value": decision_resume,
+                },
+            ],
+        })
     sections.extend(
         {"format": "raw", "trusted": True, "value": value}
         for value in raw_sections[:2]

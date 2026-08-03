@@ -131,6 +131,7 @@ def _preserve_text(value: Any, limit: int = 12000) -> str:
 
 
 def _normalize_details(raw: Any) -> list[tuple[str, str]]:
+    divider = "__vo_card_divider__"
     if raw is None:
         return []
     if isinstance(raw, dict):
@@ -139,13 +140,19 @@ def _normalize_details(raw: Any) -> list[tuple[str, str]]:
         items = []
         for item in raw:
             if isinstance(item, dict):
-                items.append((item.get("label") or item.get("key") or item.get("name"), item.get("value")))
+                if item.get("type") == "divider":
+                    items.append((divider, divider))
+                else:
+                    items.append((item.get("label") or item.get("key") or item.get("name"), item.get("value")))
             elif isinstance(item, (list, tuple)) and len(item) >= 2:
                 items.append((item[0], item[1]))
     else:
         return [("详情", raw)]
     details = []
     for key, value in items:
+        if key == divider and value == divider:
+            details.append((divider, divider))
+            continue
         label = _string(key, 80)
         text = _string(value, 500)
         if label and text:
@@ -232,6 +239,9 @@ def _base_content_elements(normalized: dict[str, Any], *, v2: bool = False) -> l
         elements.append(text_block("\n".join(related_lines)))
 
     for label, value in normalized["details"]:
+        if label == "__vo_card_divider__" and value == "__vo_card_divider__":
+            elements.append({"tag": "hr"})
+            continue
         elements.append(text_block(f"**{label}**：{value}"))
     return elements
 

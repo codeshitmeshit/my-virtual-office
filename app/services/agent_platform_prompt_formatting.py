@@ -9,6 +9,7 @@ from typing import Any, Mapping
 from services import bridge_input_output_formatting as prompt_formatter
 from services.bridge_interim_notice import original_channel_interim_notice_values
 from services.bridge_prompt_preprocessing import promote_bridge_prompt_input, promote_provider_delivery_prompt
+from services.human_decision_prompt_guidance import human_decision_guidance
 
 
 def _local_vo_skill_entry_text() -> str:
@@ -28,6 +29,7 @@ def _local_vo_skill_entry_text() -> str:
 
 def _vo_routing_guidance_values() -> Mapping[str, Any]:
     return {
+        "human_decision_escalation": prompt_formatter.trusted_text(human_decision_guidance("chat")),
         "chat_intent_gate": prompt_formatter.trusted_text(
             "For every user chat message, first decide whether the request matches any VO workflow or a better-suited VO Agent before answering directly. This includes agent collaboration, HR directory/routing, projects, workspaces, browser control, meetings, scheduled tasks, finance or market analysis, code work, and any domain listed by the local VO skill entry."
         ),
@@ -93,6 +95,14 @@ def render_promoted_agent_platform_message_prompt(promoted: Mapping[str, Any]) -
         values["metadata"]["source_message_id"] = prompt_formatter.untrusted_text(
             metadata.get("source_message_id")
         )
+    if metadata.get("conversation_id"):
+        values["conversation_context"] = {
+            "agent_id": prompt_formatter.untrusted_text(metadata.get("agent_id") or metadata.get("to_id") or ""),
+            "provider_kind": prompt_formatter.untrusted_text(
+                metadata.get("provider_kind") or promoted.get("provider_kind") or ""
+            ),
+            "conversation_id": prompt_formatter.untrusted_text(metadata.get("conversation_id") or ""),
+        }
     if metadata.get("feishu_chat_id") or metadata.get("chat_type"):
         values["metadata"]["feishu_source_context"] = prompt_formatter.section(
             "feishu_source_context",

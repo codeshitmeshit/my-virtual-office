@@ -96,6 +96,16 @@
         }
     }
 
+    function applyDecisions(decisions) {
+        if (!decisions || !Number.isSafeInteger(decisions.revision)) return;
+        window.dashboardDecisions = decisions;
+        if (window.HumanDecisionCenterApp && typeof window.HumanDecisionCenterApp.applySnapshot === 'function') {
+            window.HumanDecisionCenterApp.applySnapshot(decisions);
+        } else if (window.humanDecisionCenter && typeof window.humanDecisionCenter.update === 'function') {
+            window.humanDecisionCenter.update(decisions);
+        }
+    }
+
     function actionText(action) {
         var title = action.title || 'Action required';
         var text = action.text ? ': ' + action.text : '';
@@ -170,6 +180,7 @@
         applyStatus(payload.status);
         applyMeetings(payload.meetings);
         applyProjects(payload.projects);
+        applyDecisions(payload.decisions);
         applyActions(payload.actions);
     }
 
@@ -184,7 +195,8 @@
             var meetingsPromise = fetch('/api/meetings/active').then(function (r) { return r.json(); });
             var requestsPromise = fetch('/api/meetings/requests?status=pending').then(function (r) { return r.json(); });
             var projectsPromise = fetch('/api/projects?status=active').then(function (r) { return r.json(); });
-            var results = await Promise.all([statusPromise, meetingsPromise, requestsPromise, projectsPromise]);
+            var decisionsPromise = fetch('/api/human-decisions').then(function (r) { return r.json(); });
+            var results = await Promise.all([statusPromise, meetingsPromise, requestsPromise, projectsPromise, decisionsPromise]);
             if (typeof window.dashboardApplyStatusSnapshot === 'function') {
                 window.dashboardApplyStatusSnapshot(results[0], { logRoutine: false });
             }
@@ -193,6 +205,7 @@
                 pendingRequests: (results[2] || {}).requests || []
             });
             applyProjects((results[3] || {}).projects || []);
+            applyDecisions((results[4] || {}).snapshot || results[4]);
             applyActions(actionsFromFallback((results[1] || {}).meetings || [], (results[2] || {}).requests || []));
         } catch (_) {}
     }
@@ -257,6 +270,12 @@
             setMode('sse');
             applyProjects(parse(evt).projects);
         });
+        source.addEventListener('dashboard.decisions', function (evt) {
+            markSseActive();
+            stopFallback();
+            setMode('sse');
+            applyDecisions(parse(evt).decisions);
+        });
         source.addEventListener('dashboard.actions', function (evt) {
             markSseActive();
             applyActions(parse(evt).actions);
@@ -278,7 +297,8 @@
         isSseFresh: isSseFresh,
         fetchFallbackOnce: fetchFallbackOnce,
         _applySnapshot: applySnapshot,
-        _applyActions: applyActions
+        _applyActions: applyActions,
+        _applyDecisions: applyDecisions
     };
 
     window.addEventListener('i18n:ready', refreshModeLabel);

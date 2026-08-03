@@ -928,8 +928,27 @@ def transition_command(
         return {"error": f"Illegal transition from {current} to {target}", "stage": current, "_status": error.status}
     actor = {"type": str(body.get("actorType") or "user"), "id": str(body.get("actorId") or "user")}
     if current == "awaiting_user_decision" and raw_target in {"continue", "continue_decision"}:
+        decision_id = str(body.get("decisionId") or "").strip()
+        bound_decision_id = str(meeting.get("humanDecisionId") or "").strip()
+        if decision_id and bound_decision_id and decision_id != bound_decision_id:
+            return {"error": "Meeting is waiting for a different human decision", "_status": 409}
+        if decision_id:
+            meeting["humanDecisionId"] = decision_id
+        meeting["humanDecisionResolution"] = str(body.get("decision") or "")
+        meeting["humanDecisionResumeKey"] = idempotency_key
+        resolution_event = hooks.append_event(
+            data,
+            meeting,
+            "human_decision_resolved",
+            actor=actor,
+            payload={"decisionId": decision_id, "answer": meeting["humanDecisionResolution"]},
+            idempotency_key=idempotency_key,
+        )
         hooks.continue_decision(data, meeting, actor=actor, reason=body.get("reason") or "user_continue")
-        return {"ok": True, "meeting": meeting, "event": data.get("events", {}).get(meeting_id, [])[-1]}
+        event = data.get("events", {}).get(meeting_id, [])[-1] if data.get("events", {}).get(meeting_id) else resolution_event
+        if idem_key:
+            data.setdefault("idempotency", {})[idem_key] = {"meetingId": meeting_id, "sequence": event.get("sequence")}
+        return {"ok": True, "meeting": meeting, "event": event}
     meeting["previousStage"] = current
     meeting["stage"] = target
     if target == "preparing":

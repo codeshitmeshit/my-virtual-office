@@ -1,0 +1,4 @@
+interface:
+  display_name: "VO 人工决策"
+  short_description: "为 VO 任务、会议和聊天执行创建统一的关键人工决策请求"
+  default_prompt: "Use $vo-human-decision to request a human decision for this blocked execution branch."

@@ -112,6 +112,45 @@ def test_decision_window_can_pause_and_resume_to_same_window():
     assert value["stage"] == "awaiting_user_decision"
 
 
+def test_continue_decision_persists_answer_and_idempotency_before_native_resume():
+    value = {
+        **meeting(stage="awaiting_user_decision", version=2),
+        "humanDecisionId": "decision-1",
+        "decisionNextStage": "active_discussion",
+    }
+    data = {"meetings": {"m1": value}, "events": {"m1": []}, "occupancy": {}, "idempotency": {}}
+
+    def append_event(store, current, event_type, **kwargs):
+        current["version"] += 1
+        event = {"sequence": len(store["events"]["m1"]) + 1, "type": event_type, "payload": kwargs.get("payload", {})}
+        store["events"]["m1"].append(event)
+        return event
+
+    def continue_decision(store, current, **kwargs):
+        current["stage"] = "active_discussion"
+        append_event(store, current, "decision_window_closed")
+
+    hooks = TransitionHooks(
+        append_event=append_event, continue_decision=continue_decision,
+        mark_preparing=lambda current: None, resume_original_work=lambda *args: None,
+        ensure_action_items=lambda *args: None, award_points=lambda current: None,
+    )
+    body = {
+        "action": "continue_decision",
+        "decisionId": "decision-1",
+        "decision": "Staged rollout",
+        "idempotencyKey": "human-decision-resume:decision-1",
+    }
+
+    first = transition_command(data, "m1", body, hooks)
+    second = transition_command(data, "m1", body, hooks)
+
+    assert first["ok"] is True
+    assert value["humanDecisionResumeKey"] == "human-decision-resume:decision-1"
+    assert value["humanDecisionResolution"] == "Staged rollout"
+    assert second["idempotent"] is True
+
+
 def test_create_command_owns_conflict_and_atomic_initial_state():
     data = {"meetings": {}, "events": {}, "occupancy": {}, "idempotency": {}}
     def append_event(store, current, kind, **kwargs):

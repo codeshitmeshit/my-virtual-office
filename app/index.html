@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="archive-room.css?v=1785328545-phase13">
     <link rel="stylesheet" href="human-resources.css?v=20260731-hr-report-rendering">
     <link rel="stylesheet" href="human-resources-figma.css?v=20260731-hr-report-rendering">
+    <link rel="stylesheet" href="human-decision-center.css?v=20260803-vo-shell">
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
     <link rel="stylesheet" href="window-controls.css?v=1785328545-close-controls">
     <link rel="stylesheet" href="meeting-center.css?v=1785328545-status-list-colors">
@@ -471,6 +472,14 @@
                 <div class="section-body" style="display:none">
                     <div id="sidebar-mtg-active" class="sidebar-mtg-list"></div>
                     <button class="sidebar-mtg-btn" onclick="openMeetingsDashboard()" data-i18n="open_meetings">📊 Open Meetings</button>
+                </div>
+            </div>
+
+            <div class="human-decision-sidebar collapsible">
+                <h4 onclick="toggleSection(this)"><span class="section-arrow">▶</span> <span>⚖️ 人工决策</span></h4>
+                <div class="section-body" style="display:none">
+                    <p class="human-decision-sidebar__summary">集中处理任务、会议与聊天中的待决策事项。</p>
+                    <button id="human-decision-center-toggle" type="button" title="打开人工决策中枢">⚖️ 打开人工决策</button>
                 </div>
             </div>
 
@@ -979,6 +988,9 @@
         </div>
     </div>
 
+    <!-- Human Decision Center -->
+    <div id="human-decision-center-panel" aria-label="人工决策中枢"></div>
+
     <!-- SMS Panel -->
     <div id="sms-panel" class="sms-panel">
         <div class="sms-resize-handle top-left"></div>
@@ -1232,7 +1244,9 @@
     <script src="mcp-registry-ui.js?v=20260730-managed-launcher"></script>
     <script src="meeting-center.js?v=1785328545-status-list-colors"></script>
     <script src="agent-guide.js?v=1785328545-agent-guide-skill-md"></script>
-    <script src="dashboard-realtime.js?v=1785328545-startup-poll-delay"></script>
+    <script src="human-decision-center.js?v=20260803-vo-shell"></script>
+    <script src="human-decision-center-app.js?v=20260803-vo-shell"></script>
+    <script src="dashboard-realtime.js?v=20260803-human-decisions"></script>
     <script src="browser-viewer-url.js?v=1785328545-viewer-proxy"></script>
     <script src="browser-panel.js?v=1785328545-poll-inflight-guard"></script>
     <script src="project-orchestration-api.js?v=1785328545-orchestration-actions"></script>

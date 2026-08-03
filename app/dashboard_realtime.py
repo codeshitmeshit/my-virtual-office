@@ -171,22 +171,35 @@ def _project_summary_projection(projects: list[Any]) -> list[JsonDict]:
     return projected
 
 
-def build_dashboard_snapshot(status: JsonDict, meetings: list[Any], requests: list[Any], projects: list[Any] | None = None) -> JsonDict:
+def build_dashboard_snapshot(
+    status: JsonDict,
+    meetings: list[Any],
+    requests: list[Any],
+    projects: list[Any] | None = None,
+    decisions: JsonDict | None = None,
+) -> JsonDict:
     status_projection = _agent_status_projection(status if isinstance(status, dict) else {})
     meeting_projection = _meeting_summary_projection(meetings if isinstance(meetings, list) else [], requests if isinstance(requests, list) else [])
     project_projection = _project_summary_projection(projects if isinstance(projects, list) else [])
+    decision_projection = decisions if isinstance(decisions, dict) else {"revision": 0, "decisions": []}
+    decision_signature_projection = {
+        "revision": int(decision_projection.get("revision") or 0),
+        "decisions": decision_projection.get("decisions") if isinstance(decision_projection.get("decisions"), list) else [],
+    }
     actions = _action_required_items(meeting_projection["active"], meeting_projection["pendingRequests"])
     snapshot = {
         "ts": int(time.time() * 1000),
         "status": status_projection,
         "meetings": meeting_projection,
         "projects": project_projection,
+        "decisions": decision_projection,
         "actions": actions,
     }
     snapshot["signatures"] = {
         "status": _signature(status_projection),
         "meetings": _signature(meeting_projection),
         "projects": _signature(project_projection),
+        "decisions": _signature(decision_signature_projection),
         "actions": _signature(actions),
     }
     return snapshot
@@ -204,6 +217,8 @@ def diff_dashboard_events(previous: JsonDict | None, current: JsonDict) -> list[
         events.append(("dashboard.meetings", {"ts": current.get("ts"), "meetings": current.get("meetings"), "signature": curr_sig.get("meetings")}))
     if prev_sig.get("projects") != curr_sig.get("projects"):
         events.append(("dashboard.projects", {"ts": current.get("ts"), "projects": current.get("projects"), "signature": curr_sig.get("projects")}))
+    if prev_sig.get("decisions") != curr_sig.get("decisions"):
+        events.append(("dashboard.decisions", {"ts": current.get("ts"), "decisions": current.get("decisions"), "signature": curr_sig.get("decisions")}))
     if prev_sig.get("actions") != curr_sig.get("actions"):
         events.append(("dashboard.actions", {"ts": current.get("ts"), "actions": current.get("actions"), "signature": curr_sig.get("actions")}))
     return events
@@ -215,6 +230,7 @@ class DashboardRealtimeStream:
     meetings_loader: Callable[[], list[Any]]
     requests_loader: Callable[[], list[Any]]
     projects_loader: Callable[[], list[Any]] | None = None
+    decisions_loader: Callable[[], JsonDict] | None = None
     interval_sec: float = 1.0
     heartbeat_sec: float = 15.0
 
@@ -224,6 +240,7 @@ class DashboardRealtimeStream:
             self.meetings_loader() or [],
             self.requests_loader() or [],
             self.projects_loader() if self.projects_loader else [],
+            self.decisions_loader() if self.decisions_loader else None,
         )
 
     def _send_event(self, handler: Any, event_name: str, payload: JsonDict) -> bool:

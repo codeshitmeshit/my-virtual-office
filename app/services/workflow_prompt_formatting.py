@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from services import business_prompt_bridge
+from services.human_decision_prompt_guidance import human_decision_section
 
 
 def _project_context_section(project: dict[str, Any] | None, task: dict[str, Any]) -> dict[str, Any] | None:
@@ -120,6 +121,7 @@ def render_workflow_task_prompt(
 ) -> str:
     sections: list[dict[str, Any]] = [
         {"name": "assignment", "value": "Complete the assigned task fully on your own. Do NOT ask for clarification, followups, or user input.", "trusted": True},
+        human_decision_section("task"),
     ]
     project_context = _project_context_section(project, task)
     if project_context:

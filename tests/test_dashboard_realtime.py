@@ -206,3 +206,16 @@ def test_dashboard_initial_diff_emits_snapshot():
     events = diff_dashboard_events(None, snapshot)
     assert len(events) == 1
     assert events[0][0] == "dashboard.snapshot"
+
+
+def test_dashboard_diff_emits_human_decisions_as_a_dedicated_section():
+    before = build_dashboard_snapshot({}, [], [], decisions={"revision": 1, "decisions": []})
+    after = build_dashboard_snapshot(
+        {}, [], [],
+        decisions={"revision": 2, "decisions": [{"id": "decision-1", "status": "resolved"}]},
+    )
+
+    events = diff_dashboard_events(before, after)
+
+    assert [name for name, _ in events] == ["dashboard.decisions"]
+    assert events[0][1]["decisions"]["revision"] == 2

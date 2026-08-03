@@ -392,6 +392,55 @@ def test_runner_discards_cancel_flag_when_provider_raises():
     assert registry.get("attempt-1") is None
 
 
+def test_runner_stops_before_review_when_provider_created_human_decision():
+    _, repository = _repository()
+    repository.update("p1", lambda project: project["tasks"][0].update({
+        "executionState": "executing",
+        "activeAttemptId": "attempt-1",
+        "checklist": [{"id": "deliverable", "text": "Deliver", "done": False}],
+        "attempts": [{
+            "id": "attempt-1",
+            "status": "executing",
+            "workspacePath": "/workspace",
+            "executor": {"id": "executor", "providerKind": "test"},
+        }],
+    }))
+    registry = execution_lifecycle.CancelRegistry(flags={"attempt-1": threading.Event()})
+    forbidden = []
+
+    def provider(*args, **kwargs):
+        def wait(project):
+            task = project["tasks"][0]
+            task["attempts"][0].update({
+                "status": "awaiting_user_decision",
+                "humanDecisionId": "decision-1",
+            })
+            task["executionState"] = "awaiting_user_decision"
+        repository.update("p1", wait)
+        return {"ok": True, "reply": "waiting", "status": "completed"}
+
+    ports = type("Ports", (), {
+        "repository": repository,
+        "build_prompt": staticmethod(lambda *args: "prompt"),
+        "provider": staticmethod(provider),
+        "acceptance_checklist": staticmethod(lambda task: task.get("checklist") or []),
+        "find_attempt": staticmethod(lambda task, attempt_id: next(item for item in task["attempts"] if item["id"] == attempt_id)),
+        "now": staticmethod(lambda: "now"),
+        "cancel_registry": registry,
+        "git_snapshot": staticmethod(lambda path: forbidden.append("git") or {}),
+        "start_review": staticmethod(lambda *args: forbidden.append("review")),
+        "reconcile_terminal": staticmethod(lambda *args: forbidden.append("reconcile")),
+    })()
+
+    execution_lifecycle.run_attempt("p1", "t1", "attempt-1", threading.Event(), ports=ports)
+
+    saved = repository.get("p1")["tasks"][0]
+    assert saved["activeAttemptId"] == "attempt-1"
+    assert saved["attempts"][0]["status"] == "awaiting_user_decision"
+    assert forbidden == []
+    assert registry.get("attempt-1") is None
+
+
 def test_marked_project_terminal_attempt_reconciles_instead_of_scheduling_legacy_continue():
     project = {
         "id": "p1",

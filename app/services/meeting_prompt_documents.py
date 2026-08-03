@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from services import business_prompt_bridge
+from services.human_decision_prompt_guidance import human_decision_section
 
 
 TURN_SCHEMA = {
@@ -129,6 +130,7 @@ def result_prompt(
                         "policy_rule": policy_rule,
                     },
                 },
+                human_decision_section("meeting"),
                 {"name": "json_schema", "value": RESULT_SCHEMA, "trusted": True},
             ],
             "output": "Return exactly one JSON object and no surrounding prose or Markdown fences.",
@@ -167,6 +169,7 @@ def turn_prompt(
     sections.extend(
         [
             {"name": "instruction", "value": "Contribute to the meeting. Avoid repeating previous points.", "trusted": True},
+            human_decision_section("meeting"),
             {"name": "json_schema", "value": TURN_SCHEMA, "trusted": True},
         ]
     )

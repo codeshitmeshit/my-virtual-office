@@ -471,6 +471,27 @@ def _claim_attempt_runner(project_id: str, task_id: str, attempt_id: str, ports:
         return False
 
 
+def _attempt_waiting_for_human_decision(
+    project_id: str,
+    task_id: str,
+    attempt_id: str,
+    ports: RunnerPorts,
+) -> bool:
+    try:
+        project = ports.repository.get(project_id)
+    except ProjectNotFoundError:
+        return False
+    task = _find_task(project or {}, task_id)
+    if not task or task.get("activeAttemptId") != attempt_id:
+        return False
+    attempt = ports.find_attempt(task, attempt_id)
+    return bool(
+        attempt
+        and attempt.get("status") == "awaiting_user_decision"
+        and attempt.get("humanDecisionId")
+    )
+
+
 def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: threading.Event, *, ports: RunnerPorts) -> None:
     notification_key: str | None = None
     reconcile_reason: str | None = None
@@ -489,6 +510,8 @@ def run_attempt(project_id: str, task_id: str, attempt_id: str, cancel_flag: thr
         executor = invocation.executor
         started = invocation.started_at
         result = invocation.result
+        if _attempt_waiting_for_human_decision(project_id, task_id, attempt_id, ports):
+            return
         final_snapshot = ports.git_snapshot(workspace)
         data, project, task = ports.find(project_id, task_id)
         if not project or not task:

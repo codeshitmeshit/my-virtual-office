@@ -80,18 +80,16 @@ echo $VO_GATEWAY_HTTP
 
 下面内容由 HR 名录同步、手动补全信息和新人自我介绍流程生成。主入口选择目标 Agent 时，应优先结合用户意图与这些职责介绍判断，而不是只在用户明确点名角色时才转交。
 
-- `claude-code-local` Claude Code (availability=available, readiness=ready): Claude Code — an on-premise software engineering agent running in the Virtual Office platform, backed by Anthropic's Claude (DeepSeek v4 Pro inference). Operating in a Linux environment with file read/write, shell execution, git, and web access.主要职责：Read, write, and edit code across the full repository；Execute shell commands for builds, tests, and system operations；Manage git workflows (branch, commit, review diffs)。擅长：Full-stack code understanding through direct file system access — can read, trace, and refactor across frontend (HTML/JS/CSS), backend (Python), and tests in one session；Shell-native — runs builds, tests, and system commands directly in Linux, seeing real output and iterating...
-- `codex-local` Codex (availability=available, readiness=ready): Codex 是本地代码协作与软件工程 Agent，运行在用户共享工作区中，能够读取、分析、修改和验证仓库代码。
-- `hermes-default` Hermes (availability=available, readiness=ready): 我是 Hermes Agent 上的个人助理型 AI Agent，用户称呼我为“小欧”。我主要在命令行与 Virtual Office / OpenClaw 协作环境中帮助用户处理信息整理、任务协调、工具调用、代码与文档工作，并在需要时通过本地工具、网页、文件系统、终端、定时任务和消息通道完成可验证的操作。主要职责：作为用户的个人助理，接收、拆解和推进用户交办的事务。；在 Virtual Office / OpenClaw 协作环境中理解消息请求，按要求返回结构化结果或协作回复。；根据任务需要调用本地工具、终端、文件、浏览器、网页搜索、定时任务、消息发送等能力完成实际操作。。擅长：能把模糊任务拆成可执行步骤，并持续推进到有真实工具输出的结果。；擅长在本地开发环境中读取文件、运行命令、检查 git 状态、执行测试和验证变更。。适合协作场景：其他 Agent 需要把用户请求转化为可执行任务、检查前置条件或整理下一步计划时，适合与我协作。；其他 Agent 需要在 OpenClaw 团队内选择合适 agent、派发任务或汇总多 agent 结果时，适合与我协作。。
-- `main` 小小欧 (availability=available, readiness=ready): 小小欧，OpenClaw 平台主 agent，欧阳的私人 AI 助手与执行机器，负责任务执行、agent 编排、金融投研、定时任务管理、记忆维护与 Skill Workshop 提案管理。
-- `market-analyst-team-agent` 分析师 (availability=available, readiness=ready): 综合市场金融分析团队，覆盖A股/港股/美股的技术面、基本面、新闻事件、社交情绪与中国市场制度分析，服务欧阳与主agent「小小欧」，输出含目标价、仓位与止损的可执行投资建议。
-- `market-management-team-agent` 经理人 (availability=available, readiness=ready): 组合经理与研究裁决者，负责整合基本面、技术面、新闻事件、市场情绪与多研究员观点，作出可执行的投资策略裁决（买入/持有/卖出），并制定仓位方向、目标价区间、风险调整情景与执行计划，覆盖A股、港股、美股三大市场。
-- `market-research-team-agent` 研究员 (availability=available, readiness=ready): 多空研究与证据辩论团队（market-research-team-agent），负责整合看涨与看跌两方观点，形成平衡、可执行、可复核的阶段性投资研究结论，覆盖A股/港股/美股市场。
-- `market-risk-management-team-agent` 风控官 (availability=available, readiness=ready): 风控官 — 市场风险管理委员会执行人格，负责对交易员方案进行激进/中性/保守三视角风险审查并输出最终风险裁决主要职责：对交易员提交的交易执行方案进行最终风险审查，覆盖数据完整性、交易结构、最大损失、尾部风险、执行风险与对冲需求；从激进、中性、保守三个风险视角分别评估方案，并主持三方交锋辩论；输出明确风险裁决：批准 / 调整后批准 / 暂缓 / 否决，并给出对应交易动作。擅长：审慎但不怯懦：风险不是拒绝交易的借口，而是决定是否值得承担及如何承担；证据优先：真实行情、财报、成交量、波动率、估值、宏观与政策信息优先，不编造数据。适合协作场景：当 market-trader-agent 完成交易执行方案后，需要最终风险审查与裁决时；当 market-management-team-agent 形成投资策略和目标价后，需要评估策略风控边界是否充分时。
-- `market-trader-agent` 交易员 (availability=available, readiness=ready): 交易执行计划团队（market-trader-agent），负责将前序市场研究、基本面、技术面、情绪面与风险管理结论转化为可执行交易方案，输出含买卖建议、目标价、止损止盈、仓位分批计划及风险评分的结构化交易执行计划。
-- `scheduled-task-agent` 定时任务官 (availability=available, readiness=ready): 定时任务官（scheduled-task-agent）：OpenClaw 内专门负责定时任务调度、执行与维护的 Agent，执行 cron 分配的任务，管理定时任务生命周期，对简单低风险任务自行执行，对需要专业判断的任务委派给合适 agent，默认静默运行。
+- `agent-1` Agent-1 (availability=available, readiness=ready): Public agent-1 introduction
+- `agent-2` Agent-2 (availability=available, readiness=ready): Public agent-2 introduction
 
 <!-- HR_AGENT_ROUTING_END -->
+
+
+
+
+
+
 
 
 
@@ -109,6 +107,7 @@ echo $VO_GATEWAY_HTTP
 - 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。
 - 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。
 - 需要操作已确认的 executable meeting，包括 run/transition、事件跟踪、干预、冲突处理或 action item 草稿：使用 本地 `/skills/vo-meeting-execution/SKILL.md`。
+- 任务、会议或聊天执行中出现多个合理选项，选择会实质影响结果、风险、范围、成本或不可逆动作，且 VO 无权代替用户决定：使用 本地 `/skills/vo-human-decision/SKILL.md`；只暂停受影响分支，不用普通聊天提问绕过决策中枢。
 
 不要把本 skill 当成普通通信、HR Agent 目录、浏览器、项目、workspace 或会议执行的完整手册；命中专用场景后应切换到对应 skill 的规则。
 
@@ -167,6 +166,7 @@ echo $VO_GATEWAY_HTTP
 - 普通协作已优先考虑专用通信 skill，会议只用于正式多方决策、独立评审或需要用户确认上下文的场景。
 - 明确的项目创作/受控维护与项目执行/review/验收已分别路由到 本地 `/skills/vo-project-authoring/SKILL.md` 和 本地 `/skills/vo-project-workflow/SKILL.md`。
 - Agent workspace、HR Agent 能力、已确认会议执行已分别路由到 本地 `/skills/vo-agent-workspace/SKILL.md`、本地 `/skills/vo-agent-hr/SKILL.md`、本地 `/skills/vo-meeting-execution/SKILL.md`。
+- 需要人工裁决的任务、会议或聊天执行分支已路由到 本地 `/skills/vo-human-decision/SKILL.md`，没有让无关安全分支一起等待。
 - MCP 使用说明只在工具定义不足时按需读取，没有把它当作独立 Skill 安装，也没有把说明内容视为额外授权。
 - 浏览器权限/登录/验证码/敏感操作阻塞已路由到 本地 `/skills/vo-browser-control/SKILL.md`，并已停止自动化或明确请求用户接管。
 - 需要提交或查询会议申请时，已读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。

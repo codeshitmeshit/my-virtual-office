@@ -12,6 +12,7 @@ from app.services.vo_agent_communication import (
     VOAgentCommunicationService,
     require_reply,
 )
+from app.services.human_decision_chat_continuation import ContinuationDispatchRequest
 
 
 SENDER = {
@@ -40,7 +41,7 @@ OPENCLAW_TARGET = {
 }
 
 
-def _service(*, agents=None, codex_result=None):
+def _service(*, agents=None, codex_result=None, archive_result=None):
     agents = agents or {"hr": SENDER, "codex-local": TARGET}
     events = []
     provider_calls = []
@@ -82,7 +83,7 @@ def _service(*, agents=None, codex_result=None):
     ports = VOAgentCommunicationPorts(
         lookup_agent=lambda ai_id: agents.get(ai_id),
         agent_ref=agent_ref,
-        archive_guard=lambda _target, _message: None,
+        archive_guard=lambda _target, _message: archive_result,
         source_metadata=lambda _body: {},
         append_event=append_event,
         add_provider_guidance=lambda prompt: prompt + "\nVO-GUIDANCE",
@@ -180,3 +181,76 @@ def test_http_and_hr_wiring_share_the_application_service_boundary():
     assert "_vo_agent_communication_service().send" in server_source[hr_start:hr_end]
     assert "_vo_agent_communication_service().send" in server_source[handler_start:handler_end]
     assert "_handle_agent_platform_comm_send" not in server_source[hr_start:hr_end]
+
+
+def test_trusted_human_decision_resume_reuses_original_conversation_and_prompt():
+    service, events, calls, _presence = _service()
+    request = ContinuationDispatchRequest(
+        decision_id="decision-1",
+        agent_id="codex-local",
+        conversation_id="conversation-1",
+        source_message_id="human-decision-resume:decision-1",
+        source="human-decision-resume",
+        prompt="<human_decision_chat_resume><task>继续</task></human_decision_chat_resume>",
+    )
+
+    result = service.send_trusted_resume(request)
+
+    assert result["ok"] is True
+    assert result["conversationId"] == "conversation-1"
+    assert calls[0]["agentId"] == "codex-local"
+    assert calls[0]["conversationId"] == "conversation-1"
+    assert calls[0]["sourceMessageId"] == "human-decision-resume:decision-1"
+    assert calls[0]["message"] == request.prompt
+    assert [event["conversationId"] for event in events] == ["conversation-1", "conversation-1"]
+    assert events[0]["metadata"]["sourceMessageId"] == "human-decision-resume:decision-1"
+    assert events[0]["metadata"]["source"] == "human-decision-resume"
+    assert events[1]["text"] == "收到"
+
+
+def test_trusted_human_decision_resume_rejects_unknown_agent_before_history():
+    service, events, calls, _presence = _service()
+    request = ContinuationDispatchRequest(
+        decision_id="decision-1",
+        agent_id="missing",
+        conversation_id="conversation-1",
+        source_message_id="human-decision-resume:decision-1",
+        source="human-decision-resume",
+        prompt="<human_decision_chat_resume></human_decision_chat_resume>",
+    )
+
+    result = service.send_trusted_resume(request)
+
+    assert result == {
+        "ok": False,
+        "error": "Target agent 'missing' not found",
+        "_status": 404,
+    }
+    assert events == []
+    assert calls == []
+
+
+def test_trusted_human_decision_resume_does_not_treat_archive_guard_as_dispatch():
+    service, events, calls, _presence = _service(
+        archive_result={"reply": "Agent 已归档", "status": "archived"},
+    )
+    request = ContinuationDispatchRequest(
+        decision_id="decision-1",
+        agent_id="codex-local",
+        conversation_id="conversation-1",
+        source_message_id="human-decision-resume:decision-1",
+        source="human-decision-resume",
+        prompt="<human_decision_chat_resume></human_decision_chat_resume>",
+    )
+
+    result = service.send_trusted_resume(request)
+
+    assert result == {
+        "ok": False,
+        "error": "Target agent is unavailable for continuation",
+        "code": "agent_communication_unavailable",
+        "status": "archived",
+        "_status": 409,
+    }
+    assert len(events) == 1
+    assert calls == []

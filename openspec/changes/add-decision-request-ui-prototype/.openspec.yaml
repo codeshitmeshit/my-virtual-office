@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-08-02
+goal: 在接入飞书与正式运行链路前，确认 VO 决策框的本地 UI 信息结构、状态与交互表达
