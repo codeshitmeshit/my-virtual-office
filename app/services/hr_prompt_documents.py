@@ -10,6 +10,8 @@ from services import business_prompt_bridge
 DAILY_REPORT_HISTORY_SCOPE_RULES = (
     "不要只根据当前这条请求或当前对话上下文作答。",
     "请主动回顾你自己在当日可访问的所有会话、任务执行记录、产出记录和相关日志。",
+    "请优先通过 vo-agent-communication bridge / comm history 查看当天与你相关的 conversationId 引用，再进入对应会话信息核对实际工作内容。",
+    "bridge 中的轻量会话引用只是索引；请不要把它当作工作事实本身，必须结合对应会话内容、任务记录或产出记录判断。",
     "如果无法访问自己的历史会话或任务记录，请在 selfAssessment 或 requestedHelp 中明确说明限制。",
     "不要据此猜测或虚构工作。",
 )

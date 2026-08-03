@@ -177,6 +177,10 @@ def _build_safe_vo_config():
             "maskedFeishuAppId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuAppId"), 5, 4),
             "feishuReceiveIdType": VO_CONFIG.get("notifications", {}).get("feishuReceiveIdType") or "chat_id",
             "maskedFeishuReceiveId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuReceiveId"), 5, 4),
+            "topicConversationsEnabled": bool(VO_CONFIG.get("notifications", {}).get("topicConversationsEnabled", False)),
+            "topicConversationModels": _normalize_feishu_topic_model_choices(
+                VO_CONFIG.get("notifications", {}).get("topicConversationModels")
+            ),
         },
         "hermes": {
             "enabled": VO_CONFIG.get("hermes", {}).get("enabled", True),

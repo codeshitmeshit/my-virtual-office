@@ -20,6 +20,11 @@ import threading
 import time
 from typing import Any, Callable, Mapping, Protocol
 
+try:
+    from services.feishu_topic_foreground_commands import ForegroundCommandContext
+except ModuleNotFoundError:  # pragma: no cover - package import fallback
+    from .feishu_topic_foreground_commands import ForegroundCommandContext
+
 
 MAX_FIELD_CHARS = 8_000
 MAX_CONTEXT_CHARS = 32_000
@@ -112,6 +117,11 @@ class TopicAgentSelector(Protocol):
     def __call__(self, root: NotificationRoot) -> str: ...
 
 
+class TopicForegroundCommandService(Protocol):
+    def parse(self, text: Any, attachments: list[Mapping[str, Any]] | None = None) -> Any: ...
+    def execute(self, command: Any, context: ForegroundCommandContext) -> Any: ...
+
+
 class TopicStore(Protocol):
     def save_root(self, root: NotificationRoot) -> None: ...
     def load_root(self, message_id: str) -> NotificationRoot | None: ...
@@ -122,6 +132,7 @@ class TopicStore(Protocol):
     def update_message(self, message_id: str, **updates: Any) -> dict[str, Any]: ...
     def claim_recovery(self, message_id: str, owner: str, now: int, stale_after_ms: int) -> bool: ...
     def pending_messages(self) -> list[dict[str, Any]]: ...
+    def records_for_conversation(self, conversation_id: str, *, limit: int = 12) -> list[dict[str, Any]]: ...
 
 
 class FileTopicStore:
@@ -235,6 +246,43 @@ class FileTopicStore:
         with self._locked("topic-binding", binding.topic_digest):
             self._write(path, {"schema": BINDING_SCHEMA, "kind": "topic-binding", **asdict(binding)})
 
+    def _load_binding_by_conversation(self, conversation_id: str) -> TopicBinding | None:
+        key = _text(conversation_id, 240)
+        if not key:
+            return None
+        try:
+            names = os.listdir(self.root)
+        except OSError:
+            return None
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            binding = self._binding_from_record(self._read(os.path.join(self.root, name)))
+            if binding and binding.conversation_id == key:
+                return binding
+        return None
+
+    def get_agent(self, topic_conversation_id: str) -> str:
+        binding = self._load_binding_by_conversation(topic_conversation_id)
+        return _text(binding.agent_id if binding else "", 160)
+
+    def set_agent(self, topic_conversation_id: str, agent_id: str) -> dict[str, Any]:
+        key = _text(topic_conversation_id, 240)
+        value = _text(agent_id, 160)
+        if not key or not value:
+            return {"ok": False, "status": "invalid_agent_selection"}
+        binding = self._load_binding_by_conversation(key)
+        if not binding:
+            return {"ok": False, "status": "missing_topic_binding"}
+        path = self._path("topic-binding", binding.topic_digest)
+        with self._locked("topic-binding", binding.topic_digest):
+            current = self._binding_from_record(self._read(path))
+            if not current or current.conversation_id != key:
+                return {"ok": False, "status": "missing_topic_binding"}
+            updated = replace(current, agent_id=value)
+            self._write(path, {"schema": BINDING_SCHEMA, "kind": "topic-binding", **asdict(updated)})
+            return {"ok": True, "status": "success", "agentId": value}
+
     def accept_message(self, message: TopicMessage, binding: TopicBinding, now: int) -> tuple[dict[str, Any], bool]:
         path = self._path("topic-message", message.message_id)
         with self._locked("topic-message", message.message_id):
@@ -315,6 +363,24 @@ class FileTopicStore:
             if record.get("schema") == MESSAGE_SCHEMA and record.get("state") in {"accepted", "processing"}:
                 result.append(record)
         return sorted(result, key=lambda item: (int(item.get("acceptedAt") or 0), str(item.get("messageId") or "")))
+
+    def records_for_conversation(self, conversation_id: str, *, limit: int = 12) -> list[dict[str, Any]]:
+        key = _text(conversation_id, 240)
+        if not key:
+            return []
+        result = []
+        try:
+            names = os.listdir(self.root)
+        except OSError:
+            return result
+        for name in names:
+            if not name.endswith(".json"):
+                continue
+            record = self._read(os.path.join(self.root, name))
+            if record.get("schema") == MESSAGE_SCHEMA and record.get("conversationId") == key:
+                result.append(record)
+        bounded_limit = max(1, min(int(limit or 12), 100))
+        return sorted(result, key=lambda item: (int(item.get("acceptedAt") or 0), str(item.get("messageId") or "")))[-bounded_limit:]
 
 
 class TopicCoordinator:
@@ -515,8 +581,11 @@ class NotificationTopicService:
         agent_selector: TopicAgentSelector | None = None,
         dispatch: Callable[[str, str, str, dict[str, Any]], Mapping[str, Any]],
         reply: Callable[..., Mapping[str, Any]],
+        add_reaction: Callable[[str, str], Mapping[str, Any]] | None = None,
+        delete_reaction: Callable[[str, str], Mapping[str, Any]] | None = None,
         resource_loader: Callable[[TopicMessage], list[dict[str, Any]]] | None = None,
         record_event: Callable[[Mapping[str, Any]], Any] | None = None,
+        foreground_commands: TopicForegroundCommandService | None = None,
         coordinator: TopicCoordinator | None = None,
         now: Callable[[], int] | None = None,
     ) -> None:
@@ -529,8 +598,11 @@ class NotificationTopicService:
         self.agent_selector = agent_selector or (lambda root: root.agent_id)
         self.dispatch = dispatch
         self.reply = reply
+        self.add_reaction = add_reaction or (lambda _message_id, _emoji_type: {})
+        self.delete_reaction = delete_reaction or (lambda _message_id, _reaction_id: {})
         self.resource_loader = resource_loader or (lambda _message: [])
         self.record_event = record_event or (lambda _event: None)
+        self.foreground_commands = foreground_commands
         self.coordinator = coordinator or TopicCoordinator()
         self.now = now or (lambda: int(time.time() * 1000))
         self.owner_id = _digest("notification-topic-owner", os.getpid(), id(self), time.time_ns(), length=20)
@@ -628,6 +700,18 @@ class NotificationTopicService:
         if not root:
             self._increment("rootVerificationMiss")
             return {"ok": True, "status": "ignored_unverified_root"}
+        foreground_command = None
+        if self.foreground_commands and message.message_type == "text":
+            foreground_command = self.foreground_commands.parse(message.text, [dict(item) for item in message.resources])
+            if not existing_binding and getattr(foreground_command, "name", "") == "/change":
+                self._increment("foregroundUnsupportedLocation")
+                self.reply(message.message_id, "/change 只能在已激活的通知话题中使用。", content_type="markdown", reply_in_thread=True)
+                return {"ok": False, "status": "unsupported_location"}
+            if getattr(foreground_command, "name", "") in {"/here", "/change"}:
+                if not existing_binding:
+                    foreground_command = None
+                else:
+                    return self._handle_foreground_command(message, existing_binding, foreground_command)
         selected_agent_id = (
             existing_binding.agent_id
             if existing_binding else _text(self.agent_selector(root), 160)
@@ -677,6 +761,55 @@ class NotificationTopicService:
         self._increment(f"inheritance{binding.inheritance_status.title()}")
         return {"ok": True, "status": "queued", "conversationId": binding.conversation_id, "created": created}
 
+    def _handle_foreground_command(self, message: TopicMessage, binding: TopicBinding, command: Any) -> dict[str, Any]:
+        record, accepted = self.store.accept_message(message, binding, self.now())
+        if not accepted:
+            self._increment("duplicate")
+            return {"ok": True, "status": "duplicate", "conversationId": binding.conversation_id, "record": record}
+        context = ForegroundCommandContext.create(
+            surface="feishu-notification-topic",
+            source_message_id=message.message_id,
+            conversation_id=binding.origin_conversation_id,
+            topic_conversation_id=binding.conversation_id,
+            chat_type=message.chat_type,
+            source_meta={
+                "feishuChatId": message.chat_id,
+                "rootId": message.root_message_id,
+                "threadId": message.thread_id or message.topic_id,
+                "replyToMessageId": message.reply_to_message_id,
+                "sender": copy.deepcopy(dict(message.sender)),
+            },
+        )
+        try:
+            result = self.foreground_commands.execute(command, context) if self.foreground_commands else None
+            result_data = result.to_dict() if hasattr(result, "to_dict") else dict(result or {})
+        except Exception as exc:
+            result_data = {"ok": False, "status": "failed", "reply": "命令执行失败。", "errorCategory": type(exc).__name__[:80]}
+        reply_text = _text(result_data.get("reply") or result_data.get("error") or "命令执行完成。", MAX_TEXT_CHARS)
+        self.store.update_message(
+            message.message_id,
+            state="command_completed" if result_data.get("ok") else "failed",
+            status=_text(result_data.get("status") or ("success" if result_data.get("ok") else "failed"), 80),
+            reply=reply_text,
+            command=getattr(command, "name", ""),
+            completedAt=self.now(),
+        )
+        try:
+            delivery = dict(self.reply(message.message_id, reply_text, content_type="markdown", reply_in_thread=True) or {})
+        except Exception as exc:
+            delivery = {"ok": False, "status": "delivery_exception", "errorCategory": type(exc).__name__[:80]}
+        if not delivery.get("ok"):
+            self._increment("deliveryFailure")
+        self._increment("foregroundCommand")
+        return {
+            "ok": bool(result_data.get("ok")) and bool(delivery.get("ok")),
+            "status": _text(result_data.get("status") or ("success" if result_data.get("ok") else "failed"), 80),
+            "conversationId": binding.conversation_id,
+            "commandResult": result_data,
+            "delivery": delivery,
+            "record": record,
+        }
+
     def _execute(
         self,
         message: TopicMessage,
@@ -689,6 +822,20 @@ class NotificationTopicService:
             state="processing",
             startedAt=self.now(),
             processingOwner=self.owner_id,
+        )
+        reaction_type = "LGTM"
+        reaction_result: dict[str, Any] = {}
+        reaction_delete_result: dict[str, Any] = {}
+        try:
+            reaction_result = dict(self.add_reaction(message.message_id, reaction_type) or {})
+        except Exception as exc:
+            reaction_result = {"ok": False, "status": "reaction_exception", "errorCategory": type(exc).__name__[:80]}
+        reaction_id = _text(reaction_result.get("reactionId") or reaction_result.get("reaction_id"), 300)
+        self.store.update_message(
+            message.message_id,
+            reactionType=reaction_type,
+            reactionResult=reaction_result,
+            reactionId=reaction_id,
         )
         current_binding = binding
         if message.message_id == binding.activation_source_message_id and not binding.activation_ack_attempted:
@@ -758,12 +905,18 @@ class NotificationTopicService:
             delivery = dict(self.reply(message.message_id, reply_text, content_type="markdown", reply_in_thread=True) or {})
         except Exception as exc:
             delivery = {"ok": False, "status": "delivery_exception", "errorCategory": type(exc).__name__[:80]}
+        if reaction_id:
+            try:
+                reaction_delete_result = dict(self.delete_reaction(message.message_id, reaction_id) or {})
+            except Exception as exc:
+                reaction_delete_result = {"ok": False, "status": "reaction_delete_exception", "errorCategory": type(exc).__name__[:80]}
         final_state = "completed" if result.get("ok") and delivery.get("ok") else "failed"
         self.store.update_message(
             message.message_id,
             state=final_state,
             status=("completed" if final_state == "completed" else ("delivery_failed" if result.get("ok") else "agent_failed")),
             deliveryStatus=_text(delivery.get("status") or "", 80),
+            reactionDeleteResult=reaction_delete_result,
             completedAt=self.now(),
         )
         if not result.get("ok"):
@@ -774,8 +927,16 @@ class NotificationTopicService:
             "event": "notification_topic_turn_completed",
             "conversationId": current_binding.conversation_id,
             "topicDigest": current_binding.topic_digest,
+            "sourceMessageId": message.message_id,
             "sourceMessageHash": _digest("message", message.message_id, length=16),
+            "representativeAgentId": current_binding.agent_id,
             "agentId": current_binding.agent_id,
+            "feishuChatId": message.chat_id,
+            "chatType": message.chat_type,
+            "messageType": message.message_type,
+            "rootId": message.root_message_id,
+            "threadId": message.thread_id or message.topic_id,
+            "replyToMessageId": message.reply_to_message_id,
             "ok": bool(result.get("ok")) and bool(delivery.get("ok")),
             "deliveryStatus": _text(delivery.get("status") or "", 80),
         })

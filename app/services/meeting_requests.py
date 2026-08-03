@@ -289,3 +289,46 @@ def resolve_blocker_command(data: MutableMapping[str, Any], request_id: str, sta
     request["taskBlocker"] = {**(request.get("taskBlocker") or {}), "status": status, "resolvedAt": now, "updatedAt": now, **dict(extra or {})}
     request["updatedAt"] = now
     return {"ok": True, "request": public_request(request)}
+
+
+def reset_project_task_blockers_command(
+    data: MutableMapping[str, Any],
+    project_id: str,
+    task_ids: list[str] | None,
+    *,
+    actor: str,
+    reason: str,
+    hooks: RequestHooks,
+) -> dict[str, Any]:
+    """Resolve current-run task blockers for a project reset without deleting audit records."""
+
+    project_id = str(project_id or "").strip()
+    if not project_id:
+        return error("Project id is required", 400, "project_required")
+    allowed_task_ids = {str(item).strip() for item in task_ids or [] if str(item).strip()}
+    now = hooks.now()
+    reset_ids: list[str] = []
+    for request in data.get("requests", {}).values():
+        if not isinstance(request, MutableMapping):
+            continue
+        source = request.get("source") if isinstance(request.get("source"), Mapping) else {}
+        if str(source.get("projectId") or "") != project_id:
+            continue
+        task_id = str(source.get("taskId") or "")
+        if allowed_task_ids and task_id not in allowed_task_ids:
+            continue
+        if not unresolved_for_task(request, project_id, task_id):
+            continue
+        blocker = request.get("taskBlocker") if isinstance(request.get("taskBlocker"), Mapping) else {}
+        request["taskBlocker"] = {
+            **dict(blocker),
+            "status": "cleared",
+            "resolvedAt": now,
+            "updatedAt": now,
+            "resetAt": now,
+            "resetBy": str(actor or "user"),
+            "resetReason": str(reason or "project reset"),
+        }
+        request["updatedAt"] = now
+        reset_ids.append(str(request.get("id") or ""))
+    return {"ok": True, "resetRequestIds": reset_ids, "resetRequestCount": len(reset_ids)}

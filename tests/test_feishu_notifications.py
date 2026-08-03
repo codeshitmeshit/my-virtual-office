@@ -320,6 +320,127 @@ def test_sender_uses_app_credentials_and_records_success_without_leaking_secret(
         assert "tenant-token-secret" not in serialized
 
 
+def test_workflow_notification_policy_routes_to_originating_user_dm(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = str(tmp_path)
+    import server
+    from services import feishu_notification_delivery
+
+    calls = []
+
+    def fake_send(intent, **kwargs):
+        calls.append({"intent": intent, **kwargs})
+        return {"ok": True, "status": "sent", "channel": "app"}
+
+    monkeypatch.setattr(feishu_notification_delivery, "send_feishu_notification", fake_send)
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuWebhook": "",
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_fallback",
+            "notificationRecipientPolicy": "originating_user_dm",
+        },
+    })
+
+    result = server._send_feishu_workflow_notification({
+        **base_intent("notification"),
+        "sourceActor": {"openId": "ou_origin"},
+    })
+
+    assert result["ok"] is True
+    assert calls[0]["app_config"]["receiveIdType"] == "open_id"
+    assert calls[0]["app_config"]["receiveId"] == "ou_origin"
+
+
+def test_workflow_notification_policy_does_not_fallback_to_group_without_origin(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = str(tmp_path)
+    import server
+    from services import feishu_notification_delivery
+
+    calls = []
+
+    def fake_send(intent, **kwargs):
+        calls.append({"intent": intent, **kwargs})
+        return {"ok": True, "status": "skipped_missing_webhook", "channel": ""}
+
+    monkeypatch.setattr(feishu_notification_delivery, "send_feishu_notification", fake_send)
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/group-webhook",
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_group",
+            "notificationRecipientPolicy": "originating_user_dm",
+        },
+    })
+
+    result = server._send_feishu_workflow_notification(base_intent("notification"))
+
+    assert result["ok"] is True
+    assert calls[0]["webhook_url"] is None
+    assert calls[0]["app_config"]["receiveIdType"] == "chat_id"
+    assert calls[0]["app_config"]["receiveId"] == ""
+
+
+def test_manual_test_cards_do_not_fallback_to_group_in_originating_user_dm_policy(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    os.environ["VO_STATUS_DIR"] = str(tmp_path)
+    import server
+    from services import feishu_notification_delivery
+
+    calls = []
+
+    def fake_send(intent, **kwargs):
+        calls.append({"intent": intent, **kwargs})
+        return {"ok": True, "status": "skipped_missing_webhook", "channel": ""}
+
+    monkeypatch.setattr(feishu_notification_delivery, "send_feishu_notification", fake_send)
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/group-webhook",
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_group",
+            "notificationRecipientPolicy": "originating_user_dm",
+        },
+    })
+
+    result = server._send_feishu_notification_test_cards("notification")
+
+    assert result["ok"] is True
+    assert len(calls) == 1
+    assert calls[0]["webhook_url"] is None
+    assert calls[0]["app_config"]["receiveId"] == ""
+
+
+def test_originating_user_dm_policy_does_not_require_fallback_receive_id():
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    import server
+
+    assert server._feishu_app_configured({
+        "feishuAppId": "cli_notification",
+        "feishuAppSecret": "notification-secret",
+        "notificationRecipientPolicy": "originating_user_dm",
+        "feishuReceiveIdType": "chat_id",
+        "feishuReceiveId": "",
+    }) is True
+
+
 def test_update_notification_uses_common_card_builder_and_records_message_id():
     with tempfile.TemporaryDirectory() as status_dir:
         calls = []
@@ -618,6 +739,7 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
             "feishuAppSecret": "secret-should-not-return",
             "feishuReceiveIdType": "chat_id",
             "feishuReceiveId": "oc_demo_chat",
+            "notificationRecipientPolicy": "originating_user_dm",
             "clearWebhook": True,
         })
     finally:
@@ -627,6 +749,7 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
     assert result["feishuAppConfigured"] is True
     assert result["maskedFeishuAppId"]
     assert result["maskedFeishuReceiveId"]
+    assert result["notificationRecipientPolicy"] == "originating_user_dm"
     assert result["feishuCallbackMode"] == "long_connection"
     assert result["feishuLongConnection"]["status"] == "running"
     serialized = json.dumps(result, ensure_ascii=False)
@@ -634,6 +757,224 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
     with open(os.path.join(status_dir, "vo-config.json"), "r", encoding="utf-8") as f:
         saved = json.load(f)
     assert saved["notifications"]["feishuWebhook"] == ""
+    assert saved["notifications"]["notificationRecipientPolicy"] == "originating_user_dm"
+
+
+def test_feishu_notification_config_response_exposes_normalized_topic_models(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_CONFIG", str(tmp_path / "vo-config.json"))
+    import server
+
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_FEISHU_LONG_CONNECTION_RECEIVER", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_SERVICE", None)
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuEnabled": True,
+            "notificationRecipientPolicy": "originating_user_dm",
+            "topicConversationModels": [
+                {"label": "更专业", "model": "pro-model", "aliases": ["pro"]},
+                {"label": "", "model": ""},
+                {"label": "重复", "model": "pro-model"},
+                {"label": "更详细", "model": "detail-model"},
+            ],
+        },
+    })
+
+    result = server._feishu_notification_config_response()
+
+    assert result["topicConversationModels"] == [
+        {"label": "更专业", "model": "pro-model", "aliases": ["pro"]},
+        {"label": "更详细", "model": "detail-model"},
+    ]
+
+
+def test_feishu_config_save_preserves_and_updates_topic_model_catalog(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_CONFIG", str(tmp_path / "vo-config.json"))
+    import server
+
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_start_feishu_long_connection", lambda: {"ok": True})
+    monkeypatch.setattr(server, "_FEISHU_LONG_CONNECTION_RECEIVER", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_SERVICE", None)
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuEnabled": True,
+            "feishuAppId": "cli_demo_app",
+            "feishuAppSecret": "secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_demo",
+            "notificationRecipientPolicy": "originating_user_dm",
+            "topicConversationsEnabled": True,
+            "topicConversationModels": [
+                {"label": "保留", "model": "kept-model", "aliases": ["kept"]},
+            ],
+        },
+    })
+
+    preserved = server._save_feishu_notification_config({
+        "feishuEnabled": True,
+        "notificationRecipientPolicy": "originating_user_dm",
+    })
+    updated = server._save_feishu_notification_config({
+        "feishuEnabled": True,
+        "notificationRecipientPolicy": "originating_user_dm",
+        "topicConversationModels": [
+            {"label": "更新", "model": "updated-model", "aliases": ["new"]},
+            {"label": "", "model": ""},
+        ],
+    })
+
+    assert preserved["topicConversationModels"] == [
+        {"label": "保留", "model": "kept-model", "aliases": ["kept"]},
+    ]
+    assert updated["topicConversationModels"] == [
+        {"label": "更新", "model": "updated-model", "aliases": ["new"]},
+    ]
+    with open(os.path.join(str(tmp_path), "vo-config.json"), "r", encoding="utf-8") as stream:
+        saved = json.load(stream)
+    assert saved["notifications"]["topicConversationModels"] == [
+        {"label": "更新", "model": "updated-model", "aliases": ["new"]},
+    ]
+
+
+def test_feishu_config_save_refreshes_cached_topic_foreground_catalog(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_CONFIG", str(tmp_path / "vo-config.json"))
+    import server
+
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_start_feishu_long_connection", lambda: {"ok": True})
+    monkeypatch.setattr(server, "_FEISHU_LONG_CONNECTION_RECEIVER", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_SERVICE", None)
+    monkeypatch.setattr(server, "_FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_STORE", None)
+    roster = [{"id": "old-agent", "statusKey": "old-agent", "name": "旧 Agent"}]
+    monkeypatch.setattr(server, "refresh_agent_maps", lambda: None)
+    monkeypatch.setattr(server, "get_roster", lambda: list(roster))
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuEnabled": True,
+            "feishuAppId": "cli_demo_app",
+            "feishuAppSecret": "secret",
+            "notificationRecipientPolicy": "originating_user_dm",
+            "topicConversationsEnabled": True,
+            "topicConversationModels": [{"label": "旧", "model": "old-model"}],
+        },
+    })
+    old_service = server._get_feishu_topic_foreground_command_service()
+    old_topic_service = server._get_feishu_notification_topic_service()
+    roster[:] = [{"id": "new-agent", "statusKey": "new-agent", "name": "新 Agent", "profile": "fresh"}]
+
+    result = server._save_feishu_notification_config({
+        "feishuEnabled": True,
+        "notificationRecipientPolicy": "originating_user_dm",
+        "topicConversationModels": [{"label": "新", "model": "new-model", "aliases": ["fresh"]}],
+    })
+    new_service = server._get_feishu_topic_foreground_command_service()
+    new_topic_service = server._get_feishu_notification_topic_service()
+
+    assert result["topicConversationModels"] == [
+        {"label": "新", "model": "new-model", "aliases": ["fresh"]},
+    ]
+    assert new_service is not old_service
+    assert new_topic_service is not old_topic_service
+    assert new_service._agent_catalog.resolve("fresh")["agentId"] == "new-agent"
+    assert new_service._agent_catalog.resolve("old-agent") is None
+
+
+def test_feishu_notification_service_route_preserves_topic_model_catalog(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_CONFIG", str(tmp_path / "vo-config.json"))
+    import server
+    from server_services import notifications as notification_service
+
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_start_feishu_long_connection", lambda: {"ok": True})
+    monkeypatch.setattr(server, "_FEISHU_LONG_CONNECTION_RECEIVER", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_SERVICE", None)
+    monkeypatch.setattr(server, "_FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE", None)
+    roster = [{"id": "old-agent", "statusKey": "old-agent", "name": "旧 Agent"}]
+    monkeypatch.setattr(server, "refresh_agent_maps", lambda: None)
+    monkeypatch.setattr(server, "get_roster", lambda: list(roster))
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuEnabled": True,
+            "notificationRecipientPolicy": "originating_user_dm",
+            "topicConversationsEnabled": True,
+            "topicConversationModels": [{"label": "保留", "model": "kept-model"}],
+        },
+    })
+    old_service = server._get_feishu_topic_foreground_command_service()
+    roster[:] = [{"id": "updated-agent", "statusKey": "updated-agent", "name": "更新 Agent", "profile": "new"}]
+
+    notification_service._hydrate()
+    preserved = notification_service._save_feishu_notification_config({
+        "feishuEnabled": True,
+        "notificationRecipientPolicy": "originating_user_dm",
+    })
+    updated = notification_service._save_feishu_notification_config({
+        "feishuEnabled": True,
+        "notificationRecipientPolicy": "originating_user_dm",
+        "topicConversationModels": [{"label": "更新", "model": "updated-model", "aliases": ["new"]}],
+    })
+    new_service = server._get_feishu_topic_foreground_command_service()
+
+    assert preserved["topicConversationModels"] == [{"label": "保留", "model": "kept-model"}]
+    assert updated["topicConversationModels"] == [
+        {"label": "更新", "model": "updated-model", "aliases": ["new"]},
+    ]
+    assert new_service is not old_service
+    assert new_service._agent_catalog.resolve("new")["agentId"] == "updated-agent"
+
+
+def test_feishu_notification_topic_preflight_office_handler(monkeypatch, tmp_path):
+    os.environ.setdefault("VO_HERMES_ENABLED", "0")
+    os.environ.setdefault("VO_CODEX_ENABLED", "0")
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_CONFIG", str(tmp_path / "vo-config.json"))
+    import server
+
+    calls = []
+    monkeypatch.setattr(server, "_feishu_notification_topic_preflight", lambda root_id: calls.append(root_id) or {
+        "ok": True,
+        "rootHash": "0123456789abcdef",
+        "classification": "long_running_diversion",
+        "fields": {"messageId": True, "conversationId": True, "agentId": True, "request": True, "response": True},
+    })
+
+    missing_status, missing_payload = call_office_handler(
+        server,
+        "POST",
+        "/api/feishu-notification/topic-preflight",
+        {},
+    )
+    status, payload = call_office_handler(
+        server,
+        "POST",
+        "/api/feishu-notification/topic-preflight",
+        {"rootMessageId": "om-private-root"},
+    )
+
+    assert missing_status == 400
+    assert missing_payload["ok"] is False
+    assert status == 200
+    assert calls == ["om-private-root"]
+    assert payload["rootHash"] == "0123456789abcdef"
+    assert "om-private-root" not in json.dumps(payload)
 
 
 def test_manual_test_intents_cover_all_notification_types():
@@ -771,6 +1112,102 @@ def test_feishu_long_connection_message_handler_is_invoked():
     assert status["running"] is True
     assert status["status"] == "running"
     assert status["lastEventAt"] > 0
+
+
+def test_feishu_long_connection_ignores_bot_p2p_entered_without_message_dispatch():
+    from feishu_long_connection import FeishuLongConnectionReceiver
+
+    calls = []
+    receiver = FeishuLongConnectionReceiver(
+        app_id="cli_demo",
+        app_secret="secret",
+        message_handler=lambda body: calls.append(body),
+        name="test-feishu-notification-receiver",
+    )
+
+    receiver._handle_bot_p2p_chat_entered_event({"event": {"chat_id": "oc_demo"}})
+
+    status = receiver.status()
+    assert calls == []
+    assert status["running"] is True
+    assert status["status"] == "running"
+    assert status["lastError"] == ""
+    assert status["lastEventAt"] > 0
+
+
+def test_feishu_long_connection_registers_bot_p2p_entered_handler(monkeypatch):
+    from feishu_long_connection import FeishuLongConnectionReceiver
+    import types as pytypes
+
+    registered = {}
+
+    class FakeBuilder:
+        def register_p2_card_action_trigger(self, callback):
+            registered["card"] = callback
+            return self
+
+        def register_p2_im_message_receive_v1(self, callback):
+            registered["message"] = callback
+            return self
+
+        def register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(self, callback):
+            registered["bot_entered"] = callback
+            return self
+
+        def build(self):
+            return "fake-handler"
+
+    class FakeDispatcherHandler:
+        @staticmethod
+        def builder(*args, **kwargs):
+            return FakeBuilder()
+
+    class FakeClient:
+        def __init__(self, app_id, app_secret, *, event_handler):
+            registered["client"] = (app_id, app_secret, event_handler)
+
+        def start(self):
+            return None
+
+    fake_lark = pytypes.SimpleNamespace(
+        LogLevel=pytypes.SimpleNamespace(INFO="INFO"),
+        EventDispatcherHandler=FakeDispatcherHandler,
+        ws=pytypes.SimpleNamespace(Client=FakeClient),
+    )
+    fake_card_module = pytypes.ModuleType("p2_card_action_trigger")
+
+    class FakeP2CardActionTrigger:
+        pass
+
+    class FakeP2CardActionTriggerResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+    fake_card_module.P2CardActionTrigger = FakeP2CardActionTrigger
+    fake_card_module.P2CardActionTriggerResponse = FakeP2CardActionTriggerResponse
+    monkeypatch.setitem(sys.modules, "lark_oapi", fake_lark)
+    monkeypatch.setitem(sys.modules, "lark_oapi.event", pytypes.ModuleType("event"))
+    monkeypatch.setitem(sys.modules, "lark_oapi.event.callback", pytypes.ModuleType("callback"))
+    monkeypatch.setitem(sys.modules, "lark_oapi.event.callback.model", pytypes.ModuleType("model"))
+    monkeypatch.setitem(
+        sys.modules,
+        "lark_oapi.event.callback.model.p2_card_action_trigger",
+        fake_card_module,
+    )
+
+    receiver = FeishuLongConnectionReceiver(
+        app_id="cli_demo",
+        app_secret="secret",
+        action_handler=lambda body: {"ok": True},
+        message_handler=lambda body: None,
+    )
+    receiver._run()
+    registered["bot_entered"]({})
+
+    assert "bot_entered" in registered
+    assert registered["client"] == ("cli_demo", "secret", "fake-handler")
+    assert receiver.status()["status"] == "running"
+    assert receiver.status()["lastError"] == ""
 
 
 def test_feishu_chat_config_is_separate_from_notification_app():
@@ -1307,6 +1744,51 @@ def test_feishu_sse_replays_real_comm_event_when_in_memory_publish_is_missed():
     assert replay[0]["commEvent"]["id"] == "comm-real-message"
 
 
+def test_notification_topic_completion_records_lightweight_bridge_reference(tmp_path, monkeypatch):
+    monkeypatch.setenv("VO_STATUS_DIR", str(tmp_path))
+    monkeypatch.setenv("VO_HERMES_ENABLED", "0")
+    monkeypatch.setenv("VO_CODEX_ENABLED", "0")
+    import server
+
+    monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "get_roster", lambda: [{
+        "id": "market-management-team-agent",
+        "statusKey": "market-management-team-agent",
+        "providerKind": "codex",
+        "providerAgentId": "market-management-team-agent",
+        "name": "Manager",
+        "emoji": "",
+    }])
+
+    result = server._sync_feishu_channel_record_to_comm_ledger({
+        "event": "notification_topic_turn_completed",
+        "sourceSurface": "feishu-notification-topic",
+        "sourceApp": "feishu",
+        "sourceMessageId": "om_topic_turn",
+        "conversationId": "feishu-topic:abc",
+        "representativeAgentId": "market-management-team-agent",
+        "feishuChatId": "oc_topic",
+        "chatType": "p2p",
+        "messageType": "text",
+        "ok": True,
+    })
+
+    assert result is not None
+    assert result["operation"] == "agent_conversation_reference"
+    history = server._load_comm_history(
+        limit=10,
+        conversation_id="feishu-topic:abc",
+        agent_id="market-management-team-agent",
+    )
+    assert len(history) == 1
+    assert history[0]["type"] == "operation"
+    assert history[0]["operation"] == "agent_conversation_reference"
+    assert history[0]["text"] == ""
+    assert history[0]["metadata"]["sourceSurface"] == "feishu-notification-topic"
+    assert history[0]["metadata"]["sourceMessageId"] == "om_topic_turn"
+    assert history[0].get("visibleInOffice") is False
+
+
 def test_feishu_group_rows_never_publish_or_replay_but_private_delivery_still_invalidates():
     import queue
     import server
@@ -1401,6 +1883,92 @@ def test_host_side_vo_continuation_reply_is_delivered_once_without_global_fallba
     assert records[0]["sourceMessageId"] == "vo-host-side-read-abc"
     assert records[0]["continuationForSourceMessageId"] == "om-original"
     assert records[0]["sendResult"]["messageId"] == "om-continuation-sent"
+
+
+def test_long_task_followup_routes_notification_to_originating_user(monkeypatch):
+    import server
+    from services import feishu_notification_delivery
+
+    sends = []
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuWebhook": "",
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_group",
+            "notificationRecipientPolicy": "originating_user_dm",
+        },
+    })
+
+    def fake_markdown(text, **kwargs):
+        sends.append({"text": text, **kwargs})
+        return {"ok": True, "status": "sent", "channel": "app_markdown", "messageId": "om-followup"}
+
+    monkeypatch.setattr(feishu_notification_delivery, "send_feishu_markdown_message", fake_markdown)
+
+    result = server._deliver_feishu_agent_followup_notification(
+        agent_id="codex-local",
+        conversation_id="feishu-dm:user",
+        prompt_text="请研究一下",
+        reply="完整长回复",
+        source_context={
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om-source",
+            "sourceActor": {"openId": "ou_origin", "unionId": "on_origin"},
+        },
+        result={"ok": True, "durationMs": 181000},
+        elapsed_ms=181000,
+    )
+
+    assert result["ok"] is True
+    assert sends[0]["receive_id_type"] == "union_id"
+    assert sends[0]["receive_id"] == "on_origin"
+
+
+def test_long_task_followup_does_not_fallback_to_group_without_origin(monkeypatch):
+    import server
+    from services import feishu_notification_delivery
+
+    sends = []
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            "feishuWebhook": "",
+            "feishuAppId": "cli_notification",
+            "feishuAppSecret": "notification-secret",
+            "feishuReceiveIdType": "chat_id",
+            "feishuReceiveId": "oc_group",
+            "notificationRecipientPolicy": "originating_user_dm",
+        },
+    })
+
+    def fake_markdown(text, **kwargs):
+        sends.append({"text": text, **kwargs})
+        return {"ok": False, "status": "missing_app_config", "channel": "app_markdown"}
+
+    monkeypatch.setattr(feishu_notification_delivery, "send_feishu_markdown_message", fake_markdown)
+
+    result = server._deliver_feishu_agent_followup_notification(
+        agent_id="codex-local",
+        conversation_id="feishu-dm:user",
+        prompt_text="请研究一下",
+        reply="完整长回复",
+        source_context={
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceMessageId": "om-source",
+        },
+        result={"ok": True, "durationMs": 181000},
+        elapsed_ms=181000,
+    )
+
+    assert result["ok"] is False
+    assert sends[0]["receive_id_type"] == "chat_id"
+    assert sends[0]["receive_id"] == ""
+    assert "通知应用暂时未送达" in result["chatReply"]
 
 
 def test_feishu_sse_stream_writes_replayed_event_without_queue_publish():

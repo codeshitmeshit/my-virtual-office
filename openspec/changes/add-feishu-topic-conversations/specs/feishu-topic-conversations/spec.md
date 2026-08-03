@@ -153,3 +153,56 @@ The capability MUST consume the existing notification App long connection's norm
 #### Scenario: Future Agent policy changes
 - **WHEN** a later confirmed requirement changes how a topic Agent is selected
 - **THEN** that change SHALL replace only the topic Agent-selection policy and MUST NOT require replacement of Feishu transport or Provider conversation coordination
+
+### Requirement: `/here` creates a notification-topic branch from the current conversation context
+Virtual Office SHALL support a foreground `/here` command in both the originating main chat and an existing notification topic. The command SHALL summarize the message immediately preceding the command plus bounded relevant context for that message, send the summary as a notification-topic entry, and allow the resulting topic to be used as an independent child conversation. The command MUST reuse the existing notification delivery and topic-conversation activation path and MUST NOT create a second summary sender, topic store, or conversation routing subsystem.
+
+#### Scenario: Main chat uses `/here`
+- **WHEN** a trusted user sends `/here` in a main chat after a conversational turn
+- **THEN** Virtual Office SHALL summarize the immediately preceding message and bounded relevant context, send that summary through the notification entrypoint, and create or bind a replyable notification topic for follow-up
+
+#### Scenario: Existing topic uses `/here`
+- **WHEN** a trusted user sends `/here` inside an activated notification topic after a topic turn
+- **THEN** Virtual Office SHALL summarize the immediately preceding topic message and bounded relevant topic context, send that summary as a new notification-topic branch, and keep the new child topic independent from the parent topic
+
+#### Scenario: `/here` provides a light local acknowledgement
+- **WHEN** Virtual Office successfully creates a notification-topic branch for `/here`
+- **THEN** it SHALL reply only with a short success acknowledgement at the command location and MUST NOT paste the full generated summary back into the source conversation
+
+#### Scenario: `/here` has insufficient context
+- **WHEN** `/here` is sent before there is a usable preceding message or relevant context
+- **THEN** Virtual Office SHALL return a clear command-local explanation and MUST NOT create an empty or misleading notification topic
+
+### Requirement: `/change` changes only the current notification topic conversation Agent
+Virtual Office SHALL support a foreground `/change` command only inside an activated notification topic. The command SHALL either show available Agent choices or set the Agent used by the current topic conversation's later replies. The selected Agent MUST be scoped to that topic conversation only and MUST NOT change the originating main conversation, parent topic, child topics, other notification topics, or global Agent defaults.
+
+#### Scenario: Topic shows Agent options
+- **WHEN** a trusted user sends bare `/change` inside an activated notification topic
+- **THEN** Virtual Office SHALL reply in that topic with available choices using product-facing labels paired with concrete Agent IDs
+
+#### Scenario: Topic Agent is changed by name
+- **WHEN** a trusted user sends `/change <agent>` inside an activated notification topic and the Agent is allowed
+- **THEN** Virtual Office SHALL store the Agent selection for only that topic conversation and acknowledge the new Agent once in the topic
+
+#### Scenario: Topic Agent selection affects later replies only in that topic
+- **WHEN** a topic conversation has selected a different Agent through `/change`
+- **THEN** later replies in that topic SHALL dispatch to the selected Agent, while the originating main chat and every other topic continue using their own existing Agent selection
+
+#### Scenario: `/change` outside a topic is rejected
+- **WHEN** a user sends `/change` in a main chat, ordinary bot DM timeline, group chat, or any unactivated topic
+- **THEN** Virtual Office SHALL return a clear command-local explanation that `/change` applies only to activated notification topics and MUST NOT change any Agent selection
+
+### Requirement: Foreground topic commands stay centralized and minimally invasive
+Virtual Office SHALL implement `/here` and `/change` by reusing or narrowly extending existing command parsing, notification entrypoints, topic binding, and Provider conversation selection. Command recognition, notification sending, topic branch creation, and topic-local Agent selection MUST be centralized behind the existing relevant entrypoints so future behavior changes do not require edits across independent business paths.
+
+#### Scenario: Commands reuse existing notification entrypoint
+- **WHEN** `/here` sends its summary to Feishu
+- **THEN** the send SHALL go through the unified notification delivery entrypoint used by notification-module sends rather than calling low-level Feishu senders directly
+
+#### Scenario: Commands reuse topic conversation dispatch
+- **WHEN** a topic created by `/here` receives follow-up messages
+- **THEN** Virtual Office SHALL route those messages through the existing notification-topic conversation resolver and Provider dispatch path instead of creating a separate child-topic dispatcher
+
+#### Scenario: Topic-local Agent selection has one authority
+- **WHEN** `/change` stores, reads, or applies a topic Agent choice
+- **THEN** that state SHALL be owned by the topic conversation binding/store path and MUST NOT be duplicated in unrelated command handlers, notification records, or Provider-specific adapters

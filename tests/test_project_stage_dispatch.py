@@ -693,6 +693,113 @@ def test_start_marked_project_rejects_legacy_start_payload_fields():
     assert store.save_calls == 0
 
 
+def test_start_marked_project_restarts_completed_reusable_project_with_fresh_runtime_state():
+    project = _project(
+        projectType="reusable",
+        status="completed",
+        tasks=[
+            _task(
+                "a",
+                1,
+                columnId="done",
+                executionState="done",
+                completedAt="done-at",
+                stageRunId="run-old",
+                activeAttemptId="attempt-old",
+                blockedReason="old block",
+                lastError="old error",
+                reworkFeedback="old feedback",
+                reworkCount=2,
+                evidence={"summary": "old"},
+                reviewResult={"status": "pass"},
+                checklist=[
+                    {
+                        "id": "deliverable",
+                        "text": "Produce report",
+                        "done": True,
+                        "completedAt": "done-at",
+                        "completedBy": "executor",
+                        "completionEvidence": "old evidence",
+                    },
+                    {
+                        "id": "meeting",
+                        "text": "Meeting action",
+                        "done": True,
+                        "source": "meeting_action_item",
+                    },
+                ],
+                meetingBlocker={"requestId": "req-1"},
+                meetingActionItems=[{"id": "m1"}],
+                meetingDecisionHistory=[{"id": "d1"}],
+                meetingDiscussionPoints=[{"id": "p1"}],
+                meetingRecords=[{"id": "r1"}],
+                attempts=[{"id": "attempt-old", "status": "completed", "stageRunId": "run-old"}],
+            ),
+            _task(
+                "later",
+                2,
+                executionState="done",
+                completedAt="done-at",
+                stageRunId="run-later",
+            ),
+        ],
+    )
+    project["orchestration"].update({
+        "state": "completed",
+        "currentStage": 2,
+        "currentRunId": None,
+        "completedAt": "done-at",
+        "revision": 5,
+    })
+    store, repo = _repo(project)
+    preflight_ports = _Ports()
+    preflight_ports.run_ids = ["run-fresh"]
+    attempt_ports = _AttemptPorts()
+    dispatcher = BoundedProjectExecutionDispatcher(lambda item: item.task_id, worker_count=1, queue_capacity=2, autostart=False)
+
+    outcome = start_marked_project(
+        "project-1",
+        {"revision": 5, "by": "owner"},
+        repository=repo,
+        preflight_ports=preflight_ports,
+        attempt_ports=attempt_ports,
+        dispatcher=dispatcher,
+        create_cancel_flag=lambda attempt_id: {"attemptId": attempt_id},
+    )
+
+    assert outcome.result.status == 200
+    assert outcome.result.payload["currentStage"] == 1
+    assert outcome.result.payload["currentRunId"] == "run-fresh"
+    saved = store.data["projects"][0]
+    task = saved["tasks"][0]
+    assert saved["status"] == "active"
+    assert saved["orchestration"]["state"] == "running"
+    assert saved["orchestration"]["currentStage"] == 1
+    assert saved["orchestration"]["currentRunId"] == "run-fresh"
+    assert saved["orchestration"]["completedAt"] is None
+    assert task["stageRunId"] == "run-fresh"
+    assert task["executionState"] == "executing"
+    assert task["completedAt"] is None
+    assert task["activeAttemptId"] == "attempt-1"
+    assert task["blockedReason"] is None
+    assert task["lastError"] is None
+    assert task["reworkFeedback"] is None
+    assert task["reworkCount"] == 0
+    assert task["evidence"] == {}
+    assert task["reviewResult"] == {}
+    assert task["meetingBlocker"] == {}
+    assert task["meetingBlockerHistory"][0]["requestId"] == "req-1"
+    assert task["meetingActionItems"] == []
+    assert task["meetingDecisionHistory"] == []
+    assert task["meetingDiscussionPoints"] == []
+    assert task["meetingRecords"] == []
+    assert task["checklist"] == [{"id": "meeting", "text": "Meeting action", "done": True, "source": "meeting_action_item"}]
+    assert [attempt["id"] for attempt in task["attempts"]] == ["attempt-old", "attempt-1"]
+    assert saved["tasks"][1]["stageRunId"] is None
+    assert saved["tasks"][1]["executionState"] == "backlog"
+    assert dispatcher.diagnostics()["queued"] == 1
+
+
 def test_start_marked_project_restarts_inactive_running_blocked_stage_task_with_fresh_rework_window():
     project = _project(tasks=[
         *[

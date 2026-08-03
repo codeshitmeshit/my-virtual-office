@@ -56,3 +56,38 @@
 - [ ] 9.2 Deploy with the feature disabled and capture read-only production evidence for the actual long-running notification/audit shape; if required, add and locally test only a focused `NotificationRootLookup` compatibility adapter.
 - [ ] 9.3 Enable one explicitly selected production test notification and verify `p2p` topic delivery without `@`, independent conversation creation, bounded context inheritance, pinned Agent, same-topic continuation, topic-local result placement, and ordinary DM/group non-regression.
 - [ ] 9.4 Exercise flag-only rollback, confirm new topic activation stops while existing notification, card-action, Chat App, and group behavior remain unchanged, and record final acceptance results for the separate test-results review gate.
+
+## 10. Foreground command entrypoint and `/here` branch creation
+
+- [x] 10.1 Add characterization tests for existing main-chat slash command parsing, notification-topic message admission, and unsupported command locations before introducing `/here` or `/change`.
+- [x] 10.2 Add a focused foreground command service or helper owned by the notification-topic capability, with injected ports for context lookup, notification sending, topic reply, topic binding lookup, Agent catalog, and topic-local configuration; keep `app/server.py` limited to wiring.
+- [x] 10.3 Implement `/here` recognition from the main chat command path and delegate to the focused command service without changing existing `/new` or `/compact` behavior.
+- [x] 10.4 Implement `/here` recognition inside activated notification topics before ordinary Agent dispatch, preserving existing topic idempotency, bot-loop protection, and unsupported attachment semantics.
+- [x] 10.5 Select the immediately preceding message plus bounded relevant context for `/here` in main chats and topics; return a clear local explanation when no usable preceding context exists.
+- [x] 10.6 Send `/here` summaries through the unified notification delivery entrypoint with metadata that lets the existing topic activation flow verify and bind the new branch; do not call low-level Feishu senders directly.
+- [x] 10.7 Verify `/here` success from main chat and topic, no-context rejection, duplicate/idempotent command handling, notification-delivery failure handling, light local acknowledgement, and no full-summary echo in the source conversation.
+
+## 11. Topic-local `/change` Agent selection
+
+- [x] 11.1 Extend the topic conversation configuration authority to store and read one selected Agent per topic conversation using the existing topic binding/store path; avoid duplicating Agent-selection state in command handlers, notification records, or Provider adapters.
+- [x] 11.2 Add a bounded Agent catalog for topic `/change` replies that presents product-facing labels with concrete Agent IDs and rejects unlisted Agent IDs, labels, or aliases.
+- [x] 11.3 Implement bare `/change` inside activated notification topics to reply with the allowed Agent choices and current topic Agent state.
+- [x] 11.4 Implement `/change <agent>` inside activated notification topics to atomically update only that topic conversation's Agent selection and acknowledge the change once.
+- [x] 11.5 Reject `/change` in main chats, ordinary bot-DM timelines, group chats, and unactivated topics with a clear command-local explanation and no Agent-selection mutation.
+- [x] 11.6 Apply the topic-local Agent selection to later topic dispatch through the existing representative-Agent bridge.
+- [x] 11.7 Verify legal/illegal Agent changes, concurrent changes, and isolation from the originating main chat, parent topic, child topics, sibling topics, and global Agent defaults.
+
+## 12. Centralization guardrails and regression coverage
+
+- [x] 12.1 Add focused tests or static checks proving `/here` notification sends go through the unified notification delivery entrypoint and not low-level Feishu senders.
+- [x] 12.2 Add focused tests or static checks proving `/change` state is read and written only through the topic conversation configuration authority.
+- [x] 12.3 Preserve regressions for existing notification sends, topic conversation activation, Feishu card actions, Chat App direct messages, group behavior, `/new`, `/compact`, Provider history, and source-index recovery.
+- [x] 12.4 Update project agent guidance if implementation introduces any new notification-command ownership rule that future contributors must follow.
+
+## 13. Command acceptance evidence and rollout
+
+- [x] 13.1 Run focused Python and Node tests plus OpenSpec strict validation for `/here`, `/change`, topic conversation, notification delivery, and chat command regressions; record commands and results in an evidence artifact.
+- [ ] 13.2 Restart the local service and manually verify `/here` from a main chat creates a replyable notification topic with bounded previous-message context and only a light local acknowledgement.
+- [ ] 13.3 Manually verify `/here` from an existing notification topic creates an independent child topic and does not pollute the parent topic or originating main conversation.
+- [ ] 13.4 Manually verify `/change`, `/change <agent>`, unsupported Agent, and unsupported location behavior in a notification topic, including later replies dispatching only to the current topic's selected Agent.
+- [ ] 13.5 Record final acceptance evidence for command behavior, centralization guardrails, rollback/disable behavior, and ordinary DM/group non-regression.

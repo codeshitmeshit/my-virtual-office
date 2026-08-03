@@ -414,7 +414,7 @@
                 <input type="text" id="s-feishu-app-id" placeholder="cli_xxx" autocomplete="off">
                 <label data-i18n="feishu_app_secret">Feishu App Secret</label>
                 <input type="password" id="s-feishu-app-secret" placeholder="app secret" autocomplete="off">
-                <label data-i18n="feishu_receive_id_type">Receive ID Type</label>
+                <label data-i18n="feishu_fallback_receive_id_type">Fallback Receive ID Type</label>
                 <select id="s-feishu-receive-id-type">
                     <option value="chat_id">chat_id</option>
                     <option value="open_id">open_id</option>
@@ -422,8 +422,9 @@
                     <option value="union_id">union_id</option>
                     <option value="email">email</option>
                 </select>
-                <label data-i18n="feishu_receive_id">Receive ID</label>
+                <label data-i18n="feishu_fallback_receive_id">Fallback Receive ID</label>
                 <input type="text" id="s-feishu-receive-id" placeholder="oc_xxx / ou_xxx / user@example.com" autocomplete="off">
+                <div class="note" data-i18n="feishu_dm_recipient_note">AI notifications are sent to the originating user's bot DM. The fallback ID is optional.</div>
                 <div id="s-feishu-long-connection-status" style="font-size:12px;color:#888;margin:8px 0 10px;" data-i18n="feishu_long_connection_pending">长连接将在保存配置后启动。</div>
                 <button type="button" class="secondary" onclick="saveFeishuWebhook()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_save_config">SAVE</button>
                 <button type="button" onclick="testFeishuNotification()" style="margin:0 0 12px;padding:8px 16px;font-size:9px;" data-i18n="feishu_send_test_cards">SEND TEST CARDS</button>
@@ -703,6 +704,15 @@
             if (!el) return;
             cfg = cfg || {};
             if (cfg.feishuAppConfigured) {
+                if ((cfg.notificationRecipientPolicy || '') === 'originating_user_dm') {
+                    el.textContent = _t('feishu_configured_app_dm', {
+                        appId: cfg.maskedFeishuAppId || '••••••••',
+                        receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
+                        receiveId: cfg.maskedFeishuReceiveId || ''
+                    });
+                    el.style.color = '#81c784';
+                    return;
+                }
                 el.textContent = _t('feishu_configured_app', {
                     appId: cfg.maskedFeishuAppId || '••••••••',
                     receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
@@ -731,8 +741,8 @@
             var receiveIdType = document.getElementById('s-feishu-receive-id-type').value || 'chat_id';
             var receiveId = document.getElementById('s-feishu-receive-id').value.trim();
             var statusEl = document.getElementById('feishu-test-status');
-            var appConfigured = isMaskedFeishuValue(appId) && isMaskedFeishuValue(appSecret) && isMaskedFeishuValue(receiveId);
-            if (!(appConfigured || (appId && appSecret && receiveId))) {
+            var appConfigured = isMaskedFeishuValue(appId) && isMaskedFeishuValue(appSecret);
+            if (!(appConfigured || (appId && appSecret))) {
                 statusEl.innerHTML = '<div class="status-box error">' + _esc(_t('feishu_save_requires_config')) + '</div>';
                 return;
             }
@@ -746,6 +756,7 @@
                     feishuAppSecret: isMaskedFeishuValue(appSecret) ? '' : appSecret,
                     feishuReceiveIdType: receiveIdType,
                     feishuReceiveId: isMaskedFeishuValue(receiveId) ? '' : receiveId,
+                    notificationRecipientPolicy: 'originating_user_dm',
                     clearWebhook: true
                 })
             }).then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); }).then(function(d) {
@@ -1207,11 +1218,12 @@
                 pcMetrics: pcMetricsEnabled ? {
                     url: document.getElementById('s-pcmetrics-url').value.trim() || null
                 } : {},
-                notifications: (function() {
-                    var n = {
-                        feishuEnabled: document.getElementById('s-feishu-enable').checked,
-                        feishuReceiveIdType: document.getElementById('s-feishu-receive-id-type').value || 'chat_id'
-                    };
+            notifications: (function() {
+                var n = {
+                    feishuEnabled: document.getElementById('s-feishu-enable').checked,
+                    feishuReceiveIdType: document.getElementById('s-feishu-receive-id-type').value || 'chat_id',
+                    notificationRecipientPolicy: 'originating_user_dm'
+                };
                     if (feishuAppId && !isMaskedFeishuValue(feishuAppId)) n.feishuAppId = feishuAppId;
                     if (feishuAppSecret && !isMaskedFeishuValue(feishuAppSecret)) n.feishuAppSecret = feishuAppSecret;
                     if (feishuReceiveId && !isMaskedFeishuValue(feishuReceiveId)) n.feishuReceiveId = feishuReceiveId;

@@ -14674,6 +14674,15 @@ function mmRenderFeishuMask(cfg) {
     if (!el) return;
     cfg = cfg || {};
     if (cfg.feishuAppConfigured) {
+        if ((cfg.notificationRecipientPolicy || '') === 'originating_user_dm') {
+            el.textContent = _tr('feishu_configured_app_dm', {
+                appId: cfg.maskedFeishuAppId || '••••••••',
+                receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
+                receiveId: cfg.maskedFeishuReceiveId || ''
+            });
+            el.style.color = '#81c784';
+            return;
+        }
         el.textContent = _tr('feishu_configured_app', {
             appId: cfg.maskedFeishuAppId || '••••••••',
             receiveIdType: cfg.feishuReceiveIdType || 'chat_id',
@@ -14952,8 +14961,8 @@ function mmSaveFeishuWebhook() {
     var appSecret = (appSecretEl ? appSecretEl.value : '').trim();
     var receiveId = (receiveIdEl ? receiveIdEl.value : '').trim();
     var receiveIdType = (receiveIdTypeEl ? receiveIdTypeEl.value : 'chat_id') || 'chat_id';
-    var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret) && mmIsMaskedFeishuValue(receiveId);
-    if (!(appConfigured || (appId && appSecret && receiveId))) {
+    var appConfigured = mmIsMaskedFeishuValue(appId) && mmIsMaskedFeishuValue(appSecret);
+    if (!(appConfigured || (appId && appSecret))) {
         statusEl.innerHTML = '<div class="mm-status err">' + escHtml(_tr('feishu_save_requires_config')) + '</div>';
         return;
     }
@@ -14967,6 +14976,7 @@ function mmSaveFeishuWebhook() {
             feishuAppSecret: mmIsMaskedFeishuValue(appSecret) ? '' : appSecret,
             feishuReceiveIdType: receiveIdType,
             feishuReceiveId: mmIsMaskedFeishuValue(receiveId) ? '' : receiveId,
+            notificationRecipientPolicy: 'originating_user_dm',
             clearWebhook: true
         })
     }).then(function(r) {
@@ -15261,7 +15271,8 @@ function mmSaveSettings() {
     if (_feishuCb) {
         config.notifications = {
             feishuEnabled: _feishuCb.checked,
-            feishuReceiveIdType: ((document.getElementById('mm-feishu-receive-id-type') || {}).value || 'chat_id')
+            feishuReceiveIdType: ((document.getElementById('mm-feishu-receive-id-type') || {}).value || 'chat_id'),
+            notificationRecipientPolicy: 'originating_user_dm'
         };
         var _feishuAppIdValue = ((document.getElementById('mm-feishu-app-id') || {}).value || '').trim();
         var _feishuAppSecretValue = ((document.getElementById('mm-feishu-app-secret') || {}).value || '').trim();

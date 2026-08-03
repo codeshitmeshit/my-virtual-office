@@ -41,6 +41,9 @@ def test_skill_requires_original_channel_progress_notice_for_any_agent_interacti
     assert "sourceSurface=feishu-dm/feishu-group" in content
     assert "POST /api/feishu-chat/original-channel-notice" in content
     assert "该 endpoint 是 Virtual Office 通用能力，不属于 Codex 私有工具" in content
+    assert "调用 `/api/agent-platform-communications/send` 时也必须继承同一份原始来源上下文" in content
+    assert "`sourceApp`、`sourceSurface`、`sourceMessageId`、`feishuChatId`、`chatType`、`sourceLabel`" in content
+    assert "不要把跨 Agent 请求改写成 `sourceApp=virtual-office/sourceSurface=agent-platform`" in content
     assert "missing_feishu_chat_id" in content
     assert "只有完全不涉及其他 Agent 交互的本地快速回复，才不需要发送这条进度告知" in content
 
@@ -55,6 +58,25 @@ def test_skill_examples_forbid_collapsing_notice_into_final_answer():
     assert "直接调用目标 Agent 后，只发送一条最终回复" in content
     assert "在最终回复开头补一句“问到了”或“已询问”，但没有提前发送独立的原通道进度告知" in content
     assert "最终答案不能替代进度告知" in content
+
+
+def test_skill_forbids_sender_business_fallback_on_deferred_timeout():
+    content = server._agent_platform_comm_skill_content()
+    assert "`status=pending` 且 `deferred=true`" in content
+    assert "目标 Agent 已收到请求但尚未完成" in content
+    assert "不得用调用方自己的知识、搜索结果或判断替代目标 Agent 输出业务结论" in content
+    assert "`callerInstruction`" in content
+    assert "`pending/deferred` 和空回复均未被解释为目标 Agent 的完成结论" in content
+
+
+def test_skill_requires_preserving_completed_agent_reply_before_sender_thoughts():
+    content = server._agent_platform_comm_skill_content()
+    assert "### 5.1 呈现目标 Agent 的完成结果" in content
+    assert "先明确标注“目标 Agent/研究员/分析师回复”" in content
+    assert "优先引用或保留目标 Agent 原文中的关键结论" in content
+    assert "不要把目标 Agent 的回复静默改写成调用方自己的结论" in content
+    assert "必须放在“我的补充”" in content
+    assert "如需补充自己的思考，已与目标 Agent 原文分开呈现" in content
 
 
 def test_canonical_loader_rejects_wrong_identity():

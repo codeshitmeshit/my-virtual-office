@@ -281,7 +281,7 @@
                             <input type="text" id="mm-feishu-app-id" class="mm-input" placeholder="cli_xxx" autocomplete="off">
                             <label class="mm-label" data-i18n="feishu_app_secret">Feishu App Secret</label>
                             <input type="password" id="mm-feishu-app-secret" class="mm-input" placeholder="app secret" autocomplete="off">
-                            <label class="mm-label" data-i18n="feishu_receive_id_type">Receive ID Type</label>
+                            <label class="mm-label" data-i18n="feishu_fallback_receive_id_type">Fallback Receive ID Type</label>
                             <select id="mm-feishu-receive-id-type" class="mm-input">
                                 <option value="chat_id">chat_id</option>
                                 <option value="open_id">open_id</option>
@@ -289,8 +289,9 @@
                                 <option value="union_id">union_id</option>
                                 <option value="email">email</option>
                             </select>
-                            <label class="mm-label" data-i18n="feishu_receive_id">Receive ID</label>
+                            <label class="mm-label" data-i18n="feishu_fallback_receive_id">Fallback Receive ID</label>
                             <input type="text" id="mm-feishu-receive-id" class="mm-input" placeholder="oc_xxx / ou_xxx / user@example.com" autocomplete="off">
+                            <div style="font-size:9px;color:#888;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_dm_recipient_note">AI notifications are sent to the originating user's bot DM. The fallback ID is optional.</div>
                             <div id="mm-feishu-long-connection-status" style="font-size:9px;color:#888;margin:4px 0 8px;line-height:1.4;" data-i18n="feishu_long_connection_pending">Long connection starts after saving config.</div>
                             <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
                                 <button class="mm-btn mm-btn-primary" onclick="mmSaveFeishuWebhook()" data-i18n="feishu_save_config">Save Config</button>

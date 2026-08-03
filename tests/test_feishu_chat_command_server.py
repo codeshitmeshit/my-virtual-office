@@ -41,6 +41,24 @@ def _body(message_id="om-command", chat_id="oc-private", text="/new", *, group=F
 
 def _configure(monkeypatch, tmp_path, *, provider="codex"):
     monkeypatch.setattr(server, "STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_SERVICE", None)
+    monkeypatch.setattr(server, "_FEISHU_NOTIFICATION_TOPIC_STORE", None)
+    monkeypatch.setattr(server, "_FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE", None)
+    monkeypatch.setattr(server, "VO_CONFIG", {
+        **server.VO_CONFIG,
+        "notifications": {
+            **((server.VO_CONFIG.get("notifications") or {}) if isinstance(server.VO_CONFIG.get("notifications"), dict) else {}),
+            "feishuEnabled": True,
+            "feishuAppId": "cli-test",
+            "feishuAppSecret": "secret",
+            "recipientPolicy": "originating_user_dm",
+            "topicConversationsEnabled": True,
+            "topicConversationModels": [
+                {"label": "默认", "model": "default"},
+                {"label": "专业", "model": "pro-model", "aliases": ["pro"]},
+            ],
+        },
+    })
     monkeypatch.setattr(server, "_sync_feishu_channel_record_to_comm_ledger", lambda _row: None)
     monkeypatch.setattr(server, "_feishu_chat_app_config", lambda: {
         "enabled": True,
@@ -83,6 +101,70 @@ def test_server_wires_trusted_feishu_command_and_persistent_redelivery(monkeypat
     indexed = feishu_chat_channel.load_source_index(str(tmp_path), "om-command")
     assert indexed["state"] == "completed"
     assert indexed["record"]["event"] == "command_completed"
+
+
+def test_server_wires_private_here_to_foreground_notification_sender(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    dispatches, notifications, sends = [], [], []
+    monkeypatch.setattr(server, "_dispatch_representative_agent_message", lambda *args: dispatches.append(args) or {
+        "ok": True,
+        "reply": "上一条回复",
+        "feishuChatReply": "上一条回复",
+    })
+    monkeypatch.setattr(server, "_send_here_branch_notification", lambda intent: notifications.append(intent) or {
+        "ok": True,
+        "status": "success",
+        "messageId": "om-here-card",
+    })
+    send = lambda chat_id, text: sends.append((chat_id, text)) or {"ok": True, "messageId": f"reply-{len(sends)}"}
+
+    normal = server._handle_feishu_chat_message_event(
+        _body(message_id="om-before", text="请分析一下这条消息"),
+        send_text=send,
+    )
+    here = server._handle_feishu_chat_message_event(
+        _body(message_id="om-here", text="/here"),
+        send_text=send,
+    )
+
+    assert normal["status"] == "completed"
+    assert here["status"] == "success"
+    assert len(dispatches) == 1
+    assert len(notifications) == 1
+    assert notifications[0]["topicContext"]["parentSourceMessageId"] == "om-here"
+    assert notifications[0]["topicContext"]["context"][-1]["messageId"] == "om-before"
+    assert sends[-1] == ("oc-private", "已发送到通知话题。")
+
+
+def test_server_wires_private_change_to_topic_foreground_rejection(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    dispatches, notifications, sends = [], [], []
+    monkeypatch.setattr(server, "_dispatch_representative_agent_message", lambda *args: dispatches.append(args) or {"ok": True, "reply": "ordinary"})
+    monkeypatch.setattr(server, "_send_here_branch_notification", lambda intent: notifications.append(intent) or {"ok": True})
+
+    result = server._handle_feishu_chat_message_event(
+        _body(message_id="om-change", text="/change pro"),
+        send_text=lambda chat_id, text: sends.append((chat_id, text)) or {"ok": True, "messageId": "reply-change"},
+    )
+
+    assert result["status"] == "unsupported_location"
+    assert not dispatches
+    assert not notifications
+    assert "已激活的通知话题" in sends[-1][1]
+
+
+def test_server_topic_agent_catalog_uses_roster_without_placeholder_defaults(monkeypatch, tmp_path):
+    _configure(monkeypatch, tmp_path)
+    monkeypatch.setattr(server, "refresh_agent_maps", lambda: None)
+    monkeypatch.setattr(server, "get_roster", lambda: [
+        {"id": "agent-a", "statusKey": "agent-a", "name": "Agent A"},
+        {"id": "agent-b", "statusKey": "agent-b", "name": "Agent B", "profile": "profile-b"},
+    ])
+
+    assert server._configured_feishu_topic_agent_choices() == [
+        {"label": "Agent A", "agentId": "agent-a"},
+        {"label": "Agent B", "agentId": "agent-b", "aliases": ["profile-b"]},
+    ]
 
 
 def test_global_slash_flag_blocks_feishu_exact_command_before_agent_dispatch(monkeypatch, tmp_path):

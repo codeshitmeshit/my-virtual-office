@@ -11,10 +11,12 @@ from datetime import datetime
 try:
     from services.chat_commands import parse_chat_command
     from services.chat_slash_guard import classify_slash_message, feishu_block_reply
+    from services.feishu_topic_foreground_commands import parse_foreground_command
     from services.feishu_rich_text import extract_feishu_rich_text
 except ModuleNotFoundError:  # Package import in direct unit tests.
     from .services.chat_commands import parse_chat_command
     from .services.chat_slash_guard import classify_slash_message, feishu_block_reply
+    from .services.feishu_topic_foreground_commands import parse_foreground_command
     from .services.feishu_rich_text import extract_feishu_rich_text
 
 ACK_EMOJIS = ("LGTM",)
@@ -753,6 +755,7 @@ def handle_message_event(
     download_image=None,
     mark_dispatching=None,
     command_callback=None,
+    foreground_command_callback=None,
     async_acknowledgement=False,
 ):
     event = (body or {}).get("event") if isinstance((body or {}).get("event"), dict) else {}
@@ -855,6 +858,11 @@ def handle_message_event(
         if message_type == "text"
         else None
     )
+    foreground_command = (
+        parse_foreground_command(text, message.get("resources") or [])
+        if message_type == "text"
+        else None
+    )
     command = parse_chat_command(text, message.get("resources") or []) if message_type == "text" else None
     if slash_intent is not None and slash_intent.is_command and not command_callback:
         reply = feishu_block_reply(text, disabled=True)
@@ -902,6 +910,82 @@ def handle_message_event(
             "sendResult": send_result,
             "record": record,
         }
+    if foreground_command is not None and foreground_command_callback:
+        if not lock.acquire(blocking=False):
+            reply = "当前会话正在处理其他请求，请稍后重试。"
+            send_result = deliver(reply)
+            record = record_event({
+                **base_record,
+                "event": "command_completed",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": foreground_command.name,
+                "commandStatus": "busy",
+                "reply": reply,
+                "sendResult": send_result,
+                "deliveryStatus": _delivery_classification(send_result),
+                "replyInThread": reply_in_thread if chat_type == "group" else False,
+            })
+            return {"ok": False, "status": "busy", "reply": reply, "sendResult": send_result, "record": record, "_status": 409}
+        try:
+            started = record_event({
+                **base_record,
+                "event": "command_started",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": foreground_command.name,
+                **({"commandArgument": foreground_command.argument} if foreground_command.argument else {}),
+            })
+            try:
+                outcome = foreground_command_callback(foreground_command.name, {
+                    "argument": foreground_command.argument,
+                    "sourceMessageId": source_message_id,
+                    "conversationId": conversation_id,
+                    "feishuChatId": chat_id,
+                    "chatType": chat_type,
+                    "sourceSurface": projection["sourceSurface"],
+                    "representativeAgentId": representative_agent_id,
+                    "voUserId": vo_user_id,
+                    "sender": identity,
+                })
+            except Exception:
+                outcome = {"ok": False, "status": "failed", "reply": "命令执行失败。"}
+            outcome = outcome if isinstance(outcome, dict) else {"ok": False, "status": "failed", "reply": "命令执行失败。"}
+            status = str(outcome.get("status") or ("success" if outcome.get("ok") else "failed"))[:64]
+            reply = str(outcome.get("reply") or outcome.get("error") or "命令执行完成。")[:1024]
+            send_result = deliver(reply)
+            completed = record_event({
+                **base_record,
+                "event": "command_completed",
+                "voUserId": vo_user_id,
+                "representativeAgentId": representative_agent_id,
+                "conversationId": conversation_id,
+                "command": foreground_command.name,
+                **({"commandArgument": foreground_command.argument} if foreground_command.argument else {}),
+                "commandStatus": status,
+                "commandResult": {
+                    key: outcome.get(key)
+                    for key in ("ok", "status", "changed", "operationId", "duplicate", "durationMs")
+                    if outcome.get(key) not in (None, "")
+                },
+                "reply": reply,
+                "sendResult": send_result,
+                "deliveryStatus": _delivery_classification(send_result),
+                "replyInThread": reply_in_thread if chat_type == "group" else False,
+                "inboundRecordId": started.get("id"),
+            })
+            return {
+                "ok": bool(outcome.get("ok")) and bool(send_result.get("ok")),
+                "status": status if send_result.get("ok") else "delivery_failed",
+                "reply": reply,
+                "commandResult": outcome,
+                "sendResult": send_result,
+                "record": completed,
+            }
+        finally:
+            lock.release()
     if command is not None and command_callback:
         if not lock.acquire(blocking=False):
             reply = "当前会话正在处理其他请求，请稍后重试。"

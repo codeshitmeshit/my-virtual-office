@@ -1679,8 +1679,8 @@
         const assignee = task.assignee ? state.agentRoster.find(a => a.key === task.assignee || a.statusKey === task.assignee || a.agentId === task.assignee) : null;
         const priorityLabel = task.priority !== 'medium' ? _t('proj_priority_' + task.priority) : '';
         const projectExecutionState = task.executionState && task.executionState !== 'backlog' ? `<span class="proj-exec-state state-${escHtml(task.executionState)}">${escHtml(projectExecutionStateLabel(task))}</span>` : '';
-        const mtgRequests = state.meetingRequestsByTask[task.id] || [];
-        const pendingMtgRequests = mtgRequests.filter(r => r.status === 'pending').length;
+        const mtgRequests = activeTaskMeetingRequests(task, state.meetingRequestsByTask[task.id] || []);
+        const pendingMtgRequests = mtgRequests.filter(r => (r.taskBlocker && r.taskBlocker.status || r.status) === 'pending').length;
         const stageValue = Number(task.executionStage);
         const stageBadge = markedPipeline && Number.isInteger(stageValue) && stageValue > 0
             ? `<span class="proj-task-exec-order" title="${escHtml(_tf('proj_task_execution_stage_hint', 'Project execution stage', '项目执行阶段'))}">S${stageValue}</span>`

@@ -11,6 +11,8 @@ When a main Agent conversation is blocked by a long-running turn, Virtual Office
 - Degrade gracefully when originating conversation context is unavailable: continue from the source and topic messages and disclose that context inheritance is incomplete.
 - Use the Agent associated with the originating main chat when the topic conversation is activated, keep that Agent stable for the topic, and leave a narrow policy boundary for a later confirmed Agent-selection change.
 - Preserve the bot DM's supported text, image, and file behavior in topic conversations.
+- Add a `/here` foreground command in both the originating main chat and existing notification topics so a user can send a bounded summary of the immediately preceding relevant context into a new notification topic entry without copying the whole conversation.
+- Add a `/change` foreground command inside notification topics so a user can inspect or change only that topic conversation's active Agent, leaving the originating main conversation and other topics unchanged.
 - Reuse the notification App long connection, Feishu thread metadata, notification App reply operations, and the existing provider-neutral conversation bridge; do not add a parallel receiver, external queue, conversation store, transport, or Agent-routing subsystem.
 
 ## Capabilities
@@ -18,6 +20,7 @@ When a main Agent conversation is blocked by a long-running turn, Virtual Office
 ### New Capabilities
 
 - `feishu-topic-conversations`: Activation, context inheritance, isolation, ordering, Agent binding, reply placement, degradation, and capability parity for conversations rooted in long-running AI notifications delivered through a Virtual Office bot DM.
+- `feishu-topic-foreground-commands`: `/here` context branching from main chats or topics, and `/change` topic-local Agent selection, composed through the same notification-topic conversation infrastructure.
 
 ### Modified Capabilities
 
@@ -29,5 +32,6 @@ None. The change composes the existing Feishu direct-message channel, notificati
 - Thin orchestration and source-context lookup in focused new modules, wired from `app/server.py` without adding new business logic to that legacy entry point.
 - Existing provider dispatch and `ProviderConversationService` conversation scoping in `app/services/provider_conversations.py` and provider bridge handlers.
 - Existing long-running AI-notification delivery/audit metadata so an outbound bot-DM source message can be related back to its originating main conversation and Agent context.
+- Existing chat command parsing, notification delivery, topic binding, Provider conversation configuration, and Agent-selection surfaces should be reused or narrowly extended; this change must not introduce a parallel command router, notification sender, topic store, or Provider dispatch path.
 - Focused Feishu channel, provider conversation, notification, recovery, ordering, isolation, and attachment tests.
 - No new external dependency, daemon, database, queue, transport, or standalone tool is intended.

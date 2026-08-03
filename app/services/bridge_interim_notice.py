@@ -45,6 +45,21 @@ def original_channel_interim_notice_values(metadata: Mapping[str, Any]) -> Mappi
             "contacting the other VO Agent. Include sourceApp, sourceSurface, "
             "sourceMessageId, conversationId, feishuChatId, chatType, and text from this prompt context."
         ),
+        "agent_communication_context": prompt_formatter.trusted_text(
+            "When you subsequently call `/api/agent-platform-communications/send`, carry the same "
+            "sourceApp, sourceSurface, sourceMessageId, feishuChatId, chatType, sourceLabel, and "
+            "original Feishu conversationId in that request. Put them at top level when possible, "
+            "or inside metadata if the calling tool only allows metadata. This lets VO route timeout "
+            "and late-completion behavior back to the original Feishu conversation instead of letting "
+            "the calling Agent answer on behalf of the requested Agent."
+        ),
+        "agent_reply_presentation": prompt_formatter.trusted_text(
+            "When the requested VO Agent returns a completed reply, present that Agent's result as "
+            "the primary source. Quote or preserve the Agent's key original conclusion first, clearly "
+            "label it as the requested Agent's reply, and only then add your own brief follow-up "
+            "thinking in a separate section. Do not silently rewrite the Agent reply as if it were "
+            "your own conclusion."
+        ),
         "action": prompt_formatter.trusted_text(
             "Use the same original communication channel that delivered this message "
             "when the runtime provides that route."

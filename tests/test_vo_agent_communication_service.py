@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
+
+ROOT = Path(__file__).resolve().parents[1]
+APP_DIR = ROOT / "app"
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
 
 from app.services.vo_agent_communication import (
     VOAgentCommunicationError,
@@ -40,11 +46,12 @@ OPENCLAW_TARGET = {
 }
 
 
-def _service(*, agents=None, codex_result=None):
+def _service(*, agents=None, codex_result=None, agent_reply="收到"):
     agents = agents or {"hr": SENDER, "codex-local": TARGET}
     events = []
     provider_calls = []
     presence = []
+    followups = []
 
     def append_event(event):
         saved = {**event, "id": f"event-{len(events) + 1}"}
@@ -77,7 +84,7 @@ def _service(*, agents=None, codex_result=None):
             "projectId": args[3],
             "taskId": args[4],
         })
-        return "收到"
+        return agent_reply
 
     ports = VOAgentCommunicationPorts(
         lookup_agent=lambda ai_id: agents.get(ai_id),
@@ -90,12 +97,13 @@ def _service(*, agents=None, codex_result=None):
         call_codex=call_codex,
         call_claude_code=call_claude_code,
         call_agent=call_agent,
+        schedule_deferred_followup=lambda payload: followups.append(dict(payload)) or {"ok": True, "status": "scheduled"},
     )
-    return VOAgentCommunicationService(ports), events, provider_calls, presence
+    return VOAgentCommunicationService(ports), events, provider_calls, presence, followups
 
 
 def test_hr_message_uses_visible_vo_events_and_provider_routing():
-    service, events, calls, presence = _service()
+    service, events, calls, presence, _followups = _service()
 
     result = service.send({
         "fromAgentId": "hr",
@@ -114,7 +122,7 @@ def test_hr_message_uses_visible_vo_events_and_provider_routing():
     assert "<agent_platform_message_prompt>" in calls[0]["message"]
     assert '<from id="hr"' in calls[0]["message"]
     assert "<original_channel_interim_notice>" in calls[0]["message"]
-    assert "cross-VO communication" in calls[0]["message"]
+    assert "My Virtual Office AgentPlatform-to-AgentPlatform Communications" in calls[0]["message"]
     assert "VO-GUIDANCE" in calls[0]["message"]
     assert presence == [
         ("codex-local", "working", "Replying to OpenClaw: HR 👩‍💼"),
@@ -124,7 +132,7 @@ def test_hr_message_uses_visible_vo_events_and_provider_routing():
 
 def test_non_ready_openclaw_sender_fails_before_history_and_provider():
     blocked = {**SENDER, "communicationSkill": {"ready": False, "status": "missing"}}
-    service, events, calls, _presence = _service(agents={"hr": blocked, "codex-local": TARGET})
+    service, events, calls, _presence, _followups = _service(agents={"hr": blocked, "codex-local": TARGET})
 
     result = service.send({
         "fromAgentId": "hr",
@@ -149,7 +157,7 @@ def test_non_ready_openclaw_sender_fails_before_history_and_provider():
     ],
 )
 def test_provider_failures_have_stable_codes(provider_result, expected_code):
-    service, events, _calls, _presence = _service(codex_result=provider_result)
+    service, events, _calls, _presence, _followups = _service(codex_result=provider_result)
 
     result = service.send({
         "fromAgentId": "hr",
@@ -164,6 +172,104 @@ def test_provider_failures_have_stable_codes(provider_result, expected_code):
         require_reply(result)
     assert raised.value.code == expected_code
     assert raised.value.status == result["status"]
+
+
+def test_feishu_timeout_is_deferred_without_authorizing_sender_fallback():
+    service, events, _calls, _presence, followups = _service(codex_result={
+        "ok": False,
+        "status": "timeout",
+        "error": "timed out",
+        "activeConversationId": "main__codex__market",
+        "activeStatus": "running",
+    })
+
+    result = service.send({
+        "fromAgentId": "hr",
+        "toAgentId": "codex-local",
+        "message": "请研究这家公司",
+        "conversationId": "main__codex__market",
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-dm",
+        "sourceMessageId": "om-1",
+        "feishuChatId": "oc-1",
+        "timeoutSec": 90,
+    })
+
+    assert result["ok"] is True
+    assert result["status"] == "pending"
+    assert result["deferred"] is True
+    assert result["code"] == "agent_communication_deferred"
+    assert result["activeConversationId"] == "main__codex__market"
+    assert result["activeStatus"] == "running"
+    assert result["deferredFollowup"]["status"] == "scheduled"
+    assert followups[0]["requestEventId"] == events[0]["id"]
+    assert followups[0]["sourceContext"]["sourceMessageId"] == "om-1"
+    assert "不要代替目标 Agent 输出业务结论" in result["reply"]
+    assert "Do not answer the delegated business question yourself" in result["callerInstruction"]
+    assert events[-1]["ok"] is False
+    assert events[-1]["metadata"]["deferredTimeout"]["reason"] == "target_agent_timeout"
+
+
+def test_feishu_timeout_defers_when_source_context_is_nested_in_metadata():
+    service, events, calls, _presence, _followups = _service(codex_result={
+        "ok": False,
+        "status": "timeout",
+        "error": "timed out",
+    })
+
+    result = service.send({
+        "fromAgentId": "hr",
+        "toAgentId": "codex-local",
+        "message": "请研究这家公司",
+        "conversationId": "main__codex__market",
+        "timeoutSec": 90,
+        "metadata": {
+            "sourceApp": "feishu",
+            "sourceSurface": "feishu-dm",
+            "sourceLabel": "Feishu DM",
+            "sourceMessageId": "om-1",
+            "feishuChatId": "oc-1",
+            "chatType": "p2p",
+        },
+    })
+
+    assert result["ok"] is True
+    assert result["status"] == "pending"
+    assert result["deferred"] is True
+    assert calls[0]["timeoutSec"] == 90
+    assert events[0]["metadata"]["sourceApp"] == "feishu"
+    assert events[0]["metadata"]["sourceSurface"] == "feishu-dm"
+    assert events[-1]["metadata"]["deferredTimeout"]["timeoutSec"] == 90
+
+
+def test_openclaw_agent_timeout_is_deferred_for_feishu_followup():
+    service, events, calls, _presence, followups = _service(
+        agents={"hr": SENDER, "main": OPENCLAW_TARGET},
+        agent_reply="[ERROR] Agent call timed out",
+    )
+
+    result = service.send({
+        "fromAgentId": "hr",
+        "toAgentId": "main",
+        "message": "请研究美团",
+        "conversationId": "codex__research__meituan",
+        "sourceApp": "feishu",
+        "sourceSurface": "feishu-dm",
+        "sourceMessageId": "om-timeout",
+        "feishuChatId": "oc-1",
+        "timeoutSec": 90,
+    })
+
+    assert result["ok"] is True
+    assert result["status"] == "pending"
+    assert result["deferred"] is True
+    assert result["activeConversationId"] == "codex__research__meituan"
+    assert result["activeStatus"] == "running"
+    assert calls[0]["agentId"] == "main"
+    assert followups[0]["requestEventId"] == events[0]["id"]
+    assert followups[0]["agentId"] == "main"
+    assert followups[0]["providerResult"]["status"] == "timeout"
+    assert events[-1]["metadata"]["deferredTimeout"]["followup"]["status"] == "scheduled"
 
 
 def test_http_and_hr_wiring_share_the_application_service_boundary():
