@@ -117,6 +117,7 @@
     "_meeting_request_public",
     "_meeting_request_reconcile_project",
     "_meeting_request_record_reconciliation",
+    "_meeting_request_reset_project_task_blockers",
     "_meeting_request_resolve_task_blocker",
     "_meeting_request_selected_context",
     "_meeting_request_service_hooks",
@@ -258,7 +259,7 @@
       "caller": "_deliver_meeting_notification"
     },
     {
-      "callee": "send_feishu_notification",
+      "callee": "send_notification_card",
       "caller": "_deliver_meeting_notification"
     },
     {
@@ -1110,6 +1111,10 @@
       "caller": "_handle_project_execution_meeting_blocker_action"
     },
     {
+      "callee": "_meeting_request_reset_project_task_blockers",
+      "caller": "_handle_project_reset"
+    },
+    {
       "callee": "_load_exec_meeting_store",
       "caller": "_human_decision_bind_native"
     },
@@ -1920,6 +1925,18 @@
     {
       "callee": "next",
       "caller": "_meeting_request_record_reconciliation"
+    },
+    {
+      "callee": "_meeting_domain_repository",
+      "caller": "_meeting_request_reset_project_task_blockers"
+    },
+    {
+      "callee": "_meeting_request_service_hooks",
+      "caller": "_meeting_request_reset_project_task_blockers"
+    },
+    {
+      "callee": "list",
+      "caller": "_meeting_request_reset_project_task_blockers"
     },
     {
       "callee": "_meeting_domain_repository",

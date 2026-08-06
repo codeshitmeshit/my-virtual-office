@@ -5287,6 +5287,7 @@ def _send_hermes_approval_feishu_notification(approval):
         intent,
         notification_config=notifications_cfg,
         base_app_config=_feishu_app_send_config(notifications_cfg),
+        send=send_feishu_notification,
         webhook_url=notifications_cfg.get("feishuWebhook") or None,
         status_dir=STATUS_DIR,
     )
@@ -13453,6 +13454,7 @@ def _deliver_meeting_notification(entity_kind, entity_id, intent):
         result = send_notification_card(
             notification_config=notifications_cfg,
             base_app_config=_feishu_app_send_config(notifications_cfg),
+            send=send_feishu_notification,
             intent=staged["intent"],
             webhook_url=notifications_cfg.get("feishuWebhook") or None,
             status_dir=STATUS_DIR,
@@ -13529,6 +13531,7 @@ def _send_feishu_workflow_notification(intent):
         intent if isinstance(intent, dict) else {},
         notification_config=notification_cfg,
         base_app_config=_feishu_app_send_config(notification_cfg),
+        send=send_feishu_notification,
         status_dir=STATUS_DIR,
     )
 

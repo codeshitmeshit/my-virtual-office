@@ -4,6 +4,10 @@ from app.services.meeting_requests import (
     reset_project_task_blockers_command, resolve_blocker_command, selected_context,
     unresolved_for_task,
 )
+from itertools import count
+
+
+_GENERATED_IDS = count(1)
 
 
 def hooks():
@@ -14,7 +18,7 @@ def hooks():
         data.setdefault("events", {}).setdefault(meeting["id"], []).append(event)
         return event
     return RequestHooks(
-        now=lambda: "now", new_id=lambda: "generated-id",
+        now=lambda: "now", new_id=lambda: f"generated-id-{next(_GENERATED_IDS)}",
         clean_participants=lambda values: list(dict.fromkeys(str(value).strip() for value in values if str(value).strip())),
         participant_error=lambda value: ({
             "error": "Archive manager cannot participate in executable meetings",

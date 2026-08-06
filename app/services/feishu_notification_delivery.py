@@ -47,6 +47,7 @@ def send_notification_card(
     *,
     notification_config: Mapping[str, Any],
     base_app_config: Mapping[str, Any],
+    send: Any = send_feishu_notification,
     status_dir: str | None = None,
     webhook_url: str | None = None,
     timeout: int = 10,
@@ -58,7 +59,7 @@ def send_notification_card(
         intent=intent,
         webhook_url=webhook_url,
     )
-    return send_feishu_notification(
+    return send(
         dict(intent or {}),
         webhook_url=delivery["webhook_url"],
         app_config=delivery["app_config"],
