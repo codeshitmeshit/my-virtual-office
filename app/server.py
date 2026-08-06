@@ -213,6 +213,8 @@ from provider_execution import (
     provider_http_status,
 )
 from feishu_notifications import add_feishu_message_reaction, delete_feishu_message_reaction, download_feishu_message_resource, recall_feishu_message, reply_feishu_message, reply_feishu_notification, send_feishu_markdown_message, send_feishu_notification, send_feishu_text_message, update_feishu_notification
+
+_DEFAULT_FEISHU_NOTIFICATION_SENDER = send_feishu_notification
 from feishu_long_connection import FeishuLongConnectionReceiver
 
 SETTINGS_PROBE_CACHE = SettingsProbeCache()
@@ -5287,7 +5289,11 @@ def _send_hermes_approval_feishu_notification(approval):
         intent,
         notification_config=notifications_cfg,
         base_app_config=_feishu_app_send_config(notifications_cfg),
-        send=send_feishu_notification,
+        send=(
+            send_feishu_notification
+            if send_feishu_notification is not _DEFAULT_FEISHU_NOTIFICATION_SENDER
+            else None
+        ),
         webhook_url=notifications_cfg.get("feishuWebhook") or None,
         status_dir=STATUS_DIR,
     )
@@ -13454,7 +13460,11 @@ def _deliver_meeting_notification(entity_kind, entity_id, intent):
         result = send_notification_card(
             notification_config=notifications_cfg,
             base_app_config=_feishu_app_send_config(notifications_cfg),
-            send=send_feishu_notification,
+            send=(
+                send_feishu_notification
+                if send_feishu_notification is not _DEFAULT_FEISHU_NOTIFICATION_SENDER
+                else None
+            ),
             intent=staged["intent"],
             webhook_url=notifications_cfg.get("feishuWebhook") or None,
             status_dir=STATUS_DIR,
@@ -13531,7 +13541,11 @@ def _send_feishu_workflow_notification(intent):
         intent if isinstance(intent, dict) else {},
         notification_config=notification_cfg,
         base_app_config=_feishu_app_send_config(notification_cfg),
-        send=send_feishu_notification,
+        send=(
+            send_feishu_notification
+            if send_feishu_notification is not _DEFAULT_FEISHU_NOTIFICATION_SENDER
+            else None
+        ),
         status_dir=STATUS_DIR,
     )
 
