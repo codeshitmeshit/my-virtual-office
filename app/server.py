@@ -80,7 +80,13 @@ from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
 from services import meeting_callbacks as meeting_callbacks_service
 from services import feishu_original_channel_notice as feishu_original_channel_notice_service
+from services import agent_deferred_followups
 from services import agent_followup_delivery
+from services.feishu_notification_delivery import (
+    send_notification_card,
+    send_notification_markdown,
+)
+from services.feishu_notification_recipients import normalize_recipient_policy
 from services.feishu_rich_text import extract_feishu_rich_text
 from services.meeting_priority_policy import (
     coerce_moderator_outcome_for_priority,
@@ -146,6 +152,13 @@ from services.feishu_notification_topic_runtime import (
     load_topic_resources as load_notification_topic_resources,
     lookup_notification_root,
     safe_preflight_audit,
+)
+from services.feishu_topic_foreground_commands import (
+    FeishuTopicForegroundCommandService,
+    ForegroundCommand,
+    ForegroundCommandContext,
+    HereBranchService,
+    StaticTopicAgentCatalog,
 )
 from services.provider_ports import AdapterCapabilities, AdapterEvent, AdapterResult, CallableProviderAdapter, RunCommand
 from services.provider_registry import ProviderRunRepository
@@ -230,6 +243,8 @@ SETTINGS_PROBE_CACHE = SettingsProbeCache()
 
 _FEISHU_LONG_CONNECTION_RECEIVER = None
 _FEISHU_NOTIFICATION_TOPIC_SERVICE = None
+_FEISHU_NOTIFICATION_TOPIC_STORE = None
+_FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE = None
 _FEISHU_NOTIFICATION_TOPIC_LOCK = threading.Lock()
 _FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
 _FEISHU_LONG_CONNECTION_LOCK = threading.Lock()
@@ -755,6 +770,33 @@ def _env_bool(key, fallback):
         return fallback
     return str(val).strip().lower() in ("1", "true", "yes", "on", "enabled")
 
+
+def _normalize_feishu_topic_model_choices(value):
+    if not isinstance(value, list):
+        return []
+    normalized = []
+    seen = set()
+    for raw in value:
+        item = raw if isinstance(raw, dict) else {}
+        label = str(item.get("label") or item.get("name") or item.get("model") or "").strip()[:80]
+        model = str(item.get("model") or item.get("name") or "").strip()[:160]
+        if not label or not model or model in seen:
+            continue
+        choice = {"label": label, "model": model}
+        aliases = item.get("aliases")
+        if isinstance(aliases, list):
+            clean_aliases = [
+                str(alias).strip()[:80]
+                for alias in aliases
+                if str(alias or "").strip() and str(alias).strip() not in {label, model}
+            ]
+            if clean_aliases:
+                choice["aliases"] = clean_aliases
+        normalized.append(choice)
+        seen.add(model)
+    return normalized
+
+
 def _resolve_config_path():
     """Return the local persistent vo-config.json path."""
     if os.environ.get("VO_CONFIG"):
@@ -916,9 +958,24 @@ def _load_vo_config():
             "feishuAppSecret": _env_or("VO_FEISHU_APP_SECRET", notifications_cfg.get("feishuAppSecret", "")),
             "feishuReceiveIdType": _env_or("VO_FEISHU_RECEIVE_ID_TYPE", notifications_cfg.get("feishuReceiveIdType", "chat_id")),
             "feishuReceiveId": _env_or("VO_FEISHU_RECEIVE_ID", notifications_cfg.get("feishuReceiveId", "")),
+            "notificationRecipientPolicy": normalize_recipient_policy(
+                _env_or(
+                    "VO_FEISHU_NOTIFICATION_RECIPIENT_POLICY",
+                    notifications_cfg.get(
+                        "notificationRecipientPolicy",
+                        notifications_cfg.get("feishuRecipientPolicy", "fixed"),
+                    ),
+                )
+            ),
             "topicConversationsEnabled": _env_bool(
                 "VO_FEISHU_NOTIFICATION_TOPICS_ENABLED",
                 notifications_cfg.get("topicConversationsEnabled", False),
+            ),
+            "topicConversationModels": _normalize_feishu_topic_model_choices(
+                notifications_cfg.get(
+                    "topicConversationModels",
+                    notifications_cfg.get("feishuTopicConversationModels", []),
+                )
             ),
         },
         "feishu": {
@@ -1024,9 +1081,17 @@ def _mask_secret_value(value, prefix=6, suffix=4):
 
 
 def _feishu_app_configured(cfg):
-    return bool(
+    recipient_policy = normalize_recipient_policy(
+        (cfg or {}).get("notificationRecipientPolicy") or (cfg or {}).get("feishuRecipientPolicy")
+    )
+    required = (
         (cfg or {}).get("feishuAppId")
         and (cfg or {}).get("feishuAppSecret")
+    )
+    if recipient_policy == "originating_user_dm":
+        return bool(required)
+    return bool(
+        required
         and (cfg or {}).get("feishuReceiveId")
     )
 
@@ -1426,6 +1491,14 @@ def _build_safe_vo_config():
             "maskedFeishuAppId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuAppId"), 5, 4),
             "feishuReceiveIdType": VO_CONFIG.get("notifications", {}).get("feishuReceiveIdType") or "chat_id",
             "maskedFeishuReceiveId": _mask_secret_value(VO_CONFIG.get("notifications", {}).get("feishuReceiveId"), 5, 4),
+            "notificationRecipientPolicy": normalize_recipient_policy(
+                VO_CONFIG.get("notifications", {}).get("notificationRecipientPolicy")
+                or VO_CONFIG.get("notifications", {}).get("feishuRecipientPolicy")
+            ),
+            "topicConversationsEnabled": bool(VO_CONFIG.get("notifications", {}).get("topicConversationsEnabled", False)),
+            "topicConversationModels": _normalize_feishu_topic_model_choices(
+                VO_CONFIG.get("notifications", {}).get("topicConversationModels")
+            ),
         },
         "feishu": {
             "chatApp": _feishu_chat_config_response(include_ok=False),
@@ -5209,10 +5282,12 @@ def _send_hermes_approval_feishu_notification(approval):
     intent = _hermes_approval_feishu_intent(approval)
     if not intent:
         return {"ok": True, "status": "skipped_invalid_approval"}
-    return send_feishu_notification(
+    notifications_cfg = VO_CONFIG.get("notifications", {}) or {}
+    return send_notification_card(
         intent,
-        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
-        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        notification_config=notifications_cfg,
+        base_app_config=_feishu_app_send_config(notifications_cfg),
+        webhook_url=notifications_cfg.get("feishuWebhook") or None,
         status_dir=STATUS_DIR,
     )
 
@@ -7162,26 +7237,50 @@ def _codex_git_paths(workspace):
         return set()
 
 
-def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body):
-    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
-    if from_type not in {"human", "user", "chat", "ui"}:
-        return None
+def _bridge_human_source_ref(body, *, source_app, source_surface, source_label):
     sender_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
+    return {
+        "id": str(body.get("fromUserId") or body.get("fromId") or body.get("userId") or "user").strip()[:256] or "user",
+        "providerKind": "human",
+        "name": sender_name,
+        "emoji": "",
+        "sourceApp": source_app,
+        "sourceSurface": source_surface,
+        "sourceLabel": source_label,
+    }
+
+
+def _bridge_source_metadata(provider_kind, agent_id, body):
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
     source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
     source_surface = str(body.get("sourceSurface") or body.get("surface") or "chat-window").strip() or "chat-window"
     source_label = str(body.get("sourceLabel") or "").strip()
     metadata = {
-        "providerKind": "codex",
+        "providerKind": str(provider_kind or "").strip() or "unknown",
         "sourceApp": source_app,
         "sourceSurface": source_surface,
         "fromType": from_type,
+        "representativeAgentId": str(body.get("representativeAgentId") or agent_id or "").strip(),
         **_chat_source_metadata(body),
     }
     if source_label:
         metadata["sourceLabel"] = source_label
-    idempotency_key = _codex_idempotency_key(body)
+    idempotency_key = _provider_run_idempotency_key(body)
     if idempotency_key:
         metadata["idempotencyKey"] = idempotency_key
+    return metadata
+
+
+def _append_bridge_user_comm_event(provider_kind, agent_id, conversation_id, message, body):
+    body = body if isinstance(body, dict) else {}
+    from_type = str(body.get("fromType") or body.get("senderType") or "").strip().lower()
+    if from_type not in {"human", "user", "chat", "ui"}:
+        return None
+    metadata = _bridge_source_metadata(provider_kind, agent_id, body)
+    source_app = metadata.get("sourceApp") or "virtual-office"
+    source_surface = metadata.get("sourceSurface") or "chat-window"
+    source_label = metadata.get("sourceLabel") or ""
+    idempotency_key = str(metadata.get("idempotencyKey") or "").strip()
     source_message_id = metadata.get("sourceMessageId")
     with _COMM_REQUEST_IDEMPOTENCY_LOCK:
         if source_message_id:
@@ -7200,15 +7299,7 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
             "type": "message",
             "direction": "request",
             "conversationId": conversation_id,
-            "from": {
-                "id": "user",
-                "providerKind": "human",
-                "name": sender_name,
-                "emoji": "",
-                "sourceApp": source_app,
-                "sourceSurface": source_surface,
-                "sourceLabel": source_label,
-            },
+            "from": _bridge_human_source_ref(body, source_app=source_app, source_surface=source_surface, source_label=source_label),
             "to": _office_agent_ref(agent_id),
             "text": message,
             "attachments": list(body.get("attachments") or []),
@@ -7217,6 +7308,87 @@ def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, bod
         }, require_durable=True)
     _publish_feishu_chat_comm_event(event, "message")
     return event
+
+
+def _append_bridge_reply_comm_event(provider_kind, agent_id, conversation_id, request_event, reply, metadata=None, *, ok=True):
+    text = str(reply or "")
+    if not isinstance(request_event, dict) or not text:
+        return None
+    existing = _find_comm_reply_for_request(request_event)
+    if existing:
+        return existing
+    source_metadata = {
+        k: v for k, v in _comm_metadata(request_event).items()
+        if k in {"sourceApp", "sourceSurface", "sourceLabel", "channel", "sourceMessageId", "feishuChatId", "representativeAgentId", "fromType", "chatType"}
+    }
+    extra = metadata if isinstance(metadata, dict) else {}
+    event = _append_comm_event({
+        "type": "message",
+        "direction": "reply",
+        "conversationId": conversation_id,
+        "from": _office_agent_ref(agent_id),
+        "to": request_event.get("from") or {"id": "user", "providerKind": "human", "name": "User"},
+        "text": text,
+        "inReplyTo": request_event.get("id"),
+        "metadata": {
+            "providerKind": str(provider_kind or "").strip() or "unknown",
+            **source_metadata,
+            **extra,
+        },
+        "visibleInOffice": (
+            request_event.get("visibleInOffice", True) is not False
+            and not _comm_is_feishu_group(request_event)
+        ),
+        "ok": bool(ok),
+    }, require_durable=True)
+    _publish_feishu_chat_comm_event(event, "message")
+    return event
+
+
+def _append_bridge_conversation_reference(provider_kind, agent_id, conversation_id, source_context, *, ok=True):
+    source_context = source_context if isinstance(source_context, dict) else {}
+    agent_id = str(agent_id or source_context.get("representativeAgentId") or source_context.get("agentId") or "").strip()[:160]
+    conversation_id = str(conversation_id or source_context.get("conversationId") or "").strip()[:240]
+    source_message_id = str(source_context.get("sourceMessageId") or "").strip()[:300]
+    if not agent_id or not conversation_id:
+        return None
+    metadata = _bridge_source_metadata(provider_kind, agent_id, source_context)
+    metadata = {
+        key: value
+        for key, value in metadata.items()
+        if key in {
+            "providerKind", "sourceApp", "sourceSurface", "sourceLabel",
+            "sourceMessageId", "feishuChatId", "chatType", "representativeAgentId",
+            "threadId", "rootId", "replyToMessageId", "topicConversationId",
+            "originConversationId", "inheritanceStatus",
+        }
+    }
+    digest = hashlib.sha1(
+        f"{provider_kind}|{agent_id}|{conversation_id}|{source_message_id}|{metadata.get('sourceSurface') or ''}".encode("utf-8")
+    ).hexdigest()[:24]
+    event_id = f"bridge-conversation-reference-{digest}"
+    with _COMM_REQUEST_IDEMPOTENCY_LOCK:
+        existing = _find_comm_event_by_id(event_id, conversation_id=conversation_id, agent_id=agent_id)
+        if existing:
+            return existing
+        event = _append_comm_event({
+            "id": event_id,
+            "type": "operation",
+            "operation": "agent_conversation_reference",
+            "direction": "system",
+            "conversationId": conversation_id,
+            "from": _office_agent_ref(agent_id),
+            "to": {"id": "hr", "providerKind": "human-resources", "name": "HR"},
+            "text": "",
+            "metadata": metadata,
+            "visibleInOffice": False,
+            "ok": bool(ok),
+        }, require_durable=True)
+    return event
+
+
+def _append_codex_user_comm_event(agent, agent_id, conversation_id, message, body):
+    return _append_bridge_user_comm_event("codex", agent_id, conversation_id, message, body)
 
 
 def _codex_feishu_approval_cards_enabled():
@@ -8737,9 +8909,12 @@ def _deliver_feishu_agent_followup_notification(
             "reason": delivery.reason,
             "chatReply": "",
         }
-    send_result = send_feishu_markdown_message(
+    notifications_cfg = VO_CONFIG.get("notifications", {}) or {}
+    send_result = send_notification_markdown(
         delivery.markdown,
-        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        notification_config=notifications_cfg,
+        base_app_config=_feishu_app_send_config(notifications_cfg),
+        recipient_intent=source_context if isinstance(source_context, dict) else {},
         timeout=20,
     )
     return {
@@ -8749,6 +8924,68 @@ def _deliver_feishu_agent_followup_notification(
         "chatReply": agent_followup_delivery.with_notification_status(delivery.chat_reply, send_result),
         "sendResult": send_result,
     }
+
+
+_DEFERRED_AGENT_FOLLOWUP_SCHEDULER = None
+_DEFERRED_AGENT_FOLLOWUP_SCHEDULER_LOCK = threading.Lock()
+
+
+def _find_deferred_agent_followup_reply(payload):
+    payload = payload if isinstance(payload, dict) else {}
+    request_event_id = str(payload.get("requestEventId") or "").strip()
+    conversation_id = str(payload.get("conversationId") or "").strip()
+    agent_id = str(payload.get("agentId") or "").strip()
+    if not request_event_id or not conversation_id:
+        return None
+    for event in reversed(_load_comm_history(limit=1000, conversation_id=conversation_id)):
+        if event.get("direction") != "reply" or event.get("inReplyTo") != request_event_id:
+            continue
+        metadata = _comm_metadata(event)
+        if metadata.get("deferredTimeout") or metadata.get("event") == "original_channel_notice":
+            continue
+        if agent_id and str((event.get("from") or {}).get("id") or "") != agent_id:
+            continue
+        if str(event.get("text") or "").strip():
+            return event
+    return None
+
+
+def _deliver_deferred_agent_followup_reply(payload, reply_event):
+    payload = payload if isinstance(payload, dict) else {}
+    reply_event = reply_event if isinstance(reply_event, dict) else {}
+    provider_result = payload.get("providerResult") if isinstance(payload.get("providerResult"), dict) else {}
+    metadata = _comm_metadata(reply_event)
+    result = {
+        **provider_result,
+        "ok": bool(reply_event.get("ok", True)),
+        "status": metadata.get("status") or "completed",
+        "threadId": metadata.get("threadId") or provider_result.get("threadId") or "",
+        "turnId": metadata.get("turnId") or provider_result.get("turnId") or "",
+    }
+    return _deliver_feishu_agent_followup_notification(
+        agent_id=payload.get("agentId") or "",
+        conversation_id=payload.get("conversationId") or "",
+        prompt_text=payload.get("promptText") or "",
+        reply=reply_event.get("text") or "",
+        source_context=payload.get("sourceContext") if isinstance(payload.get("sourceContext"), dict) else {},
+        result=result,
+        late=True,
+    )
+
+
+def _deferred_agent_followup_scheduler():
+    global _DEFERRED_AGENT_FOLLOWUP_SCHEDULER
+    with _DEFERRED_AGENT_FOLLOWUP_SCHEDULER_LOCK:
+        if _DEFERRED_AGENT_FOLLOWUP_SCHEDULER is None:
+            _DEFERRED_AGENT_FOLLOWUP_SCHEDULER = agent_deferred_followups.DeferredAgentFollowupScheduler(
+                find_reply=_find_deferred_agent_followup_reply,
+                deliver_reply=_deliver_deferred_agent_followup_reply,
+            )
+        return _DEFERRED_AGENT_FOLLOWUP_SCHEDULER
+
+
+def _schedule_agent_communication_deferred_followup(payload):
+    return _deferred_agent_followup_scheduler().schedule(payload if isinstance(payload, dict) else {})
 
 
 def _deliver_feishu_host_side_vo_continuation_reply(
@@ -11865,6 +12102,7 @@ def _vo_agent_communication_service():
                 project_id=project_id,
                 task_id=task_id,
             ),
+            schedule_deferred_followup=_schedule_agent_communication_deferred_followup,
         )
     )
 
@@ -13211,10 +13449,12 @@ def _deliver_meeting_notification(entity_kind, entity_id, intent):
     if not staged.get("ok"):
         return staged
     try:
-        result = send_feishu_notification(
-            staged["intent"],
-            webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
-            app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+        notifications_cfg = VO_CONFIG.get("notifications", {}) or {}
+        result = send_notification_card(
+            notification_config=notifications_cfg,
+            base_app_config=_feishu_app_send_config(notifications_cfg),
+            intent=staged["intent"],
+            webhook_url=notifications_cfg.get("feishuWebhook") or None,
             status_dir=STATUS_DIR,
         )
     except Exception as exc:
@@ -13284,10 +13524,11 @@ _PROJECT_EXECUTION_FEISHU_REWORK_FEEDBACK = "Requested rework from Feishu"
 
 
 def _send_feishu_workflow_notification(intent):
-    return send_feishu_notification(
-        intent,
-        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
-        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+    notification_cfg = VO_CONFIG.get("notifications", {}) or {}
+    return send_notification_card(
+        intent if isinstance(intent, dict) else {},
+        notification_config=notification_cfg,
+        base_app_config=_feishu_app_send_config(notification_cfg),
         status_dir=STATUS_DIR,
     )
 
@@ -13550,6 +13791,10 @@ def _feishu_notification_config_response():
         "feishuReceiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
         "feishuCallbackMode": "long_connection",
+        "notificationRecipientPolicy": normalize_recipient_policy(
+            cfg.get("notificationRecipientPolicy") or cfg.get("feishuRecipientPolicy")
+        ),
+        "topicConversationModels": _normalize_feishu_topic_model_choices(cfg.get("topicConversationModels")),
         "feishuLongConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
         "topicConversationsEnabled": bool(cfg.get("topicConversationsEnabled", False)),
         "topicConversations": topic_service.status() if topic_service else {
@@ -13567,6 +13812,12 @@ def _save_feishu_notification_config(body):
     app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
     receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
     receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
+    recipient_policy = normalize_recipient_policy(
+        (body or {}).get("notificationRecipientPolicy")
+        or (body or {}).get("feishuRecipientPolicy")
+        or (VO_CONFIG.get("notifications") or {}).get("notificationRecipientPolicy")
+        or (VO_CONFIG.get("notifications") or {}).get("feishuRecipientPolicy")
+    )
     topic_conversations_enabled = (
         bool((body or {}).get("topicConversationsEnabled"))
         if "topicConversationsEnabled" in (body or {})
@@ -13579,8 +13830,25 @@ def _save_feishu_notification_config(body):
     notifications = {
         "feishuEnabled": enabled,
         "feishuReceiveIdType": receive_id_type,
+        "notificationRecipientPolicy": recipient_policy,
         "topicConversationsEnabled": topic_conversations_enabled,
     }
+    if "topicConversationModels" in (body or {}):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (body or {}).get("topicConversationModels")
+        )
+    elif "feishuTopicConversationModels" in (body or {}):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (body or {}).get("feishuTopicConversationModels")
+        )
+    elif isinstance((VO_CONFIG.get("notifications") or {}).get("topicConversationModels"), list):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (VO_CONFIG.get("notifications") or {}).get("topicConversationModels")
+        )
+    elif isinstance((VO_CONFIG.get("notifications") or {}).get("feishuTopicConversationModels"), list):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (VO_CONFIG.get("notifications") or {}).get("feishuTopicConversationModels")
+        )
     if webhook or (body or {}).get("clearWebhook"):
         notifications["feishuWebhook"] = webhook
     if app_id or (body or {}).get("clearApp"):
@@ -13595,6 +13863,7 @@ def _save_feishu_notification_config(body):
     result = _persist_setup_payload(payload)
     if not result.get("ok"):
         return result
+    _reset_feishu_notification_topic_runtime()
     _start_feishu_long_connection()
     return _feishu_notification_config_response()
 
@@ -13711,10 +13980,11 @@ def _send_feishu_notification_test_cards(kind=None):
     selected = [kind] if kind in intents else ["application_form", "notification", "warning", "error"]
     results = []
     for selected_kind in selected:
-        results.append(send_feishu_notification(
+        results.append(send_notification_card(
             intents[selected_kind],
-            webhook_url=webhook,
-            app_config=_feishu_app_send_config(cfg),
+            notification_config=cfg,
+            base_app_config=_feishu_app_send_config(cfg),
+            webhook_url=webhook or None,
             status_dir=STATUS_DIR,
             timeout=20,
         ))
@@ -14295,6 +14565,106 @@ def _get_feishu_chat_long_connection_receiver():
     return _FEISHU_CHAT_LONG_CONNECTION_RECEIVER
 
 
+def _get_feishu_notification_topic_store():
+    global _FEISHU_NOTIFICATION_TOPIC_STORE
+    if _FEISHU_NOTIFICATION_TOPIC_STORE is None:
+        _FEISHU_NOTIFICATION_TOPIC_STORE = FileTopicStore(STATUS_DIR)
+    return _FEISHU_NOTIFICATION_TOPIC_STORE
+
+
+def _reset_feishu_notification_topic_runtime():
+    global _FEISHU_NOTIFICATION_TOPIC_SERVICE, _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE
+    with _FEISHU_NOTIFICATION_TOPIC_LOCK:
+        _FEISHU_NOTIFICATION_TOPIC_SERVICE = None
+        _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE = None
+
+
+def _configured_feishu_topic_model_choices():
+    notifications_cfg = VO_CONFIG.get("notifications", {}) or {}
+    choices = notifications_cfg.get("topicConversationModels")
+    if not isinstance(choices, list) or not choices:
+        choices = notifications_cfg.get("feishuTopicConversationModels")
+    if isinstance(choices, list) and choices:
+        return choices
+    return []
+
+
+def _configured_feishu_topic_agent_choices():
+    refresh_agent_maps()
+    choices = []
+    for agent in get_roster():
+        agent_id = str(agent.get("id") or agent.get("statusKey") or "").strip()
+        if not agent_id:
+            continue
+        aliases = []
+        for key in ("statusKey", "providerAgentId", "profile"):
+            value = str(agent.get(key) or "").strip()
+            if value and value not in {agent_id, *aliases}:
+                aliases.append(value)
+        choices.append({
+            "label": str(agent.get("name") or agent_id).strip(),
+            "agentId": agent_id,
+            "aliases": aliases,
+        })
+    return StaticTopicAgentCatalog(choices).choices()
+
+
+def _send_here_branch_notification(intent):
+    notifications_cfg = VO_CONFIG.get("notifications", {}) or {}
+    return send_notification_card(
+        intent if isinstance(intent, dict) else {},
+        notification_config=notifications_cfg,
+        base_app_config=_feishu_app_send_config(notifications_cfg),
+        status_dir=STATUS_DIR,
+    )
+
+
+def _load_here_branch_records(context):
+    if getattr(context, "is_topic", False):
+        return _get_feishu_notification_topic_store().records_for_conversation(
+            context.topic_conversation_id,
+            limit=50,
+        )
+    return _load_feishu_channel_records(limit=500)
+
+
+def _get_feishu_topic_foreground_command_service():
+    global _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE
+    if _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE is None:
+        store = _get_feishu_notification_topic_store()
+        _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE = FeishuTopicForegroundCommandService(
+            here_branch=HereBranchService(
+                records_loader=_load_here_branch_records,
+                notification_sender=_send_here_branch_notification,
+            ),
+            agent_catalog=StaticTopicAgentCatalog(_configured_feishu_topic_agent_choices()),
+            agent_config=store,
+        )
+    return _FEISHU_TOPIC_FOREGROUND_COMMAND_SERVICE
+
+
+def _dispatch_feishu_foreground_command(command, context):
+    context = context if isinstance(context, dict) else {}
+    source_meta = {
+        "representativeAgentId": context.get("representativeAgentId"),
+        "voUserId": context.get("voUserId"),
+        "feishuChatId": context.get("feishuChatId"),
+        "sender": context.get("sender") if isinstance(context.get("sender"), dict) else {},
+    }
+    service = _get_feishu_topic_foreground_command_service()
+    result = service.execute(
+        ForegroundCommand(str(command or ""), str(context.get("argument") or "")),
+        ForegroundCommandContext.create(
+            surface=context.get("sourceSurface") or "feishu-dm",
+            source_message_id=context.get("sourceMessageId"),
+            conversation_id=context.get("conversationId"),
+            chat_type=context.get("chatType"),
+            source_meta=source_meta,
+        ),
+    )
+    return result.to_dict() if hasattr(result, "to_dict") else dict(result or {})
+
+
 def _get_feishu_notification_topic_service():
     global _FEISHU_NOTIFICATION_TOPIC_SERVICE
     with _FEISHU_NOTIFICATION_TOPIC_LOCK:
@@ -14304,10 +14674,11 @@ def _get_feishu_notification_topic_service():
         def notification_app_config():
             return _feishu_app_send_config(VO_CONFIG.get("notifications", {}))
 
+        store = _get_feishu_notification_topic_store()
         _FEISHU_NOTIFICATION_TOPIC_SERVICE = NotificationTopicService(
             enabled=lambda: bool((VO_CONFIG.get("notifications") or {}).get("topicConversationsEnabled", False)),
             app_identity=lambda: str((VO_CONFIG.get("notifications") or {}).get("feishuAppId") or "notification-app"),
-            store=FileTopicStore(STATUS_DIR),
+            store=store,
             root_lookup=lambda message_id: lookup_notification_root(STATUS_DIR, message_id, _load_comm_history),
             history_loader=lambda root: load_notification_topic_origin_history(root, _load_comm_history),
             agent_lookup=_find_agent_record,
@@ -14317,6 +14688,18 @@ def _get_feishu_notification_topic_service():
                 content,
                 app_config=notification_app_config(),
                 **kwargs,
+            ),
+            add_reaction=lambda message_id, emoji_type: add_feishu_message_reaction(
+                message_id,
+                emoji_type,
+                app_config=notification_app_config(),
+                timeout=10,
+            ),
+            delete_reaction=lambda message_id, reaction_id: delete_feishu_message_reaction(
+                message_id,
+                reaction_id,
+                app_config=notification_app_config(),
+                timeout=10,
             ),
             resource_loader=lambda message: load_notification_topic_resources(
                 message,
@@ -14331,6 +14714,7 @@ def _get_feishu_notification_topic_service():
                 "sourceSurface": "feishu-notification-topic",
                 **dict(event),
             }),
+            foreground_commands=_get_feishu_topic_foreground_command_service(),
         )
         return _FEISHU_NOTIFICATION_TOPIC_SERVICE
 
@@ -14535,10 +14919,15 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
             record = {**record, "conversationId": conversation_id}
     if not source_message_id or not conversation_id:
         return None
-    representative_agent_id = str(record.get("representativeAgentId") or "").strip()
-    is_group = str(record.get("chatType") or "").lower() == "group" or str(record.get("sourceSurface") or "").lower() == "feishu-group"
-    source_surface = "feishu-group" if is_group else "feishu-dm"
-    source_label = "Feishu Group" if is_group else "Feishu DM"
+    representative_agent_id = str(record.get("representativeAgentId") or record.get("agentId") or "").strip()
+    raw_source_surface = str(record.get("sourceSurface") or "").strip().lower()
+    is_group = str(record.get("chatType") or "").lower() == "group" or raw_source_surface == "feishu-group"
+    if raw_source_surface == "feishu-notification-topic":
+        source_surface = "feishu-notification-topic"
+        source_label = "Feishu Notification Topic"
+    else:
+        source_surface = "feishu-group" if is_group else "feishu-dm"
+        source_label = "Feishu Group" if is_group else "Feishu DM"
     visible_in_office = not is_group
     metadata = {
         "providerKind": (_office_agent_ref(representative_agent_id).get("providerKind") or ""),
@@ -14583,6 +14972,14 @@ def _sync_feishu_channel_record_to_comm_ledger(record):
         })
         _publish_feishu_chat_comm_event(comm_event, "message")
         return comm_event
+    if event_name == "notification_topic_turn_completed":
+        return _append_bridge_conversation_reference(
+            metadata.get("providerKind") or "unknown",
+            representative_agent_id,
+            conversation_id,
+            {**record, **metadata},
+            ok=bool(record.get("ok", True)),
+        )
     if event_name == "turn_completed":
         request_event = _find_comm_request_by_source_message(source_message_id)
         if not request_event:
@@ -15347,6 +15744,7 @@ def _handle_feishu_chat_message_event(
         download_image=download_image if download_image is not None else (None if send_text else _feishu_chat_app_image_download),
         mark_dispatching=_mark_feishu_source_dispatching,
         command_callback=_dispatch_feishu_chat_command if command_flags.enabled else None,
+        foreground_command_callback=_dispatch_feishu_foreground_command,
         async_acknowledgement=async_acknowledgement,
     )
 
@@ -20095,9 +20493,32 @@ def _handle_project_reset(project_id, body):
     project["activeAgent"] = None
     project["executionDirtyConfirmations"] = []
     project["updatedAt"] = now
+    try:
+        meeting_reset = _meeting_request_reset_project_task_blockers(
+            project_id,
+            [str(task.get("id") or "") for task in tasks if task.get("id")],
+            actor,
+            reason,
+        )
+    except meeting_repository_service.MeetingStoreError as exc:
+        return {
+            "ok": False,
+            "error": "Failed to reset project meeting request blockers",
+            "code": exc.code,
+            "_status": exc.status,
+        }
+    if not meeting_reset.get("ok"):
+        return {**meeting_reset, "_status": meeting_reset.get("_status", 409)}
     _log_activity(project, "project_reset", actor, f"Reset project with mode '{mode}' and reset {reset_count} task(s).")
     _save_projects(data)
-    return {"ok": True, "project": project, "mode": mode, "resetTaskCount": reset_count, **risk}
+    return {
+        "ok": True,
+        "project": project,
+        "mode": mode,
+        "resetTaskCount": reset_count,
+        "resetMeetingRequestCount": meeting_reset.get("resetRequestCount", 0),
+        **risk,
+    }
 
 
 def _project_execution_reset_project_tasks_for_restart(project, actor="user"):
@@ -20351,7 +20772,14 @@ def _project_execution_incomplete_checklist_rework_feedback(project, task, attem
     try:
         from services.project_artifact_paths import artifact_prompt_run_directory
 
-        artifact_dir = artifact_prompt_run_directory(project, task)
+        artifact_task = task
+        if isinstance(attempt, dict):
+            artifact_task = {
+                **task,
+                "finalResult": {"sourceAttemptId": attempt_id},
+                "attempts": [attempt],
+            }
+        artifact_dir = artifact_prompt_run_directory(project, artifact_task)
     except Exception:
         artifact_dir = ""
     diagnostics = [
@@ -20671,6 +21099,20 @@ def _meeting_request_resolve_task_blocker(request_id, status, extra=None):
     _, result = _meeting_domain_repository().update(
         lambda data: meeting_requests_service.resolve_blocker_command(
             data, request_id, status, extra, _meeting_request_service_hooks(),
+        )
+    )
+    return result
+
+
+def _meeting_request_reset_project_task_blockers(project_id, task_ids, actor, reason):
+    _, result = _meeting_domain_repository().update(
+        lambda data: meeting_requests_service.reset_project_task_blockers_command(
+            data,
+            project_id,
+            list(task_ids or []),
+            actor=actor,
+            reason=reason,
+            hooks=_meeting_request_service_hooks(),
         )
     )
     return result
@@ -26110,6 +26552,9 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
                     payload = msg.get("payload") or {}
                     m = payload.get("message") if isinstance(payload.get("message"), dict) else payload
                     if m.get("role") == "assistant" and (payload.get("sessionKey") in (None, session_key) or (run_id and payload.get("runId") == run_id)):
+                        state = str(m.get("state") or payload.get("state") or "").strip().lower()
+                        if state not in {"final", "done", "completed"}:
+                            continue
                         text = _extract_openclaw_text(m.get("content") or m.get("text") or m)
                         if text:
                             return text
@@ -32376,6 +32821,24 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             try:
                 body = json.loads(self.rfile.read(length)) if length else {}
                 result = _save_feishu_notification_config(body)
+            except json.JSONDecodeError as e:
+                result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
+            self.send_response(result.get("_status", 200))
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+            result.pop("_status", None)
+            self.wfile.write(json.dumps(result).encode())
+            return
+        elif self.path == "/api/feishu-notification/topic-preflight":
+            length = int(self.headers.get('Content-Length', 0))
+            try:
+                body = json.loads(self.rfile.read(length)) if length else {}
+                root_message_id = str((body or {}).get("rootMessageId") or "").strip()
+                if not root_message_id:
+                    result = {"ok": False, "error": "rootMessageId is required", "_status": 400}
+                else:
+                    result = _feishu_notification_topic_preflight(root_message_id)
             except json.JSONDecodeError as e:
                 result = {"ok": False, "error": f"Invalid JSON: {str(e)}", "_status": 400}
             self.send_response(result.get("_status", 200))

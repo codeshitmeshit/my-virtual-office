@@ -105,6 +105,9 @@ def service(provider=None, reservation=None, audit=None):
     ("/New", None),
     ("/new now", None),
     ("/help", None),
+    ("/here", None),
+    ("/change", None),
+    ("/change professional-model", None),
     ("", None),
 ])
 def test_parser_recognizes_only_exact_commands(text, expected):

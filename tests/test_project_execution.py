@@ -1427,6 +1427,18 @@ def test_project_reset_requires_confirmation_and_preserves_history_order():
             stored["tasks"][2]["columnId"] = done
             stored["scheduledCronHistory"] = [{"id": "cron-history-1", "status": "started"}]
             server._save_projects(data)
+            server._meeting_domain_repository().update(lambda meeting_data: meeting_data["requests"].update({
+                "req-1": {
+                    "id": "req-1",
+                    "status": "pending",
+                    "sourceType": "project_task",
+                    "source": {"projectId": project["id"], "taskId": second["id"]},
+                    "blockingTask": True,
+                    "taskBlocker": {"status": "pending", "createdAt": "2026-07-07T00:00:00+08:00", "updatedAt": "2026-07-07T00:00:00+08:00", "resolvedAt": ""},
+                    "createdAt": "2026-07-07T00:00:00+08:00",
+                    "updatedAt": "2026-07-07T00:00:00+08:00",
+                },
+            }))
 
             blocked = server._handle_project_reset(project["id"], {"mode": "task_state"})
             assert blocked["_status"] == 409
@@ -1436,7 +1448,13 @@ def test_project_reset_requires_confirmation_and_preserves_history_order():
             result = server._handle_project_reset(project["id"], {"mode": "task_state", "confirmed": True, "by": "test"})
             assert result["ok"] is True
             assert result["resetTaskCount"] == 2
+            assert result["resetMeetingRequestCount"] == 1
             fresh = next(p for p in server._load_projects()["projects"] if p["id"] == project["id"])
+            reset_request = server._meeting_domain_repository().snapshot()["requests"]["req-1"]
+            assert reset_request["status"] == "pending"
+            assert reset_request["taskBlocker"]["status"] == "cleared"
+            assert reset_request["taskBlocker"]["resolvedAt"]
+            assert reset_request["taskBlocker"]["resetReason"] == "project reset: task_state"
             backlog = col_id(fresh, "Backlog")
             ordered = sorted(fresh["tasks"], key=lambda t: t["order"])
             assert [t["title"] for t in ordered] == ["Backlog task", "Running task", "Review task"]
@@ -2030,6 +2048,41 @@ def test_project_execution_incomplete_checklist_feedback_includes_review_details
             assert "lastReview=reviewStatus=needs_more_work; Task-3 and Task-5 are not covered." in feedback
             assert "concrete deliverable files needed by the unfinished checklist items" in feedback
             assert "buy/sell-list" not in feedback
+        finally:
+            restore_store(old)
+
+
+def test_project_execution_incomplete_checklist_feedback_uses_current_attempt_artifact_dir_for_reusable_project():
+    with tempfile.TemporaryDirectory() as status_dir, tempfile.TemporaryDirectory() as workspace:
+        old = with_store(status_dir)
+        try:
+            project, task = create_project_execution_project(workspace)
+            project["projectType"] = "reusable"
+            task["id"] = "task-5"
+            task["finalResult"] = {
+                "sourceAttemptId": "old-attempt",
+                "generatedAt": "2026-07-29T11:26:00+00:00",
+            }
+            task["attempts"] = [
+                {"id": "old-attempt", "startedAt": "2026-07-29T11:24:19+00:00"},
+                {"id": "current-attempt", "startedAt": "2026-08-02T07:44:01+00:00"},
+            ]
+            task["checklist"] = [{
+                "id": "buy-list-complete",
+                "text": "买入清单包含具体标的",
+                "done": False,
+            }]
+            done_result = {
+                "code": "checklist_incomplete",
+                "unfinishedChecklist": [{"id": "buy-list-complete", "text": "买入清单包含具体标的"}],
+            }
+
+            feedback = server._project_execution_incomplete_checklist_rework_feedback(
+                project, task, "current-attempt", done_result,
+            )
+
+            assert ".vo/task-5/20260802074401/TASK_FINAL_RESULT.md" in feedback
+            assert ".vo/task-5/20260729112600/TASK_FINAL_RESULT.md" not in feedback
         finally:
             restore_store(old)
 

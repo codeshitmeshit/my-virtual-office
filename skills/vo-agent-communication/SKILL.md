@@ -43,6 +43,8 @@ POST /api/agent-platform-communications/send
 
 当 `sourceApp=feishu` 且 `feishuChatId` 存在时，这不是可选文字规则，而是可执行步骤：必须先调用 `POST /api/feishu-chat/original-channel-notice` 发送进度告知，再继续调用 `/api/agent-platform-communications/send` 联系其他 Agent。该 endpoint 是 Virtual Office 通用能力，不属于 Codex 私有工具；OpenClaw、Hermes、Claude Code、Codex 等 provider 只要能访问当前 VO HTTP 地址，都按同一规则使用。
 
+调用 `/api/agent-platform-communications/send` 时也必须继承同一份原始来源上下文。也就是说，如果本次用户请求来自飞书，发送给目标 Agent 的请求体必须带上 `sourceApp`、`sourceSurface`、`sourceMessageId`、`feishuChatId`、`chatType`、`sourceLabel`，以及原始飞书 `conversationId`。这些字段优先放在顶层；如果调用工具只能传 `metadata`，则放入 `metadata`。不要把跨 Agent 请求改写成 `sourceApp=virtual-office/sourceSurface=agent-platform`，否则 VO 无法把 timeout 和迟到完成结果正确路由回原始飞书会话。
+
 请求体：
 
 ```json
@@ -182,6 +184,12 @@ curl -sS \
     "fromAgentId": "codex-local",
     "toAgentId": "main",
     "conversationId": "codex__main__general",
+    "sourceApp": "feishu",
+    "sourceSurface": "feishu-dm",
+    "sourceMessageId": "<原飞书消息 id，若本次请求来自飞书>",
+    "feishuChatId": "<原飞书 chat id，若本次请求来自飞书>",
+    "chatType": "p2p",
+    "sourceLabel": "Feishu DM",
     "message": "请检查当前 OpenClaw 服务状态，并简要返回结果。",
     "metadata": {
       "topic": "service-status"
@@ -256,9 +264,21 @@ curl -sS \
 - `status=completed` 且 `reply` 非空：返回目标 Agent 的真实回复。
 - `status=busy`：报告忙碌并停止，不自动重试或并发发送。
 - `status=timeout`：报告结果未知，不推定成功或失败，不自动重发。
+- `status=pending` 且 `deferred=true`：表示目标 Agent 已收到请求但尚未完成。只能告诉用户目标 Agent 仍在处理，并等待 VO 后续通过原通知/会话推送目标 Agent 的最终回复；不得用调用方自己的知识、搜索结果或判断替代目标 Agent 输出业务结论。
+- 如果响应包含 `callerInstruction`，必须优先遵守该字段；它通常用于说明不要代答、不要伪造目标 Agent 回复、或等待后续完成推送。
 - `reply` 为空：报告未获得有效回复，不把空回复解释为成功。
 - `needsHumanIntervention=true`：停止自动执行并通知用户介入。
 - 未识别状态：原样报告关键响应字段，不伪造目标 Agent 的回复。
+
+### 5.1 呈现目标 Agent 的完成结果
+
+当目标 Agent 已完成并返回 `reply` 时，最终给用户的回复必须以目标 Agent 的结论作为主内容：
+
+- 先明确标注“目标 Agent/研究员/分析师回复”或等价来源说明。
+- 优先引用或保留目标 Agent 原文中的关键结论、核心证据和重要限定条件；不要把目标 Agent 的回复静默改写成调用方自己的结论。
+- 可以为了长度做必要摘录，但摘录必须忠实于原意，不得新增目标 Agent 未表达的判断。
+- 如果调用方需要补充自己的思考，必须放在“我的补充”或等价的独立小节，并与目标 Agent 原文区分开。
+- 对投资、产品、技术评审等有明确责任主体的委派任务，尤其要保留被委派 Agent 的署名和结论来源。
 
 ### 6. 按需查询历史
 
@@ -304,6 +324,6 @@ curl -sS \
 收到响应后确认：
 
 - 已检查 `ok`、`status`、`reply` 和 `needsHumanIntervention`。
-- 返回的是目标 Agent 的真实响应，没有自行补写或伪造。
-- `busy`、`timeout` 和空回复均未被解释为成功。
+- 返回的是目标 Agent 的真实响应；如需补充自己的思考，已与目标 Agent 原文分开呈现。
+- `busy`、`timeout`、`pending/deferred` 和空回复均未被解释为目标 Agent 的完成结论。
 - 通信使用的 `conversationId` 可用于查询 Virtual Office history。

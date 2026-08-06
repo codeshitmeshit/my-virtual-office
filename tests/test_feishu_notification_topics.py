@@ -36,6 +36,10 @@ from services.feishu_notification_topics import (
     build_topic_prompt,
     derive_topic_conversation_id,
 )
+from services.feishu_topic_foreground_commands import (
+    FeishuTopicForegroundCommandService,
+    StaticTopicAgentCatalog,
+)
 from services.codex_feishu_approvals import CodexFeishuApprovalCoordinator, CodexFeishuApprovalRouteStore
 from services.provider_conversations import ProviderConversationService
 
@@ -90,7 +94,10 @@ def service_fixture(
     agent_selector=None,
     resource_loader=None,
     reply_handler=None,
+    foreground_commands=None,
     store=None,
+    add_reaction=None,
+    delete_reaction=None,
 ):
     roots = roots or {"root-1": root()}
     replies = []
@@ -125,7 +132,10 @@ def service_fixture(
         agent_selector=agent_selector,
         dispatch=fake_dispatch,
         reply=fake_reply,
+        add_reaction=add_reaction,
+        delete_reaction=delete_reaction,
         resource_loader=resource_loader,
+        foreground_commands=foreground_commands,
         coordinator=coordinator or TopicCoordinator(max_workers=4, max_per_topic=20),
         now=lambda: 123456,
     )
@@ -285,6 +295,189 @@ def test_feature_boundary_ignores_disabled_non_p2p_non_topic_and_bot(tmp_path):
     assert enabled.handle_event(unsupported)["status"] == "ignored_unsupported_message_type"
 
 
+@pytest.mark.parametrize("command_text", ["/here", "/change", "/change professional-model"])
+def test_foreground_command_text_is_currently_ordinary_topic_message(tmp_path, command_text):
+    service, _replies, dispatches = service_fixture(tmp_path)
+
+    result = service.handle_event(body("message-command", text=command_text))
+
+    assert result["status"] == "queued"
+    assert service.coordinator.wait_idle()
+    assert len(dispatches) == 1
+    assert command_text in dispatches[0]["prompt"]
+
+
+@pytest.mark.parametrize("command_text", ["/here", "/change"])
+def test_foreground_command_text_is_not_claimed_from_non_topic_locations(tmp_path, command_text):
+    enabled, _replies, dispatches = service_fixture(tmp_path)
+    flat = body(text=command_text)
+    flat["event"]["message"]["root_id"] = ""
+    flat["event"]["message"]["thread_id"] = ""
+    flat["event"]["message"]["parent_id"] = ""
+
+    assert enabled.handle_event(flat)["status"] == "ignored_non_topic"
+    assert enabled.handle_event(body(chat_type="group", text=command_text))["status"] == "ignored_non_p2p"
+    assert dispatches == []
+
+
+def test_here_foreground_command_in_activated_topic_skips_agent_dispatch(tmp_path):
+    class ForegroundCommands:
+        def __init__(self):
+            self.calls = []
+
+        def parse(self, text, attachments=None):
+            if str(text).strip() == "/here":
+                return types.SimpleNamespace(name="/here", argument="")
+            return None
+
+        def execute(self, command, context):
+            self.calls.append((command, context))
+            return {
+                "ok": True,
+                "status": "success",
+                "reply": "已发送到通知话题。",
+                "changed": True,
+            }
+
+    foreground = ForegroundCommands()
+    service, replies, dispatches = service_fixture(tmp_path, foreground_commands=foreground)
+    first = service.handle_event(body("message-1", text="first"))
+    assert service.coordinator.wait_idle()
+    assert first["status"] == "queued"
+    dispatches.clear()
+
+    result = service.handle_event(body("message-here", text="/here"))
+    duplicate = service.handle_event(body("message-here", text="/here"))
+
+    assert result["status"] == "success"
+    assert duplicate["status"] == "duplicate"
+    assert dispatches == []
+    assert len(foreground.calls) == 1
+    assert foreground.calls[0][1].surface == "feishu-notification-topic"
+    assert foreground.calls[0][1].topic_conversation_id == first["conversationId"]
+    assert replies[-1]["messageId"] == "message-here"
+    assert replies[-1]["reply_in_thread"] is True
+    assert "已发送到通知话题" in replies[-1]["content"]
+
+
+def test_change_foreground_command_lists_and_updates_topic_agent(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    foreground = FeishuTopicForegroundCommandService(
+        agent_catalog=StaticTopicAgentCatalog([
+            {"label": "Agent A", "agentId": "agent-a"},
+            {"label": "Agent B", "agentId": "agent-b", "aliases": ["professional"]},
+        ]),
+        agent_config=store,
+    )
+    agents = {
+        "agent-a": {"id": "agent-a", "providerKind": "codex"},
+        "agent-b": {"id": "agent-b", "providerKind": "codex"},
+    }
+    service, replies, dispatches = service_fixture(tmp_path, store=store, foreground_commands=foreground, agents=agents)
+    first = service.handle_event(body("message-1", text="first"))
+    assert service.coordinator.wait_idle()
+    dispatches.clear()
+
+    choices = service.handle_event(body("message-change-list", text="/change"))
+    changed = service.handle_event(body("message-change-set", text="/change professional"))
+    duplicate = service.handle_event(body("message-change-set", text="/change professional"))
+
+    assert choices["status"] == "choices"
+    assert changed["status"] == "success"
+    assert duplicate["status"] == "duplicate"
+    assert dispatches == []
+    assert store.get_agent(first["conversationId"]) == "agent-b"
+    assert "Agent A" in replies[-2]["content"]
+    assert "agent-b" in replies[-1]["content"]
+
+    service.handle_event(body("message-2", text="second"))
+    assert service.coordinator.wait_idle()
+    assert dispatches[-1]["agentId"] == "agent-b"
+
+
+def test_change_foreground_command_in_unactivated_topic_is_rejected_without_binding(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    foreground = FeishuTopicForegroundCommandService(
+        agent_catalog=StaticTopicAgentCatalog([{"label": "Agent B", "agentId": "agent-b"}]),
+        agent_config=store,
+    )
+    service, replies, dispatches = service_fixture(tmp_path, store=store, foreground_commands=foreground)
+
+    result = service.handle_event(body("message-change-first", text="/change"))
+
+    topic_digest = hashlib.sha256(
+        "notification-app\x1ftenant-a\x1fchat-a\x1fthread-1".encode("utf-8")
+    ).hexdigest()
+    assert result["status"] == "unsupported_location"
+    assert service.store.load_binding(topic_digest) is None
+    assert dispatches == []
+    assert "已激活的通知话题" in replies[-1]["content"]
+
+
+def test_topic_agent_turn_adds_and_removes_processing_reaction(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    reactions = []
+
+    def add_reaction(message_id, emoji_type):
+        reactions.append(("add", message_id, emoji_type))
+        return {"ok": True, "status": "added", "reactionId": "reaction-1"}
+
+    def delete_reaction(message_id, reaction_id):
+        reactions.append(("delete", message_id, reaction_id))
+        return {"ok": True, "status": "deleted", "reactionId": reaction_id}
+
+    service, _replies, dispatches = service_fixture(
+        tmp_path,
+        store=store,
+        add_reaction=add_reaction,
+        delete_reaction=delete_reaction,
+    )
+
+    first = service.handle_event(body("message-1", text="first"))
+    assert service.coordinator.wait_idle()
+    record = store.records_for_conversation(first["conversationId"])[-1]
+
+    assert dispatches[-1]["agentId"] == "agent-a"
+    assert reactions == [
+        ("add", "message-1", "LGTM"),
+        ("delete", "message-1", "reaction-1"),
+    ]
+    assert record["reactionResult"]["status"] == "added"
+    assert record["reactionDeleteResult"]["status"] == "deleted"
+
+
+def test_topic_without_agent_change_keeps_original_agent(tmp_path):
+    service, _replies, dispatches = service_fixture(tmp_path)
+
+    service.handle_event(body("message-1", text="first"))
+    assert service.coordinator.wait_idle()
+
+    assert dispatches[-1]["agentId"] == "agent-a"
+
+
+def test_topic_agent_selection_is_isolated_between_sibling_topics(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    agents = {
+        "agent-a": {"id": "agent-a", "providerKind": "codex"},
+        "agent-b": {"id": "agent-b", "providerKind": "codex"},
+    }
+    service, _replies, dispatches = service_fixture(tmp_path, store=store, agents=agents)
+    first = service.handle_event(body("topic-a-1", thread_id="thread-a", text="first a"))
+    second = service.handle_event(body("topic-b-1", thread_id="thread-b", text="first b"))
+    assert service.coordinator.wait_idle()
+    store.set_agent(first["conversationId"], "agent-b")
+    dispatches.clear()
+
+    service.handle_event(body("topic-a-2", thread_id="thread-a", text="second a"))
+    service.handle_event(body("topic-b-2", thread_id="thread-b", text="second b"))
+    assert service.coordinator.wait_idle()
+
+    by_message = {item["sourceMeta"]["sourceMessageId"]: item for item in dispatches}
+    assert by_message["topic-a-2"]["agentId"] == "agent-b"
+    assert by_message["topic-b-2"]["agentId"] == "agent-a"
+    assert first["conversationId"] != second["conversationId"]
+
+
 def test_notification_topic_dispatch_normalizes_long_connection_sender_identity(monkeypatch, tmp_path):
     os.environ.setdefault("VO_HERMES_ENABLED", "0")
     os.environ.setdefault("VO_CODEX_ENABLED", "0")
@@ -382,6 +575,8 @@ def test_notification_topic_uses_existing_bridge_contract_for_all_providers(monk
         assert payload["conversationId"] == "feishu-topic:opaque"
         assert payload["sourceSurface"] == "feishu-notification-topic"
         assert payload["threadId"] == "omt-thread"
+        assert "topicModel" not in payload
+        assert "model" not in payload
         assert payload["originConversationId"] == "origin-main"
     assert len(gateway) == 1
     assert gateway[0][2].startswith("agent:agent-a:")
@@ -426,6 +621,85 @@ def test_file_store_binding_is_atomic_stable_and_restrictive(tmp_path):
     json_files = [tmp_path / "feishu-source-message-index" / name for name in os.listdir(tmp_path / "feishu-source-message-index") if name.endswith(".json")]
     assert json_files
     assert all(stat.S_IMODE(os.stat(path).st_mode) == 0o600 for path in json_files)
+
+
+def test_file_store_topic_agent_selection_updates_binding_authoritatively(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    candidate = TopicBinding("digest", "topic-conversation", "root", "agent-a", "origin", "message-1", "complete", 1)
+    store.get_or_create_binding(candidate)
+
+    assert store.get_agent("topic-conversation") == "agent-a"
+    assert store.set_agent("topic-conversation", "agent-b") == {
+        "ok": True,
+        "status": "success",
+        "agentId": "agent-b",
+    }
+    assert store.get_agent("topic-conversation") == "agent-b"
+    assert store.load_binding("digest").agent_id == "agent-b"
+    assert store.set_agent("", "missing")["ok"] is False
+    assert store.set_agent("topic-conversation", "")["ok"] is False
+    assert store.set_agent("missing-conversation", "agent-c")["ok"] is False
+    json_files = [
+        tmp_path / "feishu-source-message-index" / name
+        for name in os.listdir(tmp_path / "feishu-source-message-index")
+        if name.endswith(".json")
+    ]
+    assert json_files
+    assert all(stat.S_IMODE(os.stat(path).st_mode) == 0o600 for path in json_files)
+
+
+def test_file_store_topic_agent_concurrent_updates_remain_atomic(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    store.get_or_create_binding(TopicBinding("digest", "topic-conversation", "root", "agent-a", "origin", "message-1", "complete", 1))
+    agents = [f"agent-{index}" for index in range(8)]
+
+    def update(agent_id):
+        assert store.set_agent("topic-conversation", agent_id)["ok"] is True
+
+    threads = [threading.Thread(target=update, args=(agent_id,)) for agent_id in agents]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    assert store.get_agent("topic-conversation") in set(agents)
+
+
+def test_file_store_records_for_conversation_returns_bounded_topic_history(tmp_path):
+    store = FileTopicStore(str(tmp_path))
+    binding = TopicBinding("digest-a", "topic-a", "root-1", "agent-a", "origin", "message-1", "partial", 1)
+    other = TopicBinding("digest-b", "topic-b", "root-1", "agent-a", "origin", "message-x", "partial", 1)
+    for index in range(4):
+        store.accept_message(
+            TopicMessage(
+                message_id=f"message-{index}",
+                chat_id="chat-a",
+                chat_type="p2p",
+                topic_id="thread-1",
+                root_message_id="root-1",
+                text=f"text-{index}",
+            ),
+            binding,
+            now=index,
+        )
+    store.accept_message(
+        TopicMessage(
+            message_id="message-other",
+            chat_id="chat-a",
+            chat_type="p2p",
+            topic_id="thread-2",
+            root_message_id="root-1",
+            text="other",
+        ),
+        other,
+        now=99,
+    )
+
+    records = store.records_for_conversation("topic-a", limit=2)
+
+    assert [record["messageId"] for record in records] == ["message-2", "message-3"]
+    assert {record["conversationId"] for record in records} == {"topic-a"}
+    assert store.records_for_conversation("", limit=2) == []
 
 
 def test_activation_context_continuation_and_agent_pinning(tmp_path):

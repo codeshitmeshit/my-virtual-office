@@ -40,6 +40,11 @@ from .project_repository import ProjectConflictError, ProjectNotFoundError, Proj
 from .project_final_report import ensure_project_final_report
 from .project_completion_reporting import stage_completion_report_occurrence
 from .project_task_final_result import record_stage_handoff
+from .project_stage_reusable_restart import (
+    preview_completed_reusable_restart,
+    reset_completed_reusable_project,
+    should_restart_completed_reusable_project,
+)
 
 
 DEFAULT_STAGE_DISPATCH_WORKERS = 8
@@ -427,8 +432,20 @@ def reserve_stage_run(
         return StageReservationOutcome(ServiceResult(404, {"ok": False, "error": "Project not found"}))
 
     actor = _actor(body)
-    stage = _requested_stage(snapshot, body)
-    blockers, context = _preflight(snapshot, stage, expected_revision, actor, body, ports)
+    restart_actor = _restart_actor(actor, body)
+    restart_reason = "completed reusable project restarted"
+    preflight_snapshot = (
+        preview_completed_reusable_restart(
+            snapshot,
+            now=ports.now(),
+            actor=restart_actor,
+            reason=restart_reason,
+        )
+        if should_restart_completed_reusable_project(snapshot)
+        else snapshot
+    )
+    stage = _requested_stage(preflight_snapshot, body)
+    blockers, context = _preflight(preflight_snapshot, stage, expected_revision, actor, body, ports)
     if blockers:
         return StageReservationOutcome(_blocker_result(blockers, context, 409))
 
@@ -443,6 +460,14 @@ def reserve_stage_run(
     reservation_box: dict[str, Any] = {}
 
     def mutate(project: dict[str, Any]) -> None:
+        now = ports.now()
+        if should_restart_completed_reusable_project(project):
+            reset_completed_reusable_project(
+                project,
+                now=now,
+                actor=restart_actor,
+                reason=restart_reason,
+            )
         latest_blockers, latest_context = _preflight(
             project,
             stage,
@@ -455,9 +480,8 @@ def reserve_stage_run(
         )
         if latest_blockers:
             raise _StageReservationRejected(_blocker_result(latest_blockers, latest_context, 409))
-        state = orchestration_state(project)
-        now = ports.now()
         stage_tasks = _stage_tasks(project, stage)
+        state = orchestration_state(project)
         state.update({
             "state": STATE_STARTING,
             "currentStage": stage,
@@ -767,10 +791,11 @@ def start_marked_project(
             "error": "Project is not marked for stage-pipeline orchestration",
         }))
     state = orchestration_state(snapshot)
+    default_stage = 1 if should_restart_completed_reusable_project(snapshot) else (state.get("currentStage") or 1)
     reserve_body = {
         **body,
         "revision": body.get("revision", state.get("revision")),
-        "stage": body.get("stage", body.get("currentStage", state.get("currentStage") or 1)),
+        "stage": body.get("stage", body.get("currentStage", default_stage)),
         "allowSkipReviewer": bool(body.get("allowSkipReviewer")),
     }
     reservation_outcome = reserve_stage_run(
@@ -1599,6 +1624,15 @@ def _actor(body: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(raw, Mapping):
         return dict(raw)
     return {"type": str(body.get("actorType") or "management"), "id": str(body.get("by") or "user")}
+
+
+def _restart_actor(actor: Mapping[str, Any], body: Mapping[str, Any]) -> str:
+    return str(
+        actor.get("id")
+        or body.get("by")
+        or actor.get("type")
+        or "system"
+    )
 
 
 def _requested_stage(project: Mapping[str, Any], body: Mapping[str, Any]) -> int:

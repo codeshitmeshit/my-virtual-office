@@ -168,6 +168,68 @@ def test_marked_project_level_start_rejects_legacy_start_payload(monkeypatch):
     assert result["fields"] == ["mode", "startMode", "restartPipeline"]
 
 
+def test_marked_project_level_start_restarts_completed_reusable_project(monkeypatch):
+    project = _project()
+    project.update({"projectType": "reusable", "status": "completed"})
+    project["orchestration"].update({
+        "state": "completed",
+        "currentStage": 2,
+        "currentRunId": None,
+        "completedAt": "done-at",
+        "revision": 5,
+    })
+    project["tasks"] = [
+        {
+            **_task("a", 1),
+            "executionState": "done",
+            "completedAt": "done-at",
+            "stageRunId": "run-old",
+            "activeAttemptId": "attempt-old",
+            "reviewResult": {"status": "pass"},
+            "meetingBlocker": {"requestId": "req-1"},
+        },
+        {
+            **_task("later", 2),
+            "executionState": "done",
+            "completedAt": "done-at",
+            "stageRunId": "run-later",
+        },
+    ]
+    store = _install(monkeypatch, project)
+    dispatcher = BoundedProjectExecutionDispatcher(
+        lambda item: item.task_id,
+        worker_count=1,
+        queue_capacity=2,
+        autostart=False,
+    )
+    preflight_ports = _PreflightPorts()
+    preflight_ports.run_ids = ["run-fresh"]
+    monkeypatch.setattr(server, "_PROJECT_STAGE_EXECUTION_DISPATCHER", dispatcher)
+    monkeypatch.setattr(server, "_project_stage_preflight_ports", lambda: preflight_ports)
+    monkeypatch.setattr(server, "_project_stage_attempt_ports", lambda: _AttemptPorts())
+
+    result = server._handle_project_execution_project_start("project-1", {"by": "owner"})
+
+    assert result["_status"] == 200
+    assert result["currentRunId"] == "run-fresh"
+    saved = store.data["projects"][0]
+    task = saved["tasks"][0]
+    assert saved["status"] == "active"
+    assert saved["orchestration"]["state"] == "running"
+    assert saved["orchestration"]["currentStage"] == 1
+    assert saved["orchestration"]["completedAt"] is None
+    assert task["stageRunId"] == "run-fresh"
+    assert task["executionState"] == "executing"
+    assert task["completedAt"] is None
+    assert task["activeAttemptId"] == "attempt-a"
+    assert task["reviewResult"] == {}
+    assert task["meetingBlocker"] == {}
+    assert task["meetingBlockerHistory"][0]["requestId"] == "req-1"
+    assert saved["tasks"][1]["stageRunId"] is None
+    assert saved["tasks"][1]["executionState"] == "backlog"
+    assert dispatcher.diagnostics()["queued"] == 1
+
+
 def test_marked_project_task_level_start_is_rejected(monkeypatch):
     _install(monkeypatch, _project())
 

@@ -2281,7 +2281,14 @@ def _project_execution_incomplete_checklist_rework_feedback(project, task, attem
     try:
         from services.project_artifact_paths import artifact_prompt_run_directory
 
-        artifact_dir = artifact_prompt_run_directory(project, task)
+        artifact_task = task
+        if isinstance(attempt, dict):
+            artifact_task = {
+                **task,
+                "finalResult": {"sourceAttemptId": attempt_id},
+                "attempts": [attempt],
+            }
+        artifact_dir = artifact_prompt_run_directory(project, artifact_task)
     except Exception:
         artifact_dir = ""
     diagnostics = [

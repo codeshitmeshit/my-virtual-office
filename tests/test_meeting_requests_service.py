@@ -1,7 +1,8 @@
 from app.services import meeting_lifecycle
 from app.services.meeting_requests import (
     RequestHooks, confirm_command, create_command, public_request, reject_command,
-    resolve_blocker_command, selected_context,
+    reset_project_task_blockers_command, resolve_blocker_command, selected_context,
+    unresolved_for_task,
 )
 
 
@@ -199,3 +200,35 @@ def test_context_public_projection_reject_and_resolution_are_compatible():
     assert rejected["request"]["status"] == "rejected"
     resolved = resolve_blocker_command(data, request["id"], "cleared", {"outcome": "manual"}, hooks())
     assert resolved["request"]["taskBlocker"]["status"] == "cleared"
+
+
+def test_project_reset_resolves_unresolved_task_blockers_without_deleting_audit_records():
+    data = empty_data()
+    request = create_pending(data)
+
+    result = reset_project_task_blockers_command(
+        data,
+        "p1",
+        ["t1"],
+        actor="tester",
+        reason="project reset: task_state",
+        hooks=hooks(),
+    )
+
+    stored = data["requests"][request["id"]]
+    assert result == {"ok": True, "resetRequestIds": [request["id"]], "resetRequestCount": 1}
+    assert stored["status"] == "pending"
+    assert stored["taskBlocker"]["status"] == "cleared"
+    assert stored["taskBlocker"]["resolvedAt"] == "now"
+    assert stored["taskBlocker"]["resetBy"] == "tester"
+    assert unresolved_for_task(stored, "p1", "t1") is False
+
+    recreated = create_command(
+        data, {"id": "p1", "title": "Project"}, {"id": "t1", "title": "Task"},
+        request_body(idempotencyKey="request-after-reset"),
+        [{"id": "task:t1", "sourceKind": "task", "title": "Task", "summary": "Context"}],
+        hooks(),
+    )
+    assert recreated["ok"] is True
+    assert recreated.get("created") is True
+    assert recreated["request"]["id"] != request["id"]

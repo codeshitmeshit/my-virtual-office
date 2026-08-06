@@ -8,6 +8,8 @@ Provider execution already has the required general-purpose boundary. `ProviderC
 
 The design therefore adds topic-aware orchestration around those capabilities. It does not introduce another Feishu receiver, outbound transport, durable queue, database, Provider session store, or conversation-history authority.
 
+The `/here` and `/change` foreground commands are an incremental layer on the same topic capability. Existing chat slash-command support is intentionally narrow (`/new` and `/compact`) and provider-control oriented; `/here` creates a notification-topic branch and `/change` changes topic-local Agent selection, so they are handled by the notification-topic orchestration boundary instead of being scattered through Provider adapters or `app/server.py`.
+
 ### Current and proposed flow
 
 ```mermaid
@@ -35,14 +37,18 @@ flowchart LR
 - Preserve order within a topic while removing chat-wide serialization as a reason for unrelated topics to block each other.
 - Keep acknowledgements, Agent results, errors, and interactive follow-ups in the source topic.
 - Preserve existing idempotency, attachment validation, Provider dispatch, audit, backpressure, and recovery behavior.
+- Support `/here` from both main chats and notification topics by reusing the existing notification delivery and topic activation path.
+- Support `/change` only inside activated notification topics and scope Agent changes to that topic conversation.
 - Keep new orchestration in focused modules and leave `app/server.py` as dependency wiring and compatibility delegation.
 
 **Non-Goals:**
 
 - Forking or resuming the originating Provider-native session.
 - Synchronizing topic turns back into the originating conversation.
-- User-visible Agent selection or automatic Agent switching.
+- User-visible global Agent selection or automatic main-chat Agent switching.
 - Claiming ordinary bot-DM messages, other application messages, or any group-chat topic.
+- Global model switching, global Agent switching, or changing the originating main conversation's Agent/model from a notification topic.
+- Adding a second slash-command router, notification sender, topic store, or Provider-specific topic dispatcher for `/here` or `/change`.
 - Adding a second Feishu connection, message broker, database, cache service, or standalone routing service.
 - Changing Feishu group admission, group permissions, or group-chat behavior.
 - Guaranteeing Provider-level parallel execution when a Provider or Agent intentionally permits only one active run.
@@ -226,6 +232,48 @@ Do not add a metrics backend. Existing status responses and local audit surfaces
 
 Rollback disables the feature through the existing configuration path. Existing topic/source index records remain inert and can be reused if the feature is re-enabled; no data migration or cleanup is required. Feishu permissions and group behavior are unaffected.
 
+### 12. Centralize foreground topic commands at the topic orchestration boundary
+
+Add foreground-command recognition at the existing message normalization/orchestration boundary before ordinary topic dispatch:
+
+- main-chat messages can recognize `/here` through the existing main chat command path and delegate branch creation to the notification-topic command service;
+- notification-topic messages can recognize `/here`, bare `/change`, and `/change <agent>` before they are accepted as ordinary Agent turns;
+- unsupported command placement returns a short command-local explanation and does not mutate topic bindings, Agent selection, or Provider conversation state.
+
+The command service should be a focused module owned by the notification-topic capability, with ports for context lookup, topic binding lookup, notification sending, topic reply, Agent catalog, and topic Agent selection. `app/server.py` only wires these ports. This preserves the existing `NotificationTopicService.handle_event` as the single inbound topic gateway and keeps the pre-existing `ChatCommandService` focused on Provider control commands.
+
+**Alternative considered:** Extend the existing `ChatCommandService` enum and Provider command adapter with `/here` and `/change`. Rejected because `/here` has notification-delivery side effects and `/change` has topic-local configuration semantics; forcing both through Provider control would either add non-Provider responsibilities there or require callers to bypass its model.
+
+**Alternative considered:** Parse `/here` and `/change` ad hoc in each Feishu/main-chat handler. Rejected because it would make future command behavior changes require edits across independent chat paths.
+
+### 13. Implement `/here` as a bounded branch producer that reuses notification delivery
+
+For `/here`, resolve the source surface and preceding context:
+
+- in a main chat, use the existing conversation/source-history lookup for the selected Agent conversation and select the message immediately preceding `/here` plus bounded relevant context;
+- in an activated notification topic, load the current topic binding and accepted/completed topic records from the same topic store, selecting the immediately preceding topic message plus bounded relevant topic context;
+- if there is no usable preceding message, reply locally with a clear explanation and do not create a notification.
+
+Build one bounded context-summary card from the selected message and context. The summary should be deterministic or reuse existing bounded synopsis material where available; if an Agent-generated summary is later required, it must still be invoked through a single summary port and must use the project XML prompt rules. Send the summary through the unified notification delivery entrypoint so recipient policy, app-DM delivery, auditing, and future delivery changes remain centralized.
+
+The resulting notification must carry enough root metadata for the existing topic activation flow to verify it as a Virtual Office notification branch. A `/here` branch from a topic records its parent topic relationship in metadata, but the child topic receives its own deterministic topic conversation and does not share Provider-native state with the parent.
+
+**Alternative considered:** Copy full conversation history into the notification card. Rejected because it expands data exposure, increases card size, and contradicts the product requirement to focus on the previous relevant record.
+
+**Alternative considered:** Create a child conversation directly without sending a notification. Rejected because the product entrypoint is the notification topic; users need the visible topic object as the branch affordance.
+
+### 14. Implement `/change` as topic-local Agent selection read by dispatch
+
+Extend the topic conversation binding authority so a topic binding carries the selected Agent for that topic. The owner must remain the topic conversation store/configuration path; command handlers, notification records, and Provider adapters must not duplicate Agent-selection state.
+
+Bare `/change` reads the bounded live Agent roster and replies in the same topic with product-facing labels plus concrete Agent IDs. `/change <agent>` validates the requested Agent ID, label, or alias against that roster, writes the topic-local binding atomically, and replies once with the new selection. The command is accepted only for activated notification topics; main chats, ordinary bot-DM timelines, group chats, and unactivated topics receive a clear unsupported-location reply.
+
+When dispatching later topic turns, `NotificationTopicService` reads the topic-local binding and dispatches through the existing representative-Agent bridge to the selected Agent. Existing main-chat Agent selection remains authoritative outside the topic.
+
+**Alternative considered:** Change the main chat representative Agent when `/change` is used. Rejected because topic conversations must remain independent from the main conversation and other topics.
+
+**Alternative considered:** Let each Provider adapter parse `/change` and store Agent-selection state itself. Rejected because it would fragment behavior and make cross-provider topic Agent selection inconsistent.
+
 ## Data and State Boundaries
 
 | State | Authority | Change |
@@ -235,8 +283,9 @@ Rollback disables the feature through the existing configuration path. Existing 
 | Inbound idempotency | Existing hashed source-message index | Existing record kind retained |
 | Application-root verification | Existing delivery, notification audit, communication ledger, and source index | Add bounded typed projection and legacy read-repair |
 | Topic-to-conversation and pinned-Agent binding | Existing hashed source-message index | Add atomic `topic-binding` record kind |
+| Topic-local foreground command state | Existing notification-topic store/configuration authority | Add bounded `/change` Agent selection and `/here` branch metadata without a second store |
 | Conversation history and Provider-native ID | Existing Provider history ports and `ProviderConversationService` | New deterministic conversation scope only |
-| Agent roster/configuration | Existing VO Agent configuration | Read once through selector at activation |
+| Agent roster/configuration | Existing VO Agent configuration | Read through selector at activation and live roster for explicit topic `/change` |
 | Feishu replies and cards | Existing notification App token/request/audit module | Add native topic-reply helper with the same credentials |
 
 No state is dual-written as an independent authority. Typed source-index records are lookup projections of existing Feishu/application events; Provider history remains the conversation authority.
@@ -251,6 +300,10 @@ No state is dual-written as an independent authority. Typed source-index records
 | Duplicate first message | Reuse source-message outcome and atomic topic binding |
 | Worker/server restarts | Existing spool recovery and deterministic topic scope resume the same binding |
 | Topic queue full | Existing retryable pressure error; never claim false acceptance |
+| `/here` has no usable preceding context | Short command-local explanation; no notification branch is created |
+| `/here` notification delivery fails | Preserve command outcome and classified notification-delivery failure; do not claim a branch was created |
+| `/change` is used outside an activated notification topic | Short command-local explanation; no Agent selection changes |
+| `/change` requests an unsupported Agent | Reply with the allowed Agent choices; keep the previous topic Agent unchanged |
 | Provider busy | Preserve existing Provider semantics; retained worker message is retried/processed in lane order where already guaranteed |
 | Provider-native session expired | Existing provider recovery creates replacement native state under the same topic conversation |
 | Feishu reply/card delivery fails | Preserve Agent outcome and classified delivery failure; never fabricate delivery success |
@@ -276,6 +329,9 @@ No state is dual-written as an independent authority. Typed source-index records
 - **[Interactive cards may have stricter topic reply behavior than text]** → Reuse native Feishu reply semantics, fail closed for protected actions, and include real-tenant card placement in the rollout gate.
 - **[Adding file handling expands the exercised resource surface]** → Reuse current download/validation bounds and run malicious-path, oversize, unsupported-type, and cleanup regressions.
 - **[Typed index records grow local file count]** → Keep the existing hashed-per-key layout, bounded fields, and retention/permissions; measure index growth before wider rollout.
+- **[`/here` could leak too much context]** → Select only the immediately preceding record plus bounded relevant context, reuse existing context limits, and keep dynamic content inside escaped XML/untrusted-data boundaries when summarization is needed.
+- **[`/change` could silently affect unrelated chats]** → Store Agent selection only under the topic conversation authority and prove main chat, parent topic, child topic, and sibling topic isolation in tests.
+- **[Command parsing could fork across Feishu paths]** → Keep foreground-command recognition behind the notification-topic orchestration entrypoint and a single delegated main-chat `/here` entrypoint; reject ad hoc per-handler parsing in review.
 
 ## Migration Plan
 
@@ -285,8 +341,10 @@ No state is dual-written as an independent authority. Typed source-index records
 4. Enable for one explicitly selected test notification in the bot DM and verify its topic can be continued without `@`.
 5. Verify ordinary bot-DM messages and every group-chat path remain unchanged, while distinct notification topics get distinct conversations.
 6. Verify duplicate/restart recovery, Agent pinning, partial-context disclosure, image/file handling, approval-card placement, queue pressure, and result delivery.
-7. Observe activation, verification-miss, ignored-traffic, queue, Provider-busy, inheritance, and delivery-failure counters before expanding scope.
-8. Roll back by disabling the feature. Leave typed index records intact; no permission or data rollback is required.
+7. Verify `/here` from a main chat and an existing topic creates replyable notification-topic branches, uses bounded previous-message context, and returns only a light local acknowledgement.
+8. Verify `/change`, `/change <agent>`, unsupported Agent, unsupported location, and topic/main-chat/sibling-topic isolation.
+9. Observe activation, verification-miss, ignored-traffic, command-success/failure, Agent-change, queue, Provider-busy, inheritance, and delivery-failure counters before expanding scope.
+10. Roll back by disabling the feature. Leave typed index records intact; no permission or data rollback is required.
 
 ## Open Questions
 

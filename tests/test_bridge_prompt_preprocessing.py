@@ -49,6 +49,11 @@ def test_provider_delivery_prompt_promotes_before_common_bridge_rendering():
     assert '<source_context sourceMessageId="msg_1" conversationId="feishu-group:oc_1" feishuChatId="oc_1" chatType="group">' in prompt
     assert '<feishu_source_context feishuChatId="oc_1" conversationId="feishu-group:oc_1" chatType="group">' in prompt
     assert "/api/feishu-chat/original-channel-notice" in prompt
+    assert "/api/agent-platform-communications/send" in prompt
+    assert "carry the same sourceApp, sourceSurface, sourceMessageId, feishuChatId" in prompt
+    assert "route timeout and late-completion behavior back to the original Feishu conversation" in prompt
+    assert "Quote or preserve the Agent's key original conclusion first" in prompt
+    assert "Do not silently rewrite the Agent reply as if it were your own conclusion" in prompt
     assert "contacting another VO Agent" in prompt
     assert "<feishu_group_message>" in prompt
     assert '<from id="ou_1" is_user="true">飞书用户</from>' in prompt

@@ -34,6 +34,7 @@ class VOAgentCommunicationPorts:
     call_codex: Callable[[Mapping[str, Any]], Result]
     call_claude_code: Callable[[Mapping[str, Any]], Result]
     call_agent: Callable[[str, str, int, str, str], str]
+    schedule_deferred_followup: Callable[[Mapping[str, Any]], Result] | None = None
 
 
 class VOAgentCommunicationError(RuntimeError):
@@ -79,6 +80,55 @@ class VOAgentCommunicationService:
         if status == "empty_reply" or not str(reply or "").strip():
             return "agent_communication_empty_reply"
         return "agent_communication_execution_failed"
+
+    @staticmethod
+    def _call_agent_failure_result(reply: Any, conversation_id: str) -> Result | None:
+        text = str(reply or "").strip()
+        if not text.startswith("[ERROR]"):
+            return None
+        lower = text.lower()
+        if "timed out" in lower or "timeout" in lower:
+            return {
+                "ok": False,
+                "status": "timeout",
+                "error": text,
+                "activeConversationId": conversation_id,
+                "activeStatus": "running",
+            }
+        return {"ok": False, "status": "failed", "error": text}
+
+    @staticmethod
+    def _should_defer_timeout_to_late_followup(
+        source_app: str,
+        source_surface: str,
+        provider_result: Mapping[str, Any] | None,
+    ) -> bool:
+        if str(source_app or "").strip().lower() != "feishu":
+            return False
+        if str(source_surface or "").strip().lower() not in {
+            "feishu-dm",
+            "feishu-group",
+            "feishu-notification-topic",
+        }:
+            return False
+        provider_result = provider_result or {}
+        return str(provider_result.get("status") or "").strip().lower() == "timeout"
+
+    @staticmethod
+    def _deferred_timeout_reply(
+        *,
+        target_name: str,
+        target_id: str,
+        timeout: int,
+        active_status: str,
+    ) -> str:
+        target_label = target_name or target_id or "目标 Agent"
+        status_text = f"当前状态：{active_status}。" if active_status else "当前状态：仍在处理中。"
+        return (
+            f"已把请求发送给 {target_label}，但 {timeout} 秒内还没有拿到最终回复。"
+            f"{status_text}不要代替目标 Agent 输出业务结论；请只告知用户目标 Agent "
+            "仍在处理，等它完成后 VO 会通过原通知/会话推送完整结果。"
+        )
 
     def send(self, body: Mapping[str, Any]) -> Result:
         return self._send(body)
@@ -151,9 +201,16 @@ class VOAgentCommunicationService:
                 }
 
         archive_guard = self._ports.archive_guard(to_agent_id, message)
-        source_app = str(body.get("sourceApp") or body.get("app") or "virtual-office").strip() or "virtual-office"
-        source_surface = str(body.get("sourceSurface") or body.get("surface") or "agent-platform").strip() or "agent-platform"
-        source_label = str(body.get("sourceLabel") or "").strip()
+        metadata = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
+        source_app = (
+            str(body.get("sourceApp") or body.get("app") or metadata.get("sourceApp") or metadata.get("source_app") or "virtual-office").strip()
+            or "virtual-office"
+        )
+        source_surface = (
+            str(body.get("sourceSurface") or body.get("surface") or metadata.get("sourceSurface") or metadata.get("source_surface") or "agent-platform").strip()
+            or "agent-platform"
+        )
+        source_label = str(body.get("sourceLabel") or metadata.get("sourceLabel") or metadata.get("source_label") or "").strip()
         if is_human_source:
             display_name = str(body.get("fromDisplayName") or body.get("displayName") or body.get("fromName") or "User").strip() or "User"
             native_id = str(body.get("fromId") or body.get("fromUserId") or "user").strip() or "user"
@@ -172,10 +229,20 @@ class VOAgentCommunicationService:
             from_ref = self._ports.agent_ref(from_agent_id)
         to_ref = self._ports.agent_ref(to_agent_id)
         conversation_id = str(body.get("conversationId") or body.get("threadId") or f"{from_ref['id']}__{to_ref['id']}").strip()
-        metadata = dict(body.get("metadata")) if isinstance(body.get("metadata"), dict) else {}
         metadata.setdefault("sourceApp", source_app)
         metadata.setdefault("sourceSurface", source_surface)
         metadata.update({key: value for key, value in self._ports.source_metadata(body).items() if value})
+        for source_key in (
+            "sourceMessageId",
+            "feishuChatId",
+            "chatType",
+            "representativeAgentId",
+            "voUserId",
+            "originalSourceMessageId",
+        ):
+            source_value = body.get(source_key) or metadata.get(source_key)
+            if source_value:
+                metadata.setdefault(source_key, source_value)
         if source_label:
             metadata.setdefault("sourceLabel", source_label)
         timeout = int(body.get("timeoutSec") or body.get("timeout") or 600)
@@ -297,6 +364,7 @@ class VOAgentCommunicationService:
                     ),
                 )
                 ok = not str(reply or "").startswith("[ERROR]")
+                provider_result = self._call_agent_failure_result(reply, conversation_id)
             if ok and not str(reply or "").strip():
                 ok = False
                 if provider_result is not None:
@@ -318,6 +386,53 @@ class VOAgentCommunicationService:
                 "needsHumanIntervention": bool(provider_result.get("needsHumanIntervention")),
                 "durationMs": provider_result.get("durationMs"),
             }
+        deferred_timeout = self._should_defer_timeout_to_late_followup(
+            source_app,
+            source_surface,
+            provider_result,
+        )
+        if deferred_timeout:
+            source_context = {
+                **metadata,
+                "sourceApp": source_app,
+                "sourceSurface": source_surface,
+                **({"sourceLabel": source_label} if source_label else {}),
+            }
+            followup_result: Result = {}
+            if self._ports.schedule_deferred_followup:
+                try:
+                    followup_result = self._ports.schedule_deferred_followup({
+                        "requestEventId": inbound.get("id") or "",
+                        "conversationId": conversation_id,
+                        "agentId": to_ref.get("id") or "",
+                        "agentName": to_ref.get("name") or "",
+                        "promptText": message,
+                        "sourceContext": source_context,
+                        "providerResult": provider_result or {},
+                        "timeoutSec": timeout,
+                    })
+                except Exception as exc:
+                    followup_result = {
+                        "ok": False,
+                        "status": "schedule_failed",
+                        "error": type(exc).__name__,
+                    }
+            reply = self._deferred_timeout_reply(
+                target_name=str(to_ref.get("name") or ""),
+                target_id=str(to_ref.get("id") or ""),
+                timeout=timeout,
+                active_status=str((provider_result or {}).get("activeStatus") or ""),
+            )
+            outbound_metadata["deferredTimeout"] = {
+                "status": "pending",
+                "reason": "target_agent_timeout",
+                "targetAgentId": to_ref.get("id") or "",
+                "targetAgentName": to_ref.get("name") or "",
+                "activeConversationId": (provider_result or {}).get("activeConversationId", ""),
+                "activeStatus": (provider_result or {}).get("activeStatus", ""),
+                "timeoutSec": timeout,
+                "followup": followup_result,
+            }
         outbound = self._ports.append_event({
             "type": "message",
             "direction": "reply",
@@ -334,6 +449,9 @@ class VOAgentCommunicationService:
         status = provider_result.get("status") if provider_result else (
             "completed" if ok else ("empty_reply" if not str(reply or "").strip() else "execution_failed")
         )
+        if deferred_timeout:
+            status = "pending"
+            ok = True
         result = {
             "ok": ok,
             "conversationId": conversation_id,
@@ -348,6 +466,20 @@ class VOAgentCommunicationService:
             "activeConversationId": provider_result.get("activeConversationId", "") if provider_result else "",
             "activeStatus": provider_result.get("activeStatus", "") if provider_result else "",
         }
+        if deferred_timeout:
+            result.update({
+                "deferred": True,
+                "code": "agent_communication_deferred",
+                "deferredReason": "target_agent_timeout",
+                "targetAgentId": to_ref.get("id") or "",
+                "targetAgentName": to_ref.get("name") or "",
+                "callerInstruction": (
+                    "Do not answer the delegated business question yourself. Tell the user that "
+                    "the requested Agent is still working and that VO will push the Agent's final "
+                    "reply when it completes."
+                ),
+                "deferredFollowup": outbound_metadata.get("deferredTimeout", {}).get("followup") or {},
+            })
         if not ok:
             result["code"] = self._failure_code(provider_result, reply)
         return result

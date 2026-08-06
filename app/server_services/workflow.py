@@ -1061,6 +1061,9 @@ def _wf_call_agent_ws(agent_id, message, timeout, session_key=None):
                     payload = msg.get("payload") or {}
                     m = payload.get("message") if isinstance(payload.get("message"), dict) else payload
                     if m.get("role") == "assistant" and (payload.get("sessionKey") in (None, session_key) or (run_id and payload.get("runId") == run_id)):
+                        state = str(m.get("state") or payload.get("state") or "").strip().lower()
+                        if state not in {"final", "done", "completed"}:
+                            continue
                         text = _extract_openclaw_text(m.get("content") or m.get("text") or m)
                         if text:
                             return text

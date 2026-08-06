@@ -85,6 +85,9 @@ class FeishuLongConnectionReceiver:
             self.message_handler(body)
         self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
 
+    def _handle_bot_p2p_chat_entered_event(self, data: Any) -> None:
+        self._set_status(status="running", running=True, lastEventAt=int(time.time()), lastError="")
+
     def _run(self) -> None:
         try:
             import lark_oapi as lark
@@ -125,6 +128,19 @@ class FeishuLongConnectionReceiver:
                 builder = builder.register_p2_im_message_receive_v1(on_message)
             elif self.message_handler:
                 self._set_status(status="missing_message_event_handler", running=True, lastError="register_p2_im_message_receive_v1 is unavailable")
+            if hasattr(builder, "register_p2_im_chat_access_event_bot_p2p_chat_entered_v1"):
+                def on_bot_p2p_chat_entered(data: Any) -> None:
+                    try:
+                        self._handle_bot_p2p_chat_entered_event(data)
+                    except Exception as exc:
+                        self._set_status(
+                            status="handler_error",
+                            running=True,
+                            lastEventAt=int(time.time()),
+                            lastError=f"{type(exc).__name__}: {exc}",
+                        )
+                        print(f"[FeishuLongConnection] bot p2p entered handler failed: {type(exc).__name__}: {exc}")
+                builder = builder.register_p2_im_chat_access_event_bot_p2p_chat_entered_v1(on_bot_p2p_chat_entered)
             handler = builder.build()
             self._set_status(status="connecting", running=True, lastError="")
             client = lark.ws.Client(self.app_id, self.app_secret, event_handler=handler)

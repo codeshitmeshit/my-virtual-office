@@ -41,3 +41,18 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 - Preserve public behavior and compatibility during extraction, but remove obsolete compatibility delegates and duplicate implementations after their callers have migrated.
 - Treat reduced coupling, smaller responsibility boundaries, readability, and maintainability as required implementation outcomes. The project should become incrementally simpler with each change rather than accumulating more logic in shared files.
 - If keeping new logic in an existing legacy file is genuinely necessary, document the reason and keep the addition as small and isolated as possible.
+
+## Feishu Notification Delivery
+
+- All Feishu notification-module sends must go through the centralized notification delivery entry points in `app/services/feishu_notification_delivery.py`.
+- Business modules may construct notification intents or markdown content, but they must not decide the final Feishu recipient, webhook fallback, receive ID type, or delivery policy themselves.
+- Do not call low-level notification senders such as `send_feishu_notification`, `send_feishu_markdown_message`, or `_feishu_app_send_config` directly from business workflows for notification-module delivery. Add or extend a centralized delivery helper instead.
+- The centralized delivery layer owns `notificationRecipientPolicy`, including `originating_user_dm`, source-user identity extraction, and the rule that missing source identity must not fall back to a fixed group chat.
+- Feishu chat original-channel replies are separate from notification-module delivery. Functions that intentionally reply to the current Feishu chat by `chat_id` may keep using the chat transport path, but must not be reused for notification-module sends.
+
+## Feishu Topic Foreground Commands
+
+- Feishu notification-topic foreground commands such as `/here` and `/change` must be implemented through the centralized foreground command boundary in `app/services/feishu_topic_foreground_commands.py`.
+- `/here` may select context and construct a notification intent, but actual Feishu notification sending must still go through the unified notification delivery entrypoint; do not call low-level Feishu senders from command code.
+- `/change` switches the active Agent for the current notification-topic conversation only. The selected Agent must be owned by the notification-topic binding/store path; do not duplicate that state in Provider adapters, notification audit records, chat handlers, or `app/server.py`.
+- Transport entry points such as `app/feishu_chat_channel.py`, `app/feishu_long_connection.py`, and `app/server.py` should only parse/admit and wire foreground command ports; they should not contain command business logic.

@@ -7,6 +7,9 @@ configuration while removing domain business bodies from server.py.
 
 import sys
 
+from services.feishu_notification_delivery import send_notification_card
+from services.feishu_notification_recipients import normalize_recipient_policy
+
 __all__ = ['_send_feishu_workflow_notification', '_vo_public_url', '_feishu_notification_marker', '_mark_feishu_notification', '_feishu_notification_config_response', '_save_feishu_notification_config', '_feishu_notification_topic_preflight', '_feishu_notification_test_intents', '_send_feishu_notification_test_cards', '_feishu_card_action_log_path', '_feishu_card_action_user', '_feishu_card_action_value', '_feishu_card_action_form_values', '_feishu_card_action_form_text', '_feishu_card_action_success', '_feishu_card_action_error', '_feishu_meeting_action_actor', '_handle_feishu_card_action']
 
 
@@ -50,10 +53,11 @@ _hydrate()
 
 
 def _send_feishu_workflow_notification(intent):
-    return send_feishu_notification(
-        intent,
-        webhook_url=VO_CONFIG.get("notifications", {}).get("feishuWebhook") or None,
-        app_config=_feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+    notification_cfg = VO_CONFIG.get("notifications", {}) or {}
+    return send_notification_card(
+        intent if isinstance(intent, dict) else {},
+        notification_config=notification_cfg,
+        base_app_config=_feishu_app_send_config(notification_cfg),
         status_dir=STATUS_DIR,
     )
 
@@ -110,6 +114,10 @@ def _feishu_notification_config_response():
         "feishuReceiveIdType": cfg.get("feishuReceiveIdType") or "chat_id",
         "maskedFeishuReceiveId": _mask_secret_value(cfg.get("feishuReceiveId"), 5, 4),
         "feishuCallbackMode": "long_connection",
+        "notificationRecipientPolicy": normalize_recipient_policy(
+            cfg.get("notificationRecipientPolicy") or cfg.get("feishuRecipientPolicy")
+        ),
+        "topicConversationModels": _normalize_feishu_topic_model_choices(cfg.get("topicConversationModels")),
         "feishuLongConnection": receiver.status() if receiver else {"enabled": False, "running": False, "status": "not_started"},
         "topicConversationsEnabled": bool(cfg.get("topicConversationsEnabled", False)),
         "topicConversations": topic_service.status() if topic_service else {
@@ -126,6 +134,12 @@ def _save_feishu_notification_config(body):
     app_secret = str((body or {}).get("feishuAppSecret") or "").strip()
     receive_id_type = str((body or {}).get("feishuReceiveIdType") or "chat_id").strip() or "chat_id"
     receive_id = str((body or {}).get("feishuReceiveId") or "").strip()
+    recipient_policy = normalize_recipient_policy(
+        (body or {}).get("notificationRecipientPolicy")
+        or (body or {}).get("feishuRecipientPolicy")
+        or (VO_CONFIG.get("notifications") or {}).get("notificationRecipientPolicy")
+        or (VO_CONFIG.get("notifications") or {}).get("feishuRecipientPolicy")
+    )
     topic_conversations_enabled = (
         bool((body or {}).get("topicConversationsEnabled"))
         if "topicConversationsEnabled" in (body or {})
@@ -138,8 +152,25 @@ def _save_feishu_notification_config(body):
     notifications = {
         "feishuEnabled": enabled,
         "feishuReceiveIdType": receive_id_type,
+        "notificationRecipientPolicy": recipient_policy,
         "topicConversationsEnabled": topic_conversations_enabled,
     }
+    if "topicConversationModels" in (body or {}):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (body or {}).get("topicConversationModels")
+        )
+    elif "feishuTopicConversationModels" in (body or {}):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (body or {}).get("feishuTopicConversationModels")
+        )
+    elif isinstance((VO_CONFIG.get("notifications") or {}).get("topicConversationModels"), list):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (VO_CONFIG.get("notifications") or {}).get("topicConversationModels")
+        )
+    elif isinstance((VO_CONFIG.get("notifications") or {}).get("feishuTopicConversationModels"), list):
+        notifications["topicConversationModels"] = _normalize_feishu_topic_model_choices(
+            (VO_CONFIG.get("notifications") or {}).get("feishuTopicConversationModels")
+        )
     if webhook or (body or {}).get("clearWebhook"):
         notifications["feishuWebhook"] = webhook
     if app_id or (body or {}).get("clearApp"):
@@ -154,6 +185,7 @@ def _save_feishu_notification_config(body):
     result = _persist_setup_payload(payload)
     if not result.get("ok"):
         return result
+    _reset_feishu_notification_topic_runtime()
     _start_feishu_long_connection()
     return _feishu_notification_config_response()
 
@@ -213,10 +245,11 @@ def _send_feishu_notification_test_cards(kind=None):
     selected = [kind] if kind in intents else ["application_form", "notification", "warning", "error"]
     results = []
     for selected_kind in selected:
-        results.append(send_feishu_notification(
+        results.append(send_notification_card(
             intents[selected_kind],
-            webhook_url=webhook,
-            app_config=_feishu_app_send_config(cfg),
+            notification_config=cfg,
+            base_app_config=_feishu_app_send_config(cfg),
+            webhook_url=webhook or None,
             status_dir=STATUS_DIR,
             timeout=20,
         ))

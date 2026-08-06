@@ -7,6 +7,7 @@ configuration while removing domain business bodies from server.py.
 
 import sys
 from services import meeting_prompt_documents
+from services.feishu_notification_delivery import send_notification_card
 from services.meeting_priority_policy import (
     coerce_moderator_outcome_for_priority,
     default_ai_request_resolution_policy,
@@ -348,10 +349,11 @@ def _send_meeting_request_notification(req, state="pending", *, summary="", acti
         ],
         "target": "feishu-meeting-request",
     }
-    return send_feishu_notification(
+    return send_notification_card(
         intent,
+        notification_config=notifications_cfg,
+        base_app_config=_feishu_app_send_config(notifications_cfg),
         webhook_url=notifications_cfg.get("feishuWebhook") or None,
-        app_config=_feishu_app_send_config(notifications_cfg),
         status_dir=STATUS_DIR,
     )
 
