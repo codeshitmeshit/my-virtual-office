@@ -2,11 +2,14 @@
     'use strict';
 
     var controller = null;
+    var tr = root.HumanDecisionI18n && typeof root.HumanDecisionI18n.create === 'function'
+        ? root.HumanDecisionI18n.create(root)
+        : { t: function (_key, _params, fallback) { return fallback; } };
 
     function responseJson(response) {
         return response.json().then(function (payload) {
             if (!response.ok || payload.ok === false) {
-                var error = new Error(payload.error || payload.code || '决策请求失败');
+                var error = new Error(payload.error || payload.code || tr.t('human_decision_request_failed', null, '决策请求失败'));
                 error.status = response.status;
                 error.code = payload.code || '';
                 throw error;
@@ -23,9 +26,14 @@
     }
 
     function reportError(error) {
-        if (typeof root.addGlobalLog === 'function') root.addGlobalLog('⚠️ 人工决策提交失败：' + (error && error.message || '未知错误'));
+        var message = error && error.message || tr.t('human_decision_unknown_error', null, '未知错误');
+        if (typeof root.addGlobalLog === 'function') {
+            root.addGlobalLog('⚠️ ' + tr.t('human_decision_submit_failed_log', { error: message }, '人工决策提交失败：{{error}}'));
+        }
         if (root.VODialogs && typeof root.VODialogs.showAlert === 'function') {
-            root.VODialogs.showAlert(error && error.message || '决策提交失败', { title: '人工决策中枢' });
+            root.VODialogs.showAlert(error && error.message || tr.t('human_decision_submit_failed', null, '决策提交失败'), {
+                title: tr.t('human_decision_center_title', null, '人工决策中枢'),
+            });
         }
     }
 
@@ -62,7 +70,7 @@
                 },
                 onRequestChange: function (payload) {
                     if (payload.locked) {
-                        reportError(new Error('VO 已开始执行；请在对应任务中发起新的变更决策。'));
+                        reportError(new Error(tr.t('human_decision_execution_started_error', null, 'VO 已开始执行；请在对应任务中发起新的变更决策。')));
                         return;
                     }
                     post('/api/human-decisions/' + encodeURIComponent(payload.decisionId) + '/reopen', {}).catch(reportError);

@@ -1,10 +1,10 @@
 (function (root, factory) {
     if (typeof module === 'object' && module.exports) {
-        module.exports = factory(root);
+        module.exports = factory(root, require('./human-decision-center-i18n.js'));
     } else {
-        root.HumanDecisionCenter = factory(root);
+        root.HumanDecisionCenter = factory(root, root.HumanDecisionI18n);
     }
-})(typeof globalThis !== 'undefined' ? globalThis : this, function (root) {
+})(typeof globalThis !== 'undefined' ? globalThis : this, function (root, i18nModule) {
     'use strict';
 
     var RISK_WEIGHT = { high: 3, medium: 2, low: 1 };
@@ -82,28 +82,40 @@
         );
     }
 
-    function riskLabel(risk) {
-        return { high: '高风险', medium: '中风险', low: '低风险' }[risk] || '风险待评估';
+    function riskLabel(tr, risk) {
+        return {
+            high: tr.t('human_decision_risk_high', null, '高风险'),
+            medium: tr.t('human_decision_risk_medium', null, '中风险'),
+            low: tr.t('human_decision_risk_low', null, '低风险'),
+        }[risk] || tr.t('human_decision_risk_unknown', null, '风险待评估');
     }
 
-    function sourceLabel(source) {
+    function sourceLabel(tr, source) {
         var kind = source && source.type;
-        var prefix = { task: '任务', meeting: '会议', chat: '聊天' }[kind] || 'VO';
+        var prefix = {
+            task: tr.t('human_decision_source_task', null, '任务'),
+            meeting: tr.t('human_decision_source_meeting', null, '会议'),
+            chat: tr.t('human_decision_source_chat', null, '聊天'),
+        }[kind] || 'VO';
         var label = text(source && source.label).trim();
         return label ? prefix + ' · ' + label : prefix;
     }
 
-    function channelLabel(channel) {
-        return { feishu: '飞书', local: 'VO 控制面板', timeout: '超时自动处理' }[channel] || '未知入口';
+    function channelLabel(tr, channel) {
+        return {
+            feishu: tr.t('human_decision_channel_feishu', null, '飞书'),
+            local: tr.t('human_decision_channel_local', null, 'VO 控制面板'),
+            timeout: tr.t('human_decision_channel_timeout', null, '超时自动处理'),
+        }[channel] || tr.t('human_decision_channel_unknown', null, '未知入口');
     }
 
-    function formatTime(value) {
+    function formatTime(value, locale) {
         var raw = text(value).trim();
         if (!raw) return '—';
         var date = new Date(raw);
         if (Number.isNaN(date.getTime())) return raw;
         try {
-            return new Intl.DateTimeFormat('zh-CN', {
+            return new Intl.DateTimeFormat(locale || 'en-US', {
                 month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false,
             }).format(date);
         } catch (_error) {
@@ -127,6 +139,9 @@
         }
 
         var callbacks = initialCallbacks || {};
+        var tr = i18nModule && typeof i18nModule.create === 'function'
+            ? i18nModule.create(rootObject)
+            : { t: function (_key, _params, fallback) { return fallback; }, locale: function () { return 'zh-CN'; }, subscribe: function () { return function () {}; } };
         var decisionSnapshot = { revision: -1, decisions: [] };
         var snapshotRevision = -1;
         var destroyed = false;
@@ -169,11 +184,11 @@
             var hasAttention = allDecisions().some(attention);
             toggle.setAttribute('data-count', text(count));
             toggle.setAttribute('data-attention', hasAttention ? 'true' : 'false');
-            toggle.setAttribute('aria-label', '人工决策中枢，' + count + ' 项待处理');
+            toggle.setAttribute('aria-label', tr.t('human_decision_toggle_aria', { count: count }, '人工决策中枢，{{count}} 项待处理'));
             toggle.setAttribute('aria-expanded', centerState.isOpen ? 'true' : 'false');
             toggle.replaceChildren();
             toggle.appendChild(createEl(doc, 'span', 'human-decision-center-toggle__icon', '⚖️'));
-            toggle.appendChild(createEl(doc, 'span', 'human-decision-center-toggle__label', '打开人工决策'));
+            toggle.appendChild(createEl(doc, 'span', 'human-decision-center-toggle__label', tr.t('human_decision_open', null, '打开人工决策')));
             if (count) {
                 var badge = createEl(doc, 'span', 'human-decision-center-toggle__badge', count > 99 ? '99+' : count);
                 badge.setAttribute('aria-hidden', 'true');
@@ -186,7 +201,9 @@
                 ? sortPendingDecisions(allDecisions())
                 : allDecisions().filter(function (item) { return item && item.status !== 'pending'; });
             if (!items.length) {
-                listHost.appendChild(createEl(doc, 'div', 'human-decision-center__empty', centerState.activeTab === 'pending' ? '当前没有待决策事项' : '还没有已处理记录'));
+                listHost.appendChild(createEl(doc, 'div', 'human-decision-center__empty', centerState.activeTab === 'pending'
+                    ? tr.t('human_decision_empty_pending', null, '当前没有待决策事项')
+                    : tr.t('human_decision_empty_history', null, '还没有已处理记录')));
                 return;
             }
             items.forEach(function (item) {
@@ -196,13 +213,13 @@
                 setData(button, 'risk', item.risk || 'unknown');
                 button.setAttribute('aria-selected', item.id === centerState.selectedDecisionId ? 'true' : 'false');
                 var top = createEl(doc, 'span', 'human-decision-center__list-top');
-                top.appendChild(createEl(doc, 'span', 'human-decision-center__source', sourceLabel(item.source)));
-                top.appendChild(createEl(doc, 'span', 'human-decision-center__risk', riskLabel(item.risk)));
+                top.appendChild(createEl(doc, 'span', 'human-decision-center__source', sourceLabel(tr, item.source)));
+                top.appendChild(createEl(doc, 'span', 'human-decision-center__risk', riskLabel(tr, item.risk)));
                 button.appendChild(top);
-                button.appendChild(createEl(doc, 'strong', 'human-decision-center__list-title', item.title || '未命名决策'));
+                button.appendChild(createEl(doc, 'strong', 'human-decision-center__list-title', item.title || tr.t('human_decision_untitled', null, '未命名决策')));
                 var statusText = item.status === 'pending'
-                    ? (item.nearTimeout ? '即将超时 · ' : '') + '截止 ' + formatTime(item.deadlineAt)
-                    : channelLabel(item.resolution && item.resolution.channel) + ' · ' + formatTime(item.resolution && item.resolution.resolvedAt);
+                    ? (item.nearTimeout ? tr.t('human_decision_near_timeout_prefix', null, '即将超时 · ') : '') + tr.t('human_decision_deadline_prefix', null, '截止 ') + formatTime(item.deadlineAt, tr.locale())
+                    : channelLabel(tr, item.resolution && item.resolution.channel) + ' · ' + formatTime(item.resolution && item.resolution.resolvedAt, tr.locale());
                 button.appendChild(createEl(doc, 'span', 'human-decision-center__list-status', statusText));
                 button.addEventListener('click', function () { selectDecision(item.id); });
                 listHost.appendChild(button);
@@ -213,7 +230,7 @@
             var detail = item.taskDetail || {};
             var details = createEl(doc, 'details', 'human-decision-center__task-detail');
             if (centerState.expandedDetailIds.has(item.id)) details.setAttribute('open', '');
-            var summary = createEl(doc, 'summary', 'human-decision-center__task-summary', '任务详细信息');
+            var summary = createEl(doc, 'summary', 'human-decision-center__task-summary', tr.t('human_decision_task_details', null, '任务详细信息'));
             summary.setAttribute('aria-expanded', centerState.expandedDetailIds.has(item.id) ? 'true' : 'false');
             summary.addEventListener('click', function () {
                 if (centerState.expandedDetailIds.has(item.id)) centerState.expandedDetailIds.delete(item.id);
@@ -221,11 +238,11 @@
             });
             details.appendChild(summary);
             var body = createEl(doc, 'div', 'human-decision-center__task-body');
-            appendMeta(doc, body, '任务摘要', detail.summary || '—');
-            appendMeta(doc, body, '已完成', Array.isArray(detail.completed) && detail.completed.length ? detail.completed.join('、') : '—');
-            appendMeta(doc, body, '当前阻塞', detail.blocked || '—');
-            appendMeta(doc, body, '相关上下文', detail.context || '—');
-            appendMeta(doc, body, '决策后下一步', detail.nextStep || '—');
+            appendMeta(doc, body, tr.t('human_decision_task_summary', null, '任务摘要'), detail.summary || '—');
+            appendMeta(doc, body, tr.t('human_decision_completed', null, '已完成'), Array.isArray(detail.completed) && detail.completed.length ? detail.completed.join(tr.t('human_decision_list_separator', null, '、')) : '—');
+            appendMeta(doc, body, tr.t('human_decision_blocked', null, '当前阻塞'), detail.blocked || '—');
+            appendMeta(doc, body, tr.t('human_decision_context', null, '相关上下文'), detail.context || '—');
+            appendMeta(doc, body, tr.t('human_decision_next_step', null, '决策后下一步'), detail.nextStep || '—');
             details.appendChild(body);
             parent.appendChild(details);
         }
@@ -234,29 +251,31 @@
             var resolution = item.resolution || {};
             var block = createEl(doc, 'section', 'human-decision-center__resolution');
             block.setAttribute('aria-live', 'polite');
-            var eyebrow = resolution.channel === 'feishu' ? '飞书已处理 · 已实时同步' : '决策已处理';
+            var eyebrow = resolution.channel === 'feishu'
+                ? tr.t('human_decision_feishu_synced', null, '飞书已处理 · 已实时同步')
+                : tr.t('human_decision_resolved', null, '决策已处理');
             block.appendChild(createEl(doc, 'p', 'human-decision-center__eyebrow', eyebrow));
-            block.appendChild(createEl(doc, 'h3', 'human-decision-center__resolution-answer', resolution.answer || '已处理'));
+            block.appendChild(createEl(doc, 'h3', 'human-decision-center__resolution-answer', resolution.answer || tr.t('human_decision_processed', null, '已处理')));
             var meta = createEl(doc, 'div', 'human-decision-center__resolution-meta');
-            appendMeta(doc, meta, '处理入口', channelLabel(resolution.channel));
-            appendMeta(doc, meta, '处理时间', formatTime(resolution.resolvedAt));
+            appendMeta(doc, meta, tr.t('human_decision_resolved_via', null, '处理入口'), channelLabel(tr, resolution.channel));
+            appendMeta(doc, meta, tr.t('human_decision_resolved_at', null, '处理时间'), formatTime(resolution.resolvedAt, tr.locale()));
             block.appendChild(meta);
             if (resolution.nextAction) {
                 var action = createEl(doc, 'div', 'human-decision-center__next-action');
-                action.appendChild(createEl(doc, 'span', '', 'VO 下一步'));
+                action.appendChild(createEl(doc, 'span', '', tr.t('human_decision_vo_next', null, 'VO 下一步')));
                 action.appendChild(createEl(doc, 'strong', '', resolution.nextAction));
                 block.appendChild(action);
             }
             if (item.execution && item.execution.started) {
-                block.appendChild(createEl(doc, 'p', 'human-decision-center__locked-note', 'VO 已开始执行，原决策已锁定。' + text(item.execution.impact)));
-                var requestChange = createEl(doc, 'button', 'human-decision-center__secondary-button', '请求变更');
+                block.appendChild(createEl(doc, 'p', 'human-decision-center__locked-note', tr.t('human_decision_locked_prefix', null, 'VO 已开始执行，原决策已锁定。') + text(item.execution.impact)));
+                var requestChange = createEl(doc, 'button', 'human-decision-center__secondary-button', tr.t('human_decision_request_change', null, '请求变更'));
                 requestChange.type = 'button';
                 setData(requestChange, 'decision-request-change', item.id);
                 requestChange.disabled = !(rootObject.VODialogs && typeof rootObject.VODialogs.showConfirm === 'function');
                 requestChange.addEventListener('click', function () { requestLockedChange(item); });
                 block.appendChild(requestChange);
             } else if (resolution.channel !== 'timeout') {
-                var edit = createEl(doc, 'button', 'human-decision-center__secondary-button', '修改决策');
+                var edit = createEl(doc, 'button', 'human-decision-center__secondary-button', tr.t('human_decision_edit', null, '修改决策'));
                 edit.type = 'button';
                 setData(edit, 'decision-edit', item.id);
                 edit.addEventListener('click', function () {
@@ -271,7 +290,7 @@
             var draft = centerState.drafts.get(item.id) || { optionId: '', customAnswer: '' };
             var recommendation = item.recommendation || {};
             var form = createEl(doc, 'section', 'human-decision-center__answer');
-            form.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', '请选择决策方案'));
+            form.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', tr.t('human_decision_choose_option', null, '请选择决策方案')));
             var options = createEl(doc, 'div', 'human-decision-center__options');
             (Array.isArray(item.options) ? item.options : []).forEach(function (option) {
                 var label = createEl(doc, 'label', 'human-decision-center__option');
@@ -292,7 +311,7 @@
                 var copy = createEl(doc, 'span', 'human-decision-center__option-copy');
                 var heading = createEl(doc, 'span', 'human-decision-center__option-heading');
                 heading.appendChild(createEl(doc, 'strong', '', text(option.id).toUpperCase() + ' · ' + text(option.label)));
-                if (text(option.id) === text(recommendation.optionId)) heading.appendChild(createEl(doc, 'em', 'human-decision-center__recommended-tag', 'VO 推荐'));
+                if (text(option.id) === text(recommendation.optionId)) heading.appendChild(createEl(doc, 'em', 'human-decision-center__recommended-tag', tr.t('human_decision_recommended', null, 'VO 推荐')));
                 copy.appendChild(heading);
                 copy.appendChild(createEl(doc, 'span', 'human-decision-center__option-impact', option.impact || ''));
                 label.appendChild(copy);
@@ -301,15 +320,15 @@
             form.appendChild(options);
             if (recommendation.reason) {
                 var recommendationBlock = createEl(doc, 'div', 'human-decision-center__recommendation');
-                recommendationBlock.appendChild(createEl(doc, 'strong', '', '为什么 VO 推荐 ' + text(recommendation.optionId) + '？'));
+                recommendationBlock.appendChild(createEl(doc, 'strong', '', tr.t('human_decision_recommendation_reason', { option: text(recommendation.optionId) }, '为什么 VO 推荐 {{option}}？')));
                 recommendationBlock.appendChild(createEl(doc, 'p', '', recommendation.reason));
                 form.appendChild(recommendationBlock);
             }
             var customLabel = createEl(doc, 'label', 'human-decision-center__custom');
-            customLabel.appendChild(createEl(doc, 'span', '', '以上都不符合？输入你的决策（将优先采用）'));
+            customLabel.appendChild(createEl(doc, 'span', '', tr.t('human_decision_custom_label', null, '以上都不符合？输入你的决策（将优先采用）')));
             var custom = createEl(doc, 'textarea', 'human-decision-center__custom-input');
             custom.value = draft.customAnswer || '';
-            custom.setAttribute('placeholder', '例如：先在内部团队灰度一周，再根据数据决定是否全量');
+            custom.setAttribute('placeholder', tr.t('human_decision_custom_placeholder', null, '例如：先在内部团队灰度一周，再根据数据决定是否全量'));
             setData(custom, 'decision-custom-answer', item.id);
             custom.addEventListener('input', function () {
                 var nextDraft = centerState.drafts.get(item.id) || { optionId: '', customAnswer: '' };
@@ -322,7 +341,7 @@
             var error = createEl(doc, 'p', 'human-decision-center__error', centerState.validationError);
             error.setAttribute('role', 'status');
             form.appendChild(error);
-            var submit = createEl(doc, 'button', 'human-decision-center__submit', '提交决策');
+            var submit = createEl(doc, 'button', 'human-decision-center__submit', tr.t('human_decision_submit', null, '提交决策'));
             submit.type = 'button';
             setData(submit, 'decision-submit', item.id);
             submit.addEventListener('click', function () { submitDecision(item); });
@@ -333,39 +352,43 @@
         function renderDetail(host) {
             var item = currentDecision();
             if (!item) {
-                host.appendChild(createEl(doc, 'div', 'human-decision-center__empty-detail', '选择一个决策事项查看详情'));
+                host.appendChild(createEl(doc, 'div', 'human-decision-center__empty-detail', tr.t('human_decision_select_detail', null, '选择一个决策事项查看详情')));
                 return;
             }
             setData(host, 'state', item.status);
             setData(host, 'risk', item.risk || 'unknown');
-            var back = createEl(doc, 'button', 'human-decision-center__back', '← 返回列表');
+            var back = createEl(doc, 'button', 'human-decision-center__back', tr.t('human_decision_back', null, '← 返回列表'));
             back.type = 'button';
             back.addEventListener('click', function () {
                 centerState.narrowView = 'list';
                 render();
             });
             host.appendChild(back);
-            host.appendChild(createEl(doc, 'p', 'human-decision-center__eyebrow', sourceLabel(item.source)));
-            host.appendChild(createEl(doc, 'h2', 'human-decision-center__title', item.title || '未命名决策'));
+            host.appendChild(createEl(doc, 'p', 'human-decision-center__eyebrow', sourceLabel(tr, item.source)));
+            host.appendChild(createEl(doc, 'h2', 'human-decision-center__title', item.title || tr.t('human_decision_untitled', null, '未命名决策')));
             var meta = createEl(doc, 'div', 'human-decision-center__meta');
-            appendMeta(doc, meta, '风险等级', riskLabel(item.risk), 'is-risk-' + text(item.risk));
-            appendMeta(doc, meta, '截止时间', formatTime(item.deadlineAt));
-            appendMeta(doc, meta, '双端状态', item.status === 'pending' ? '飞书与本地均等待' : '飞书与本地均已处理');
+            appendMeta(doc, meta, tr.t('human_decision_risk_level', null, '风险等级'), riskLabel(tr, item.risk), 'is-risk-' + text(item.risk));
+            appendMeta(doc, meta, tr.t('human_decision_deadline', null, '截止时间'), formatTime(item.deadlineAt, tr.locale()));
+            appendMeta(doc, meta, tr.t('human_decision_sync_status', null, '双端状态'), item.status === 'pending'
+                ? tr.t('human_decision_sync_waiting', null, '飞书与本地均等待')
+                : tr.t('human_decision_sync_resolved', null, '飞书与本地均已处理'));
             host.appendChild(meta);
             var context = createEl(doc, 'section', 'human-decision-center__context');
-            context.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', '当前情景'));
+            context.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', tr.t('human_decision_situation', null, '当前情景')));
             context.appendChild(createEl(doc, 'p', '', item.situation || '—'));
-            context.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', '为什么需要你决策'));
+            context.appendChild(createEl(doc, 'h3', 'human-decision-center__section-title', tr.t('human_decision_reason', null, '为什么需要你决策')));
             context.appendChild(createEl(doc, 'p', '', item.reason || '—'));
             var consequence = createEl(doc, 'div', 'human-decision-center__consequence');
-            consequence.appendChild(createEl(doc, 'strong', '', '超时后果'));
+            consequence.appendChild(createEl(doc, 'strong', '', tr.t('human_decision_timeout_consequence', null, '超时后果')));
             consequence.appendChild(createEl(doc, 'span', '', item.timeoutConsequence || '—'));
             context.appendChild(consequence);
             host.appendChild(context);
             var reminder = item.reminder || {};
             var reminderBlock = createEl(doc, 'section', 'human-decision-center__reminder');
-            reminderBlock.appendChild(createEl(doc, 'span', '', '提醒 ' + (reminder.count || 0) + ' / ' + (reminder.limit || 3)));
-            reminderBlock.appendChild(createEl(doc, 'strong', '', reminder.nextAt ? '下次提醒 ' + formatTime(reminder.nextAt) : '提醒周期已结束'));
+            reminderBlock.appendChild(createEl(doc, 'span', '', tr.t('human_decision_reminder_count', { count: reminder.count || 0, limit: reminder.limit || 3 }, '提醒 {{count}} / {{limit}}')));
+            reminderBlock.appendChild(createEl(doc, 'strong', '', reminder.nextAt
+                ? tr.t('human_decision_next_reminder', { time: formatTime(reminder.nextAt, tr.locale()) }, '下次提醒 {{time}}')
+                : tr.t('human_decision_reminders_finished', null, '提醒周期已结束')));
             host.appendChild(reminderBlock);
             if (item.status === 'pending') renderPendingForm(host, item);
             else renderResolution(host, item);
@@ -381,16 +404,16 @@
             panel.replaceChildren();
             var shell = createEl(doc, 'section', 'human-decision-center');
             shell.setAttribute('role', 'dialog');
-            shell.setAttribute('aria-label', '人工决策中枢');
+            shell.setAttribute('aria-label', tr.t('human_decision_center_title', null, '人工决策中枢'));
             var header = createEl(doc, 'header', 'human-decision-center__header');
             var titleGroup = createEl(doc, 'div', 'human-decision-center__heading');
             titleGroup.appendChild(createEl(doc, 'p', 'human-decision-center__kicker', 'HUMAN IN THE LOOP'));
-            titleGroup.appendChild(createEl(doc, 'h1', '', '人工决策中枢'));
-            titleGroup.appendChild(createEl(doc, 'p', '', '只暂停真正需要你判断的分支，其余工作继续运行。'));
+            titleGroup.appendChild(createEl(doc, 'h1', '', tr.t('human_decision_center_title', null, '人工决策中枢')));
+            titleGroup.appendChild(createEl(doc, 'p', '', tr.t('human_decision_center_subtitle', null, '只暂停真正需要你判断的分支，其余工作继续运行。')));
             header.appendChild(titleGroup);
-            var closeButton = createEl(doc, 'button', 'human-decision-center__close', '关闭');
+            var closeButton = createEl(doc, 'button', 'human-decision-center__close', tr.t('human_decision_close', null, '关闭'));
             closeButton.type = 'button';
-            closeButton.setAttribute('aria-label', '关闭人工决策中枢');
+            closeButton.setAttribute('aria-label', tr.t('human_decision_close_aria', null, '关闭人工决策中枢'));
             closeButton.addEventListener('click', close);
             header.appendChild(closeButton);
             shell.appendChild(header);
@@ -398,7 +421,7 @@
             var rail = createEl(doc, 'aside', 'human-decision-center__rail');
             var tabs = createEl(doc, 'div', 'human-decision-center__tabs');
             tabs.setAttribute('role', 'tablist');
-            [['pending', '待决策'], ['history', '已处理']].forEach(function (entry) {
+            [['pending', tr.t('human_decision_tab_pending', null, '待决策')], ['history', tr.t('human_decision_tab_history', null, '已处理')]].forEach(function (entry) {
                 var count = entry[0] === 'pending'
                     ? sortPendingDecisions(allDecisions()).length
                     : allDecisions().filter(function (item) { return item.status !== 'pending'; }).length;
@@ -490,7 +513,7 @@
         function submitDecision(item) {
             var answer = resolveDecisionAnswer(item, centerState.drafts.get(item.id));
             if (!answer) {
-                centerState.validationError = '请选择 A-D 中的一项，或输入你的自定义决策。';
+                centerState.validationError = tr.t('human_decision_validation_required', null, '请选择 A-D 中的一项，或输入你的自定义决策。');
                 render();
                 return;
             }
@@ -504,8 +527,12 @@
             var dialogs = rootObject.VODialogs;
             if (!dialogs || typeof dialogs.showConfirm !== 'function') return;
             Promise.resolve(dialogs.showConfirm(
-                text(item.execution && item.execution.impact) || 'VO 已开始执行，变更可能需要撤销已完成的工作。',
-                { title: '确认请求变更？', confirmText: '确认请求变更', tone: 'danger' }
+                text(item.execution && item.execution.impact) || tr.t('human_decision_change_impact_default', null, 'VO 已开始执行，变更可能需要撤销已完成的工作。'),
+                {
+                    title: tr.t('human_decision_change_confirm_title', null, '确认请求变更？'),
+                    confirmText: tr.t('human_decision_change_confirm', null, '确认请求变更'),
+                    tone: 'danger',
+                }
             )).then(function (confirmed) {
                 if (confirmed && typeof callbacks.onRequestChange === 'function') {
                     callbacks.onRequestChange({ decisionId: item.id, locked: true });
@@ -522,11 +549,13 @@
             if (destroyed) return;
             destroyed = true;
             toggle.removeEventListener('click', onToggle);
+            unsubscribeLanguage();
             panel.replaceChildren();
             panel.hidden = true;
             toggle.setAttribute('aria-expanded', 'false');
         }
 
+        var unsubscribeLanguage = tr.subscribe(render);
         toggle.addEventListener('click', onToggle);
         update(initialSnapshot || { revision: 0, decisions: [] });
         return {

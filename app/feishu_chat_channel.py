@@ -1064,6 +1064,7 @@ def handle_message_event(
                 {
                     "sourceMessageId": source_message_id,
                     "feishuChatId": chat_id,
+                    "messageType": message_type,
                     "senderName": identity.get("name") or identity.get("openId") or identity.get("userId") or "Feishu User",
                     "sender": identity,
                     **projection,

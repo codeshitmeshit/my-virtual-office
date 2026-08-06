@@ -5,6 +5,9 @@ from app.services.human_decision_delivery import (
     HumanDecisionDelivery,
     build_decision_intent,
 )
+from app.services import human_decision_delivery as delivery_module
+from app.services import human_decision_continuation_receipt as receipt_module
+from types import SimpleNamespace
 
 from tests.test_human_decisions import request_payload
 from app.services.human_decisions import HumanDecisionStore
@@ -139,3 +142,82 @@ def test_terminal_update_removes_actions_and_uses_original_application(tmp_path)
     assert updates[0][1]["inputs"], "terminal card must remain schema 2.0 so Feishu can patch the original form card"
     assert build_feishu_card(updates[0][1])["card"]["schema"] == "2.0"
     assert updates[0][2]["appId"] == "chat"
+
+
+def test_resume_receipt_reports_result_and_normal_execution_state(tmp_path):
+    assert hasattr(delivery_module, "build_continuation_receipt_intent")
+    store = HumanDecisionStore(tmp_path / "state.json")
+    item = store.create(request_payload(
+        source={"type": "meeting", "id": "meeting-1", "label": "发布评审"},
+    ))["decision"]
+    item = store.resolve(item["id"], custom_answer="先灰度一周", channel="feishu")["decision"]
+
+    intent = delivery_module.build_continuation_receipt_intent(item, kind="meeting")
+
+    assert intent["type"] == "notification"
+    assert intent["state"] == "approved"
+    assert intent["title"] == "决策已完成，VO 已恢复运行"
+    assert intent["summary"] == "已按你的决策恢复会议：先灰度一周"
+    assert intent["details"] == {
+        "决策结果": "先灰度一周",
+        "恢复场景": "会议 · 发布评审",
+        "运行状态": "原流程已恢复正常运行",
+    }
+
+
+def test_resume_receipt_reuses_notification_first_chat_fallback_route(tmp_path):
+    calls = []
+
+    def send(intent, **kwargs):
+        calls.append((intent, kwargs["app_config"]))
+        return {"ok": True, "status": "sent", "messageId": "om_receipt"}
+
+    delivery = HumanDecisionDelivery(send=send, update=lambda *args, **kwargs: {})
+    store = HumanDecisionStore(tmp_path / "state.json")
+    item = store.create(request_payload())["decision"]
+    item = store.resolve(item["id"], option_id="B", channel="local")["decision"]
+
+    result = delivery.deliver_continuation_receipt(
+        item,
+        kind="chat",
+        notification_config={"appId": "", "appSecret": ""},
+        chat_config={"appId": "chat", "appSecret": "secret"},
+        fallback_chat_id="oc_chat",
+    )
+
+    assert result == {"ok": True, "status": "sent", "messageId": "om_receipt", "application": "chat"}
+    assert calls[0][0]["audit"]["application"] == "chat"
+    assert calls[0][1] == {
+        "appId": "chat",
+        "appSecret": "secret",
+        "receiveIdType": "chat_id",
+        "receiveId": "oc_chat",
+    }
+
+
+def test_resume_receipt_adapter_reads_live_delivery_configuration(tmp_path):
+    assert hasattr(receipt_module, "HumanDecisionContinuationReceipt")
+    calls = []
+
+    class Delivery:
+        def deliver_continuation_receipt(self, decision, **options):
+            calls.append((decision["id"], options))
+            return {"ok": True, "status": "sent", "application": "notification"}
+
+    receipt = receipt_module.HumanDecisionContinuationReceipt(
+        delivery=Delivery(),
+        notification_config=lambda: {"appId": "notification", "appSecret": "secret", "receiveId": "oc_notice"},
+        chat_config=lambda: {"appId": "chat", "appSecret": "secret"},
+        fallback_chat_id=lambda: "oc_chat",
+    )
+    claim = SimpleNamespace(decision={"id": "decision-1"}, kind="task")
+
+    result = receipt.send(claim)
+
+    assert result["ok"] is True
+    assert calls == [("decision-1", {
+        "kind": "task",
+        "notification_config": {"appId": "notification", "appSecret": "secret", "receiveId": "oc_notice"},
+        "chat_config": {"appId": "chat", "appSecret": "secret"},
+        "fallback_chat_id": "oc_chat",
+    })]
