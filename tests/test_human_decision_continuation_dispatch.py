@@ -14,6 +14,15 @@ class Adapter:
         return ContinuationDispatchResult(self.outcome)
 
 
+class Receipt:
+    def __init__(self, events):
+        self.events = events
+
+    def send(self, claim):
+        self.events.append(("receipt", claim.decision_id, claim.decision["resolution"]["answer"]))
+        return {"ok": True, "status": "sent", "application": "notification"}
+
+
 def test_dispatcher_routes_each_claim_to_its_native_adapter(tmp_path):
     store = HumanDecisionStore(tmp_path / "state.json")
     chat = Adapter()
@@ -45,3 +54,68 @@ def test_dispatcher_routes_each_claim_to_its_native_adapter(tmp_path):
     assert [claim.kind for claim in chat.claims] == ["chat"]
     assert [claim.kind for claim in meeting.claims] == ["meeting"]
     assert [claim.kind for claim in task.claims] == ["task"]
+
+
+def test_successful_resume_sends_decision_result_receipt_after_dispatch(tmp_path):
+    store = HumanDecisionStore(tmp_path / "state.json")
+    decision_id = store.create(request_payload(
+        idempotencyKey="chat:receipt",
+        source={"type": "chat", "id": "conversation-1", "label": "Chat"},
+    ))["decision"]["id"]
+    store.bind_continuation(
+        decision_id,
+        kind="chat",
+        agent_id="agent-1",
+        binding={"conversationId": "conversation-1"},
+    )
+    store.resolve(decision_id, custom_answer="先灰度一周", channel="feishu")
+    store.queue_continuation(decision_id)
+    sequence = []
+
+    class OrderedAdapter:
+        def dispatch(self, claim):
+            sequence.append(("resume", claim.decision_id))
+            return ContinuationDispatchResult("dispatched")
+
+    dispatcher = HumanDecisionContinuationDispatcher(store=store, adapters={"chat": OrderedAdapter()})
+    dispatcher._receipt = Receipt(sequence)
+
+    events = dispatcher.process_due(now="2026-08-03T08:00:00+00:00")
+
+    assert sequence == [
+        ("resume", decision_id),
+        ("receipt", decision_id, "先灰度一周"),
+    ]
+    assert events == [{
+        "decisionId": decision_id,
+        "status": "completed",
+        "attempts": 1,
+        "receipt": {"ok": True, "status": "sent", "application": "notification"},
+    }]
+
+
+def test_failed_resume_does_not_claim_conversation_is_running(tmp_path):
+    store = HumanDecisionStore(tmp_path / "state.json")
+    decision_id = store.create(request_payload(
+        idempotencyKey="chat:no-false-receipt",
+        source={"type": "chat", "id": "conversation-1", "label": "Chat"},
+    ))["decision"]["id"]
+    store.bind_continuation(
+        decision_id,
+        kind="chat",
+        agent_id="agent-1",
+        binding={"conversationId": "conversation-1"},
+    )
+    store.resolve(decision_id, option_id="A", channel="local")
+    store.queue_continuation(decision_id)
+    receipts = []
+    dispatcher = HumanDecisionContinuationDispatcher(
+        store=store,
+        adapters={"chat": Adapter("failed")},
+    )
+    dispatcher._receipt = Receipt(receipts)
+
+    events = dispatcher.process_due(now="2026-08-03T08:00:00+00:00")
+
+    assert events[0]["status"] == "failed"
+    assert receipts == []

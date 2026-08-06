@@ -231,7 +231,10 @@ class VOAgentCommunicationService:
             envelope_source = bridge_source_label(source_app, source_surface, source_label)
         else:
             sender_label = agent_sender_label(from_ref)
-            envelope_source = "My Virtual Office AgentPlatform-to-AgentPlatform Communications"
+            envelope_source = (
+                "My Virtual Office cross-VO communication via "
+                "AgentPlatform-to-AgentPlatform Communications"
+            )
         if trusted_prompt is None:
             target_prompt = render_promoted_agent_platform_message_prompt(
                 promote_bridge_prompt_input(

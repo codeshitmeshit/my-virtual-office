@@ -23,7 +23,7 @@ EXPECTED_WRITERS = {
         "_handle_executable_meeting_agenda_change", "_handle_executable_meeting_arbitration",
         "_handle_executable_meeting_moderator_takeover", "_handle_executable_meeting_targeted_question",
         "_handle_executable_meeting_end_with_moderator", "_handle_executable_meeting_run",
-        "_handle_executable_meeting_reconcile",
+        "_handle_executable_meeting_reconcile", "_human_decision_bind_native",
     },
     "_save_meeting_request_store": set(),
 }
@@ -38,6 +38,7 @@ EXPECTED_READERS = {
         "_handle_executable_meeting_arbitration", "_handle_executable_meeting_moderator_takeover",
         "_handle_executable_meeting_targeted_question", "_handle_executable_meeting_end_with_moderator",
         "_handle_executable_meeting_run", "_handle_executable_meeting_reconcile",
+        "_human_decision_bind_native", "_human_decision_meeting_load",
     },
     "_load_meeting_request_store": set(),
 }

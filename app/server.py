@@ -180,6 +180,7 @@ from services.human_decision_chat_continuation import (
     HumanDecisionChatContinuation,
 )
 from services.human_decision_continuation_dispatch import HumanDecisionContinuationDispatcher
+from services.human_decision_continuation_receipt import HumanDecisionContinuationReceipt
 from services.human_decision_meeting_continuation import HumanDecisionMeetingContinuation, MeetingContinuationPorts
 from services.project_human_decision_continuation import (
     ProjectContinuationPorts,
@@ -1652,6 +1653,13 @@ def _human_decision_bind_native(decision, agent_id):
 HUMAN_DECISION_STORE = HumanDecisionStore(
     os.path.join(STATUS_DIR, "human-decisions.json")
 )
+HUMAN_DECISION_DELIVERY = HumanDecisionDelivery(status_dir=STATUS_DIR)
+HUMAN_DECISION_CONTINUATION_RECEIPT = HumanDecisionContinuationReceipt(
+    delivery=HUMAN_DECISION_DELIVERY,
+    notification_config=lambda: _feishu_app_send_config(VO_CONFIG.get("notifications", {})),
+    chat_config=_feishu_chat_app_send_config,
+    fallback_chat_id=lambda: str(_feishu_chat_app_config().get("completionReportFallbackChatId") or "").strip(),
+)
 HUMAN_DECISION_CHAT_CONTINUATION = HumanDecisionChatContinuation(
     store=HUMAN_DECISION_STORE,
     dispatch=_dispatch_human_decision_chat_continuation,
@@ -1682,6 +1690,7 @@ HUMAN_DECISION_CONTINUATION = HumanDecisionContinuationDispatcher(
         "meeting": HUMAN_DECISION_MEETING_CONTINUATION,
         "task": HUMAN_DECISION_PROJECT_CONTINUATION,
     },
+    receipt=HUMAN_DECISION_CONTINUATION_RECEIPT,
 )
 
 
@@ -1695,7 +1704,7 @@ def _kick_human_decision_chat_continuation():
 
 HUMAN_DECISION_WORKFLOW = HumanDecisionWorkflow(
     store=HUMAN_DECISION_STORE,
-    delivery=HumanDecisionDelivery(status_dir=STATUS_DIR),
+    delivery=HUMAN_DECISION_DELIVERY,
     notification_config=lambda: _feishu_app_send_config(VO_CONFIG.get("notifications", {})),
     chat_config=_feishu_chat_app_send_config,
     fallback_chat_id=lambda: str(_feishu_chat_app_config().get("completionReportFallbackChatId") or "").strip(),
@@ -14449,6 +14458,16 @@ def _feishu_channel_record_path():
 
 
 def _record_feishu_channel_event(record):
+    record = record if isinstance(record, dict) else {}
+    if (
+        str(record.get("event") or "") == "original_channel_notice"
+        and not str(record.get("conversationId") or "").strip()
+    ):
+        source_message_id = str(record.get("sourceMessageId") or "").strip()
+        request_event = _find_comm_request_by_source_message(source_message_id) if source_message_id else None
+        conversation_id = str((request_event or {}).get("conversationId") or "").strip()
+        if conversation_id:
+            record = {**record, "conversationId": conversation_id}
     item = feishu_chat_channel.record_channel_event(
         STATUS_DIR,
         record,

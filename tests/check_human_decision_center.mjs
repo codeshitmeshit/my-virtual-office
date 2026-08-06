@@ -334,6 +334,61 @@ assert.equal(interactionPanel.hidden, true, 'toolbar entry closes an open center
 interactionController.destroy();
 delete globalThis.VODialogs;
 
+const languageListeners = { ready: new Set(), changed: new Set() };
+const enLocale = JSON.parse(fs.readFileSync(path.join(here, '../app/locales/en.json'), 'utf8'));
+const zhLocale = JSON.parse(fs.readFileSync(path.join(here, '../app/locales/zh.json'), 'utf8'));
+let activeLocale = enLocale;
+let localeReady = false;
+globalThis.i18n = {
+  getLanguage() { return activeLocale === zhLocale ? 'zh' : 'en'; },
+  t(key, params = {}) {
+    if (!localeReady) return key;
+    let value = activeLocale[key] || key;
+    Object.entries(params).forEach(([name, replacement]) => {
+      value = value.replaceAll(`{{${name}}}`, String(replacement));
+    });
+    return value;
+  },
+};
+globalThis.addEventListener = (type, listener) => {
+  if (type === 'i18n:ready') languageListeners.ready.add(listener);
+  if (type === 'i18n:changed') languageListeners.changed.add(listener);
+};
+globalThis.removeEventListener = (type, listener) => {
+  if (type === 'i18n:ready') languageListeners.ready.delete(listener);
+  if (type === 'i18n:changed') languageListeners.changed.delete(listener);
+};
+
+const localizedDocument = createDocument();
+const localizedToggle = localizedDocument.createElement('button');
+const localizedPanel = localizedDocument.createElement('section');
+const localizedController = Center.mount(
+  { toggle: localizedToggle, panel: localizedPanel },
+  { revision: 20, decisions: [decision()] },
+  {},
+);
+assert.match(allText(localizedToggle), /打开人工决策/, 'uses a readable fallback while locale data is loading');
+assert.equal(languageListeners.ready.size, 1, 'subscribes to initial locale readiness');
+assert.equal(languageListeners.changed.size, 1, 'subscribes to subsequent language changes');
+
+localeReady = true;
+for (const listener of languageListeners.ready) listener({ detail: { lang: 'en' } });
+assert.match(allText(localizedToggle), /Open decisions/, 'uses the shared English locale for the entry action');
+assert.match(allText(localizedPanel), /Current situation/, 'uses the shared English locale for component chrome');
+assert.match(allText(localizedPanel), /确认上线节奏/, 'keeps backend-provided decision content in its original language');
+
+activeLocale = zhLocale;
+for (const listener of languageListeners.changed) listener({ detail: { lang: 'zh' } });
+assert.match(allText(localizedToggle), /打开人工决策/, 'rerenders the entry after a language change');
+assert.match(allText(localizedPanel), /当前情景/, 'rerenders the open component after a language change');
+
+localizedController.destroy();
+assert.equal(languageListeners.ready.size, 0, 'destroy removes the locale-readiness listener');
+assert.equal(languageListeners.changed.size, 0, 'destroy removes the language-change listener');
+delete globalThis.i18n;
+delete globalThis.addEventListener;
+delete globalThis.removeEventListener;
+
 const cssPath = path.join(here, '../app/human-decision-center.css');
 const css = fs.existsSync(cssPath) ? fs.readFileSync(cssPath, 'utf8') : '';
 assert.match(css, /\.human-decision-center\s*\{/u, 'defines the scoped center shell');
@@ -373,8 +428,9 @@ assert.match(sidebarMarkup, /⚖️ 人工决策/u, 'right control panel labels 
 assert.match(sidebarMarkup, /id="human-decision-center-toggle"/u, 'right control panel owns the production decision entry');
 assert.match(productionHtml, /id="human-decision-center-panel"/u, 'VO page owns the production modal host');
 assert.match(productionHtml, /human-decision-center\.css\?v=20260803-vo-shell/u, 'VO page invalidates cached decision styles for the new shell');
-assert.match(productionHtml, /human-decision-center\.js\?v=20260803-vo-shell/u, 'VO page invalidates cached decision component code for the new shell');
-assert.match(productionHtml, /human-decision-center-app\.js\?v=20260803-vo-shell/u, 'VO page loads the versioned production adapter');
+assert.match(productionHtml, /human-decision-center-i18n\.js\?v=20260804-i18n/u, 'VO page loads the decision translation adapter before the component');
+assert.match(productionHtml, /human-decision-center\.js\?v=20260804-i18n/u, 'VO page invalidates cached decision component code for i18n');
+assert.match(productionHtml, /human-decision-center-app\.js\?v=20260804-i18n/u, 'VO page loads the versioned production adapter');
 assert.match(productionHtml, /dashboard-realtime\.js\?v=20260803-human-decisions/u, 'VO page invalidates cached realtime code that projects decisions');
 assert.doesNotMatch(productionHtml, /human-decision-center-prototype\.js/u, 'VO page never loads the removable showcase controller');
 assert.equal(fs.existsSync(path.join(here, '../app/human-decision-center-prototype.html')), false, 'approved showcase HTML is removed');

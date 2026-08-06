@@ -41,6 +41,8 @@
     "_handle_meeting_request_detail",
     "_handle_meeting_request_reject",
     "_handle_project_execution_meeting_blocker_action",
+    "_human_decision_meeting_load",
+    "_human_decision_meeting_wake",
     "_is_meeting_domain_path",
     "_load_exec_meeting_store",
     "_load_meeting_request_store",
@@ -1106,6 +1108,26 @@
     {
       "callee": "str",
       "caller": "_handle_project_execution_meeting_blocker_action"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_human_decision_bind_native"
+    },
+    {
+      "callee": "_meeting_open_decision_window",
+      "caller": "_human_decision_bind_native"
+    },
+    {
+      "callee": "_save_exec_meeting_store",
+      "caller": "_human_decision_bind_native"
+    },
+    {
+      "callee": "_load_exec_meeting_store",
+      "caller": "_human_decision_meeting_load"
+    },
+    {
+      "callee": "_handle_executable_meeting_run",
+      "caller": "_human_decision_meeting_wake"
     },
     {
       "callee": "str",

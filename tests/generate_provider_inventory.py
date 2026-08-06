@@ -218,7 +218,9 @@ def outputs() -> dict[str, dict]:
 
 
 def encoded(value: dict) -> str:
-    return json.dumps(value, indent=2, ensure_ascii=False, sort_keys=True) + "\n"
+    # Preserve the generator's deliberate schema order so refreshing one
+    # inventory does not rewrite every unchanged artifact.
+    return json.dumps(value, indent=2, ensure_ascii=False) + "\n"
 
 
 def main() -> int:

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from .human_decision_continuation_receipt import build_continuation_receipt_intent
+
 try:  # server.py executes with app/ on sys.path; package tests import app.*
     from feishu_notifications import send_feishu_notification, update_feishu_notification
 except ModuleNotFoundError:  # pragma: no cover - exercised by package-style tests
@@ -135,9 +137,9 @@ class HumanDecisionDelivery:
         self._update = update
         self._status_dir = status_dir
 
-    def deliver(
+    def _deliver_intent(
         self,
-        decision: JsonDict,
+        intent: JsonDict,
         *,
         notification_config: JsonDict,
         chat_config: JsonDict,
@@ -158,13 +160,46 @@ class HumanDecisionDelivery:
         else:
             return {"ok": False, "status": "missing_app_config", "application": ""}
 
+        routed_intent = {**intent, "audit": {**dict(intent.get("audit") or {}), "application": application}}
         result = self._send(
-            build_decision_intent(decision, application=application),
+            routed_intent,
             app_config=app_config,
             status_dir=self._status_dir,
             allow_webhook=False,
         )
         return {**dict(result or {}), "application": application}
+
+    def deliver(
+        self,
+        decision: JsonDict,
+        *,
+        notification_config: JsonDict,
+        chat_config: JsonDict,
+        fallback_chat_id: str,
+    ) -> JsonDict:
+        application = "notification" if _configured(notification_config) else "chat"
+        return self._deliver_intent(
+            build_decision_intent(decision, application=application),
+            notification_config=notification_config,
+            chat_config=chat_config,
+            fallback_chat_id=fallback_chat_id,
+        )
+
+    def deliver_continuation_receipt(
+        self,
+        decision: JsonDict,
+        *,
+        kind: str,
+        notification_config: JsonDict,
+        chat_config: JsonDict,
+        fallback_chat_id: str,
+    ) -> JsonDict:
+        return self._deliver_intent(
+            build_continuation_receipt_intent(decision, kind=kind),
+            notification_config=notification_config,
+            chat_config=chat_config,
+            fallback_chat_id=fallback_chat_id,
+        )
 
     def update_terminal(
         self,
