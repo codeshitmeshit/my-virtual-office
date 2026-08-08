@@ -106,3 +106,59 @@
 - [ ] **Step 4: Capture screenshots for the cover, icons/actions, destructive actions, composition, adoption checklist, and full page.**
 - [ ] **Step 5: Visually inspect screenshots for clipping, overflow, inconsistent alignment, incorrect icon meaning, and missing states.**
 - [ ] **Step 6: Return direct Figma links and summarize the authoritative visual and interaction decisions.**
+
+### Task 6: Dialog and overlay standard
+
+**Figma objects:**
+- Create frame: `07 · Dialogs & Overlays`
+- Create examples: Alert Dialog, Confirm Dialog, Destructive Confirm, Form Modal, Large Workflow Modal, and Drawer.
+- Reuse component: `VO Reference/Modal Shell` (`360:378`).
+
+**Interfaces:**
+- Consumes: existing modal shell, global buttons, icon assets, state model, and destructive-action levels.
+- Produces: a selection matrix and behavioral contract for all blocking and contextual overlays.
+
+- [ ] **Step 1: Create the section skeleton after `06 · Adoption Checklist`, using the existing section surface, border, radius, spacing, and typography.**
+- [ ] **Step 2: Add a six-type selection matrix describing purpose, blocking behavior, typical content, and prohibited uses.**
+- [ ] **Step 3: Add size and anatomy guidance for title, description, Close, content scroll region, and persistent footer actions.**
+- [ ] **Step 4: Add Clean, Dirty, Validating, Saving, Success, and Error examples for form-based modals.**
+- [ ] **Step 5: Document backdrop, Escape, Close, Cancel, focus entry, focus trap, focus return, and mobile fallback rules.**
+- [ ] **Step 6: Add correct/incorrect examples that prevent using dialogs for transient feedback or drawers for blocking destructive confirmation.**
+- [ ] **Step 7: Validate structure and capture the section screenshot.**
+
+### Task 7: Notification and feedback standard
+
+**Figma objects:**
+- Create frame: `08 · Notifications & Feedback`
+- Create reusable examples: Toast, Persistent Toast, Inline Alert, Banner, Notification Item, and Badge / Dot.
+
+**Interfaces:**
+- Consumes: success, info, warning, danger, surface, border, spacing, radius, and icon variables/components.
+- Produces: a selection matrix, semantic variants, duration rules, stacking behavior, and accessibility guidance.
+
+- [ ] **Step 1: Create the section skeleton after `07 · Dialogs & Overlays`.**
+- [ ] **Step 2: Add a six-type selection matrix describing scope, persistence, actions, and history behavior.**
+- [ ] **Step 3: Create Success, Info, Warning, and Error visual examples with icon, title, description, action, and Close where allowed.**
+- [ ] **Step 4: Document auto-dismiss, persistent-message, Hover pause, manual Close, retry, and state-retention rules.**
+- [ ] **Step 5: Document screen position, maximum width, stack direction, maximum stack count, newest-message order, and duplicate-message coalescing.**
+- [ ] **Step 6: Add accessibility announcement levels and the prohibition on secrets or irreversible confirmation inside notifications.**
+- [ ] **Step 7: Add correct/incorrect examples distinguishing Toast, Inline Alert, Banner, Notification Item, and Badge.**
+- [ ] **Step 8: Validate structure and capture the section screenshot.**
+
+### Task 8: Dialog and notification integration QA
+
+**Figma objects:**
+- Validate page: `356:240`
+- Validate root: `356:241`
+- Validate new sections: `07 · Dialogs & Overlays` and `08 · Notifications & Feedback`.
+
+**Interfaces:**
+- Consumes: completed Tasks 6 and 7.
+- Produces: final page order, direct node links, and review screenshots.
+
+- [ ] **Step 1: Confirm the standard page remains at page index `0` and the new sections appear after Adoption Checklist.**
+- [ ] **Step 2: Audit empty text, placeholder nodes, default names, duplicate top-level names, and fonts.**
+- [ ] **Step 3: Audit new solid fills and strokes for semantic-variable bindings where the reusable standard requires them.**
+- [ ] **Step 4: Capture fresh screenshots of both new sections and the complete standard page.**
+- [ ] **Step 5: Visually inspect selection matrices, modal examples, notification hierarchy, text contrast, clipping, and overflow.**
+- [ ] **Step 6: Confirm the task changed no frontend implementation files and return direct Figma links.**
