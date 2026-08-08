@@ -6,6 +6,7 @@ import copy
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, MutableMapping
 
+from .meeting_human_decision_projection import build_event_payload
 from .meeting_priority_policy import coerce_moderator_outcome_for_priority
 
 
@@ -941,7 +942,7 @@ def transition_command(
             meeting,
             "human_decision_resolved",
             actor=actor,
-            payload={"decisionId": decision_id, "answer": meeting["humanDecisionResolution"]},
+            payload=build_event_payload(meeting, body),
             idempotency_key=idempotency_key,
         )
         hooks.continue_decision(data, meeting, actor=actor, reason=body.get("reason") or "user_continue")

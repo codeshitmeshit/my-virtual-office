@@ -59,17 +59,63 @@ context.window = context;
 
 vm.createContext(context);
 vm.runInContext(
+    fs.readFileSync('app/meeting-human-decision-ui.js', 'utf8'),
+    context,
+    { filename: 'app/meeting-human-decision-ui.js' }
+);
+vm.runInContext(
     fs.readFileSync('app/meeting-center.js', 'utf8'),
     context,
     { filename: 'app/meeting-center.js' }
 );
 
 const history = [
-    { id: 'meeting-a', topic: '第一场会议', status: 'completed', participants: ['a'], context: '启动资料：先看项目背景。' },
+    {
+        id: 'meeting-a',
+        topic: '第一场会议',
+        status: 'completed',
+        participants: ['a'],
+        context: '启动资料：先看项目背景。',
+        transcript: [{
+            type: 'human_decision_resolved',
+            sequence: 3,
+            stage: 'active_discussion',
+            round: 1,
+            decisionId: 'decision-history-1',
+            title: '确认历史会议保留周期',
+            answer: '14 天',
+            actorType: 'user',
+            speaker: 'human-decision-center'
+        }]
+    },
     { id: 'meeting-b', topic: '第二场会议', status: 'cancelled', participants: ['b'] }
 ];
 const active = [
-    { id: 'meeting-live', topic: '进行中会议', status: 'active', participants: ['a', 'b'], context: '实时会议原始上下文', currentRound: 1, maxRounds: 2 }
+    {
+        id: 'meeting-live',
+        topic: '进行中会议',
+        status: 'active',
+        participants: ['a', 'b'],
+        context: '实时会议原始上下文',
+        currentRound: 1,
+        maxRounds: 2,
+        transcript: [
+            {
+                type: 'human_decision_resolved',
+                sequence: 1,
+                stage: 'active_opening',
+                round: 1,
+                decisionId: 'decision-live-1',
+                title: '选择企业导出文件保留周期',
+                answer: '14 天',
+                customAnswer: '',
+                actorType: 'user',
+                speaker: 'human-decision-center',
+                createdAt: '2026-08-08T17:00:00+08:00'
+            },
+            { speaker: 'a', round: 1, sequence: 2, position: '先核对会议约束。' }
+        ]
+    }
 ];
 const requests = [
     { id: 'request-a', status: 'pending', proposal: { topic: '第一条申请' } },
@@ -114,9 +160,11 @@ assert.match(elements['meeting-center-main'].innerHTML, /原始上下文/);
 assert.match(elements['meeting-center-main'].innerHTML, /启动资料：先看项目背景。/);
 assert.ok(
     elements['meeting-center-main'].innerHTML.indexOf('启动资料：先看项目背景。') <
-    elements['meeting-center-main'].innerHTML.indexOf('data-transcript="meeting-a"')
+    elements['meeting-center-main'].innerHTML.indexOf('meeting-center-record-transcript')
 );
-assert.match(elements['meeting-center-main'].innerHTML, /data-transcript="meeting-a"/);
+assert.match(elements['meeting-center-main'].innerHTML, /meeting-center-record-transcript/);
+assert.match(elements['meeting-center-main'].innerHTML, /data-decision-id="decision-history-1"/);
+assert.match(elements['meeting-center-main'].innerHTML, /确认历史会议保留周期/);
 assert.doesNotMatch(elements['meeting-center-main'].innerHTML, /data-meeting=/);
 assert.match(elements['meeting-center-controls'].innerHTML, /第一场会议/);
 assert.match(elements['meeting-center-controls'].innerHTML, /data-meeting="meeting-a"/);
@@ -127,7 +175,7 @@ assert.strictEqual(renderCount, 1);
 assert.match(elements['meeting-center-list'].innerHTML, /meeting-center-item is-selected[^>]+meeting-b/);
 assert.match(elements['meeting-center-main'].innerHTML, /第二场会议/);
 assert.match(elements['meeting-center-main'].innerHTML, /原始上下文为空/);
-assert.match(elements['meeting-center-main'].innerHTML, /data-transcript="meeting-b"/);
+assert.match(elements['meeting-center-main'].innerHTML, /meeting-center-record-transcript/);
 assert.doesNotMatch(elements['meeting-center-main'].innerHTML, /data-meeting=/);
 assert.match(elements['meeting-center-controls'].innerHTML, /第二场会议/);
 assert.match(elements['meeting-center-controls'].innerHTML, /data-meeting="meeting-b"/);
@@ -154,5 +202,11 @@ assert.ok(
     elements['meeting-center-main'].innerHTML.indexOf('实时会议原始上下文') <
     elements['meeting-center-main'].innerHTML.indexOf('meeting-center-timeline')
 );
+assert.match(elements['meeting-center-main'].innerHTML, /data-decision-id="decision-live-1"/);
+assert.match(elements['meeting-center-main'].innerHTML, /人工决策/);
+assert.match(elements['meeting-center-main'].innerHTML, /选择企业导出文件保留周期/);
+assert.match(elements['meeting-center-main'].innerHTML, /最终结果/);
+assert.match(elements['meeting-center-main'].innerHTML, /14 天/);
+assert.match(elements['meeting-center-main'].innerHTML, /查看决策详情/);
 
 console.log('meeting center runtime interaction tests passed');

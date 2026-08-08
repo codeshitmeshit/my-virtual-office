@@ -45,7 +45,8 @@ def test_legacy_controller_explicitly_delegates_to_meeting_center():
 def test_history_record_splits_transcript_from_aside_detail():
     assert "meeting-center-record-header" in SCRIPT
     assert "record.topic" in SCRIPT
-    assert "runtime.renderMeetingTranscript(record)" in SCRIPT
+    assert "renderRecordTranscript(record)" in SCRIPT
+    assert "renderRoundGroups(liveRows(record))" in SCRIPT
     assert "runtime.renderMeetingDetail(record, { includeTranscript: false })" in SCRIPT
     assert "openMeetingDetailModal(" not in SCRIPT
     assert "openMeetingRequestDetailModal(" in SCRIPT

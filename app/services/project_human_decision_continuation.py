@@ -7,6 +7,7 @@ from typing import Any, Callable, Protocol
 
 from .human_decision_chat_continuation import ContinuationDispatchResult
 from .human_decisions import HumanDecisionContinuationClaim
+from .project_human_decision_comment import ensure_decision_comment
 from .project_repository import ProjectNotFoundError
 
 
@@ -19,6 +20,7 @@ class ProjectRepositoryPort(Protocol):
 class ProjectContinuationPorts:
     repository: ProjectRepositoryPort
     now: Callable[[], str]
+    new_id: Callable[[], str]
     launch_direct: Callable[[str, str, str], bool]
     submit_stage: Callable[[str, str, str, str], bool]
 
@@ -125,6 +127,13 @@ class ProjectHumanDecisionContinuation:
             task["executionState"] = "executing"
             task["updatedAt"] = self._ports.now()
             project["updatedAt"] = self._ports.now()
+            ensure_decision_comment(
+                task,
+                claim.decision,
+                decision_id=claim.decision_id,
+                new_id=self._ports.new_id,
+                now=self._ports.now,
+            )
             prepared.update(ok=True, idempotent=False, mode="stage" if attempt.get("stageRunId") else "direct")
 
         try:

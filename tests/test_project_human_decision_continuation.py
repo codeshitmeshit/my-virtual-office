@@ -50,8 +50,9 @@ def claim():
         decision={
             "id": "decision-1",
             "source": {"type": "task", "id": "task-a", "projectId": "project-1", "label": "A"},
+            "title": "Confirm rollout",
             "situation": "Choose rollout",
-            "resolution": {"answer": "Staged rollout"},
+            "resolution": {"answer": "Staged rollout", "optionId": "B"},
         },
     )
 
@@ -82,6 +83,7 @@ def test_stage_resume_submits_only_bound_task_and_keeps_sibling_running():
     adapter = ProjectHumanDecisionContinuation(ports=ProjectContinuationPorts(
         repository=repo,
         now=lambda: "resume-at",
+        new_id=lambda: "comment-1",
         launch_direct=lambda project_id, task_id, attempt_id: submitted.append({
             "mode": "direct", "projectId": project_id, "taskId": task_id, "attemptId": attempt_id,
         }) or True,
@@ -103,6 +105,17 @@ def test_stage_resume_submits_only_bound_task_and_keeps_sibling_running():
     assert resumed["status"] == "executing"
     assert resumed["decisionResume"]["answer"] == "Staged rollout"
     assert "runnerClaimedAt" not in resumed
+    assert saved["tasks"][0]["comments"] == [{
+        "id": "comment-1",
+        "kind": "human_decision",
+        "author": "human_decision",
+        "text": "Confirm rollout: Staged rollout",
+        "createdAt": "resume-at",
+        "decisionId": "decision-1",
+        "decisionTitle": "Confirm rollout",
+        "decisionAnswer": "Staged rollout",
+        "customAnswer": "",
+    }]
     assert saved["tasks"][1]["attempts"][0]["status"] == "executing"
 
 
@@ -114,7 +127,7 @@ def test_replaced_attempt_is_not_resumed():
     )
     repo.update("project-1", lambda project: project["tasks"][0].update({"activeAttemptId": "replacement"}))
     adapter = ProjectHumanDecisionContinuation(ports=ProjectContinuationPorts(
-        repository=repo, now=lambda: "resume-at",
+        repository=repo, now=lambda: "resume-at", new_id=lambda: "comment-1",
         launch_direct=lambda *args: True, submit_stage=lambda *args: True,
     ))
 
@@ -129,7 +142,7 @@ def test_rejected_submission_restores_waiting_state_for_safe_retry():
     )
     accepted = [False, True]
     adapter = ProjectHumanDecisionContinuation(ports=ProjectContinuationPorts(
-        repository=repo, now=lambda: "resume-at", launch_direct=lambda *args: True,
+        repository=repo, now=lambda: "resume-at", new_id=lambda: "comment-1", launch_direct=lambda *args: True,
         submit_stage=lambda *args: accepted.pop(0),
     ))
 
@@ -140,3 +153,6 @@ def test_rejected_submission_restores_waiting_state_for_safe_retry():
     assert first == ContinuationDispatchResult("not_dispatched_retryable", "project_dispatch_rejected")
     assert waiting["status"] == "awaiting_user_decision"
     assert second == ContinuationDispatchResult("dispatched")
+    saved_comments = repo.get("project-1")["tasks"][0]["comments"]
+    assert len(saved_comments) == 1
+    assert saved_comments[0]["decisionId"] == "decision-1"

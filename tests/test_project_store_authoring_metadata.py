@@ -200,3 +200,29 @@ def test_external_root_metadata_edit_invalidates_repository_cache(tmp_path):
     assert repository.load_all()["projectRecurrences"] == {
         "recurrence-2": {"state": "paused"},
     }
+
+
+def test_human_decision_comment_metadata_round_trips_through_markdown_store(tmp_path):
+    comment = {
+        "id": "comment-1",
+        "kind": "human_decision",
+        "author": "human_decision",
+        "text": "确认发布策略：分阶段发布",
+        "createdAt": "2026-08-08T17:00:00+08:00",
+        "decisionId": "decision-1",
+        "decisionTitle": "确认发布策略",
+        "decisionAnswer": "分阶段发布",
+        "customAnswer": "",
+    }
+    task = {
+        "id": "task-1",
+        "title": "发布官网",
+        "columnId": "todo",
+        "comments": [comment],
+    }
+    store = MarkdownProjectStore(str(tmp_path))
+
+    store.save_all({"projects": [_project(tasks=[task])], "templates": []})
+    loaded = MarkdownProjectStore(str(tmp_path)).load_all()
+
+    assert loaded["projects"][0]["tasks"][0]["comments"] == [comment]

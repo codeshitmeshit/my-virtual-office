@@ -5794,3 +5794,44 @@ button:active { transform: translateY(3px); box-shadow: none; }
     background: #ff8c42;
     box-shadow: 0 0 10px rgba(255, 140, 66, 0.65);
 }
+.mtg-turn-human-decision {
+    border-color: rgba(255, 215, 0, 0.45);
+    background: rgba(255, 215, 0, 0.07);
+}
+
+.mtg-human-decision-title {
+    margin: 8px 0 6px;
+    color: #f4d35e;
+    font-weight: 700;
+}
+
+.mtg-human-decision-detail {
+    margin-top: 10px;
+    border: 1px solid rgba(255, 215, 0, 0.45);
+    border-radius: 6px;
+    padding: 5px 9px;
+    color: #f4d35e;
+    background: transparent;
+    cursor: pointer;
+}
+
+.proj-comment-human-decision {
+    border-left: 3px solid rgba(255, 215, 0, 0.75);
+    background: rgba(255, 215, 0, 0.07);
+}
+
+.proj-human-decision-title {
+    margin: 6px 0;
+    color: #f4d35e;
+    font-weight: 700;
+}
+
+.proj-human-decision-detail {
+    margin-top: 8px;
+    border: 1px solid rgba(255, 215, 0, 0.45);
+    border-radius: 6px;
+    padding: 5px 9px;
+    color: #f4d35e;
+    background: transparent;
+    cursor: pointer;
+}

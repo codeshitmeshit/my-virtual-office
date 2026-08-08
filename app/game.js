@@ -18491,6 +18491,12 @@ function _mtgApplyLiveEvent(meetingId, event) {
             state.turnBySeq[arbitration.sequence] = true;
             state.transcript.push(arbitration);
         }
+    } else if (event.type === 'human_decision_resolved' && typeof MeetingHumanDecisionUI !== 'undefined') {
+        var decisionTurn = MeetingHumanDecisionUI.turnFromEvent(event);
+        if (decisionTurn && decisionTurn.sequence && !state.turnBySeq[decisionTurn.sequence]) {
+            state.turnBySeq[decisionTurn.sequence] = true;
+            state.transcript.push(decisionTurn);
+        }
     }
     _mtgLiveEvents[meetingId] = state;
 }
@@ -18597,6 +18603,14 @@ function _mtgRenderTranscript(m) {
         html += '<div class="mtg-round">';
         html += '<div class="mtg-round-title">' + _escMtg(group.label) + '</div>';
         group.turns.forEach(function(turn) {
+            if (turn.type === 'human_decision_resolved' && typeof MeetingHumanDecisionUI !== 'undefined') {
+                html += MeetingHumanDecisionUI.render(turn, {
+                    t: _mtgT,
+                    escape: _escMtg,
+                    formatTime: function(value) { return value ? new Date(value).toLocaleString() : ''; }
+                });
+                return;
+            }
             var isTargetedQuestion = turn.type === 'targeted_question';
             var isTargetedResponse = turn.kind === 'targeted_response';
             var isTargetedPending = turn.pending && turn.purpose === 'targeted_response';

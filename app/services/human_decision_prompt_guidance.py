@@ -21,11 +21,66 @@ def human_decision_guidance(source_type: str) -> str:
     )
 
 
-def human_decision_section(source_type: str) -> dict[str, Any]:
+def human_decision_section(
+    source_type: str,
+    *,
+    agent_id: str = "",
+    source_id: str = "",
+    project_id: str = "",
+) -> dict[str, Any]:
+    source = str(source_type or "task").strip().lower()
+    if source not in {"chat", "meeting", "task"}:
+        source = "task"
+    source_contract: dict[str, str] = {
+        "type": source,
+        "id": str(source_id or "").strip(),
+    }
+    if source == "task":
+        source_contract["projectId"] = str(project_id or "").strip()
     return {
         "name": "human_decision_escalation",
-        "value": human_decision_guidance(source_type),
-        "trusted": True,
+        "children": [
+            {
+                "name": "threshold",
+                "value": human_decision_guidance(source),
+                "trusted": True,
+            },
+            {
+                "name": "skill",
+                "attrs": {"path": "/skills/vo-human-decision/SKILL.md"},
+                "value": (
+                    "Read this skill from the local VO service and follow its complete request contract. "
+                    "Do not substitute a normal chat question."
+                ),
+                "trusted": True,
+            },
+            {
+                "name": "create_request",
+                "trusted": True,
+                "children": [
+                    {"name": "method", "value": "POST", "trusted": True},
+                    {"name": "path", "value": "/api/agent/human-decisions", "trusted": True},
+                    {
+                        "name": "required_headers",
+                        "format": "json",
+                        "value": {
+                            "Content-Type": "application/json",
+                            "X-VO-Agent-Action": "human-decision",
+                            "X-VO-Agent-Id": str(agent_id or "").strip(),
+                        },
+                    },
+                    {"name": "required_source", "format": "json", "value": source_contract},
+                ],
+            },
+            {
+                "name": "after_create",
+                "value": (
+                    "End the affected turn after the request is created; do not return a normal completion result "
+                    "and do not continue the blocked branch. The VO backend will resume this exact execution after resolution."
+                ),
+                "trusted": True,
+            },
+        ],
     }
 
 

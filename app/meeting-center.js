@@ -227,7 +227,30 @@
         return datePart + ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes());
     }
 
+    function meetingDecisionText(key, fallback) {
+        if (typeof window._mtgT === 'function') return window._mtgT(key, fallback);
+        if (window.i18n && typeof window.i18n.t === 'function') {
+            var translated = window.i18n.t(key);
+            if (translated && translated !== key) return translated;
+        }
+        var zh = {
+            meeting_human_decision: '人工决策',
+            human_decision_resolved: '决策已处理',
+            meeting_human_decision_result: '最终结果',
+            meeting_human_decision_custom: '自定义补充',
+            meeting_human_decision_view_detail: '查看决策详情'
+        };
+        return isZh() && zh[key] ? zh[key] : fallback;
+    }
+
     function renderTurn(turn, index) {
+        if (turn.type === 'human_decision_resolved' && window.MeetingHumanDecisionUI && typeof window.MeetingHumanDecisionUI.renderMeetingCenter === 'function') {
+            return window.MeetingHumanDecisionUI.renderMeetingCenter(turn, {
+                t: meetingDecisionText,
+                escape: esc,
+                formatTime: function(value) { return turnTime({ createdAt: value }); }
+            });
+        }
         var isUserTurn = turn.actorType === 'user' || turn.type === 'user_intervention' || String(turn.speaker || '').toLowerCase() === 'user';
         var info = isUserTurn
             ? { emoji: '👻', name: text('用户', 'User') }
@@ -307,6 +330,13 @@
                 turns.map(renderTurn).join('') +
                 '</section>';
         }).join('') + '</div>';
+    }
+
+    function renderRecordTranscript(record) {
+        return '<section class="meeting-center-record-transcript">' +
+            '<h4 class="meeting-center-record-transcript-title">' + esc(text('逐轮发言', 'Round transcript')) + '</h4>' +
+            renderRoundGroups(liveRows(record)) +
+            '</section>';
     }
 
     function renderArbitrationControls(meeting) {
@@ -602,7 +632,7 @@
             '<span class="meeting-center-round">' + esc(meetingStage(record)) + '</span>' +
             '</div>' +
             renderOriginalContext(record) +
-            runtime.renderMeetingTranscript(record);
+            renderRecordTranscript(record);
         renderRecordControls(record);
     }
 

@@ -75,6 +75,7 @@ from services import project_authoring_observability as project_authoring_observ
 from services import project_reset as project_reset_service
 from services import meeting_repository as meeting_repository_service
 from services import meeting_lifecycle as meeting_lifecycle_service
+from services import meeting_human_decision_projection as meeting_human_decision_projection_service
 from services import meeting_requests as meeting_requests_service
 from services import meeting_action_items as meeting_action_items_service
 from services import meeting_notifications as meeting_notifications_service
@@ -1754,6 +1755,7 @@ HUMAN_DECISION_PROJECT_CONTINUATION = ProjectHumanDecisionContinuation(
     ports=ProjectContinuationPorts(
         repository=_HUMAN_DECISION_PROJECT_REPOSITORY_PORT,
         now=lambda: _proj_now(),
+        new_id=lambda: str(uuid.uuid4()),
         launch_direct=_human_decision_project_launch_direct,
         submit_stage=_human_decision_project_submit_stage,
     )
@@ -16916,6 +16918,10 @@ def _exec_meeting_transcript_projection(events):
                 "providerRef": {},
                 "createdAt": event.get("createdAt") or "",
             })
+        elif event.get("type") == meeting_human_decision_projection_service.EVENT_TYPE:
+            projected = meeting_human_decision_projection_service.project_transcript_event(event)
+            if projected is not None:
+                transcript.append(projected)
     return transcript
 
 
@@ -17387,6 +17393,10 @@ def _meeting_events_text(events):
             lines.append(f"- seq {event.get('sequence')} user changed agenda to: {payload.get('agenda') or ''}{reason}")
         elif event.get("type") == "arbitration_decision":
             lines.append(f"- seq {event.get('sequence')} user arbitration {payload.get('action')}: {payload.get('decision') or ''} {payload.get('rationale') or ''}".strip())
+        elif event.get("type") == meeting_human_decision_projection_service.EVENT_TYPE:
+            projected = meeting_human_decision_projection_service.format_agent_history_event(event)
+            if projected:
+                lines.append(f"- seq {event.get('sequence')} {projected}")
     return "\n".join(lines)
 
 

@@ -300,6 +300,17 @@
     gap: 12px;
 }
 
+.meeting-center-record-transcript {
+    margin-top: 14px;
+}
+
+.meeting-center-record-transcript-title {
+    margin: 0 0 9px;
+    color: #ffd700;
+    font-size: 8px;
+    line-height: 1.5;
+}
+
 .meeting-center-round-card {
     display: grid;
     gap: 0;
@@ -396,6 +407,35 @@
 
 .meeting-center-turn.is-user {
     background: rgba(82, 183, 136, 0.06);
+}
+
+.meeting-center-turn.is-human-decision {
+    border-left: 3px solid rgba(255, 215, 0, 0.78);
+    background: rgba(255, 215, 0, 0.07);
+}
+
+.meeting-center-human-decision-title {
+    margin-bottom: 7px;
+    color: #f4d35e;
+    font-size: 7px;
+    font-weight: 700;
+    line-height: 1.5;
+}
+
+.meeting-center-human-decision-custom {
+    margin-top: 5px;
+}
+
+.meeting-center-human-decision-detail {
+    margin-top: 9px;
+    border: 1px solid rgba(255, 215, 0, 0.45);
+    border-radius: 4px;
+    padding: 5px 8px;
+    color: #f4d35e;
+    background: transparent;
+    font: inherit;
+    font-size: 6px;
+    cursor: pointer;
 }
 
 .meeting-center-position {

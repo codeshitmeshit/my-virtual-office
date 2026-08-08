@@ -2385,14 +2385,17 @@
                 </div>
                 <div class="proj-comments-list" id="detail-comments">
                     ${comments.length === 0 ? `<div style="font-size:11px;color:#555">${_t('proj_no_comments')}</div>` : ''}
-                    ${visibleComments.map(c => `
+                    ${visibleComments.map(c => (
+                        typeof ProjectHumanDecisionCommentUI !== 'undefined' && ProjectHumanDecisionCommentUI.isDecisionComment(c)
+                            ? ProjectHumanDecisionCommentUI.render(c, { t: _t, escape: escHtml, timeAgo: timeAgo })
+                            : `
                     <div class="proj-comment">
                         <div class="proj-comment-header">
                             <span class="proj-comment-author">${escHtml(c.author)}</span>
                             <span class="proj-comment-time">${timeAgo(c.createdAt)}</span>
                         </div>
                         <div class="proj-comment-text">${simpleMarkdown(c.text)}</div>
-                    </div>`).join('')}
+                    </div>`)).join('')}
                 </div>
                 <textarea class="proj-detail-textarea" id="detail-comment-input" rows="2" placeholder="${_t('proj_add_comment_placeholder')}"></textarea>
                 <div style="text-align:right;margin-top:4px">

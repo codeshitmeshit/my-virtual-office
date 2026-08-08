@@ -39,7 +39,12 @@ def render_project_execution_prompt(
         {"name": "role", "value": "You are the execution agent for a Virtual Office project task.", "trusted": True},
         {"name": "workspace", "value": workspace},
         {"name": "boundary", "value": "Work only inside this workspace. Do not review or mark the task complete.", "trusted": True},
-        human_decision_section("task"),
+        human_decision_section(
+            "task",
+            agent_id=str((attempt.get("executor") or {}).get("id") or task.get("executorAgentId") or ""),
+            source_id=str(task_id),
+            project_id=str(project_id),
+        ),
         {
             "name": "workflow",
             "trusted": True,
@@ -118,6 +123,11 @@ def render_project_execution_prompt(
                     "name": "task",
                     "value": task.get("description", ""),
                     "attrs": {"id": task_id, "title": task.get("title", ""), "attempt": attempt.get("id", "")},
+                },
+                {
+                    "name": "task_comments",
+                    "format": "json",
+                    "value": task.get("comments") if isinstance(task.get("comments"), list) else [],
                 },
                 {"name": "rework_feedback", "value": rework_feedback},
                 {"name": "checklist", "value": checklist_text},

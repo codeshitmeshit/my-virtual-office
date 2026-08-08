@@ -121,7 +121,12 @@ def render_workflow_task_prompt(
 ) -> str:
     sections: list[dict[str, Any]] = [
         {"name": "assignment", "value": "Complete the assigned task fully on your own. Do NOT ask for clarification, followups, or user input.", "trusted": True},
-        human_decision_section("task"),
+        human_decision_section(
+            "task",
+            agent_id=str(task.get("executorAgentId") or task.get("assignee") or ""),
+            source_id=str(task.get("id") or ""),
+            project_id=str((project or {}).get("id") or ""),
+        ),
     ]
     project_context = _project_context_section(project, task)
     if project_context:

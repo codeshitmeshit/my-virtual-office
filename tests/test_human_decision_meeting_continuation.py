@@ -17,8 +17,9 @@ def claim(decision_id="decision-1"):
         decision={
             "id": decision_id,
             "source": {"type": "meeting", "id": "meeting-1", "label": "Review"},
+            "title": "Confirm rollout",
             "situation": "Choose rollout",
-            "resolution": {"answer": "Approve staged rollout"},
+            "resolution": {"answer": "Approve staged rollout", "optionId": "B"},
         },
     )
 
@@ -44,6 +45,8 @@ def test_awaiting_meeting_transitions_and_wakes_once():
     assert result == ContinuationDispatchResult("dispatched")
     assert transitions[0]["action"] == "continue_decision"
     assert transitions[0]["decision"] == "Approve staged rollout"
+    assert transitions[0]["decisionTitle"] == "Confirm rollout"
+    assert transitions[0]["customAnswer"] == ""
     assert transitions[0]["idempotencyKey"] == "human-decision-resume:decision-1"
     assert wakes[0][0] == "meeting-1"
     assert "Approve staged rollout" in wakes[0][1]

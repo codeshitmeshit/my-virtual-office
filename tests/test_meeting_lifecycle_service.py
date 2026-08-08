@@ -116,6 +116,8 @@ def test_continue_decision_persists_answer_and_idempotency_before_native_resume(
     value = {
         **meeting(stage="awaiting_user_decision", version=2),
         "humanDecisionId": "decision-1",
+        "decisionForStage": "active_discussion",
+        "decisionForRound": 2,
         "decisionNextStage": "active_discussion",
     }
     data = {"meetings": {"m1": value}, "events": {"m1": []}, "occupancy": {}, "idempotency": {}}
@@ -139,6 +141,8 @@ def test_continue_decision_persists_answer_and_idempotency_before_native_resume(
         "action": "continue_decision",
         "decisionId": "decision-1",
         "decision": "Staged rollout",
+        "decisionTitle": "Confirm rollout",
+        "customAnswer": "Enterprise tenants may extend to 14 days",
         "idempotencyKey": "human-decision-resume:decision-1",
     }
 
@@ -148,6 +152,16 @@ def test_continue_decision_persists_answer_and_idempotency_before_native_resume(
     assert first["ok"] is True
     assert value["humanDecisionResumeKey"] == "human-decision-resume:decision-1"
     assert value["humanDecisionResolution"] == "Staged rollout"
+    resolved_events = [event for event in data["events"]["m1"] if event["type"] == "human_decision_resolved"]
+    assert len(resolved_events) == 1
+    assert resolved_events[0]["payload"] == {
+        "decisionId": "decision-1",
+        "title": "Confirm rollout",
+        "answer": "Staged rollout",
+        "customAnswer": "Enterprise tenants may extend to 14 days",
+        "stage": "active_discussion",
+        "round": 2,
+    }
     assert second["idempotent"] is True
 
 

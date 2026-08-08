@@ -1742,6 +1742,34 @@ def test_phase3_structured_provider_output_is_saved_without_raw_envelope_in_tran
             restore_meeting_store(old)
 
 
+def test_resolved_human_decision_is_projected_and_available_to_later_agents():
+    event = {
+        "type": "human_decision_resolved",
+        "sequence": 8,
+        "createdAt": "2026-08-08T17:00:00+08:00",
+        "actor": {"type": "user", "id": "human-decision-center"},
+        "payload": {
+            "decisionId": "decision-1",
+            "title": "确认保留期",
+            "answer": "默认保留 7 天",
+            "customAnswer": "",
+            "stage": "active_discussion",
+            "round": 2,
+        },
+    }
+
+    transcript = server._exec_meeting_transcript_projection([event])
+    history = server._meeting_events_text([event])
+
+    assert transcript[0]["type"] == "human_decision_resolved"
+    assert transcript[0]["decisionId"] == "decision-1"
+    assert transcript[0]["stage"] == "active_discussion"
+    assert transcript[0]["round"] == 2
+    assert "确认保留期" in history
+    assert "默认保留 7 天" in history
+    assert "do not request another decision for the same issue" in history
+
+
 def test_phase3_executable_end_uses_moderator_summary_without_manual_summary():
     with tempfile.TemporaryDirectory() as status_dir:
         old = with_meeting_store(status_dir)

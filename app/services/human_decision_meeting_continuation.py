@@ -77,11 +77,14 @@ class HumanDecisionMeetingContinuation:
         if meeting.get("stage") != "awaiting_user_decision" or str(meeting.get("humanDecisionId") or "") != claim.decision_id:
             return ContinuationDispatchResult("failed", "meeting_not_resumable")
         resolution = claim.decision.get("resolution") if isinstance(claim.decision.get("resolution"), dict) else {}
+        answer = str(resolution.get("answer") or "")
         try:
             transitioned = self._ports.transition(meeting_id, {
                 "action": "continue_decision",
                 "reason": f"Human decision {claim.decision_id} resolved",
-                "decision": str(resolution.get("answer") or ""),
+                "decision": answer,
+                "decisionTitle": str(claim.decision.get("title") or ""),
+                "customAnswer": answer if not resolution.get("optionId") else "",
                 "decisionId": claim.decision_id,
                 "idempotencyKey": resume_key,
                 "actorType": "user",
