@@ -102,6 +102,9 @@ from server_services import mcp_registry as mcp_registry_service
 from services.weather_config import resolve_weather_location
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
+from services.aliyun_oss_storage import AliyunOssProvider
+from services.oss_runtime import OssRuntime
+from services.oss_settings import OssSettingsStore
 from services.settings_probe_cache import SettingsProbeCache
 from services import hr_lifecycle as hr_lifecycle_service
 from services import hr_agent_auth as hr_agent_auth_service
@@ -29762,6 +29765,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == server_routes.oss_settings.GET_PATH:
+            # OSS 设置包含凭证状态，必须在读取 runtime 前复用现有管理令牌边界。
+            if self._reject_untrusted_management_request():
+                return
+            if server_routes.oss_settings.handle_get(self, parsed_url):
+                return
         if request_path == "/api/skills-library":
             if server_routes.skill_library_organization.handle_get(self, parsed_url):
                 return
@@ -32416,6 +32425,12 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path == server_routes.oss_settings.ACTIVATE_PATH:
+            # 鉴权必须先于 body 解析，避免未授权请求触发候选凭证处理或云端探测。
+            if self._reject_untrusted_management_request():
+                return
+            if server_routes.oss_settings.handle_post(self, parsed_url):
+                return
         if request_path == "/api/agent/human-decisions" or request_path.startswith("/api/agent/human-decisions/"):
             if self._reject_untrusted_human_decision_agent_request():
                 return
@@ -38312,6 +38327,24 @@ def _mcp_usage_guide_organization_runtime():
     )
 
 
+_OSS_RUNTIME_INSTANCE = None
+_OSS_RUNTIME_LOCK = threading.Lock()
+
+
+def _oss_runtime():
+    """在首次访问 OSS 设置时恢复配置，保持主 server 仅负责依赖装配。"""
+
+    global _OSS_RUNTIME_INSTANCE
+    if _OSS_RUNTIME_INSTANCE is None:
+        with _OSS_RUNTIME_LOCK:
+            if _OSS_RUNTIME_INSTANCE is None:
+                _OSS_RUNTIME_INSTANCE = OssRuntime(
+                    OssSettingsStore(Path(STATUS_DIR)), AliyunOssProvider
+                )
+    return _OSS_RUNTIME_INSTANCE
+
+
+server_routes.oss_settings.configure_runtime(_oss_runtime)
 server_routes.skill_library_organization.configure_runtime(
     _skill_library_organization_runtime
 )

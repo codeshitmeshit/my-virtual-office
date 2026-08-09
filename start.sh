@@ -402,6 +402,25 @@ start_local() {
     fi
     echo -e "  ${GREEN}✓${NC} lark-oapi 可用"
 
+    if ! "$python_bin" -c "import alibabacloud_oss_v2" 2>/dev/null; then
+        echo -e "  ${YELLOW}⚠ Alibaba Cloud OSS SDK V2 未安装，正在安装...${NC}"
+        if [ ! -x "$SCRIPT_DIR/.venv/bin/python" ]; then
+            python3 -m venv "$SCRIPT_DIR/.venv" || {
+                echo -e "${RED}✗ 创建 Python 虚拟环境失败${NC}"
+                echo "请安装 python3-venv，或手动创建 .venv 后安装: python -m pip install alibabacloud-oss-v2"
+                exit 1
+            }
+        fi
+        python_bin="$SCRIPT_DIR/.venv/bin/python"
+        "$python_bin" -m pip install 'alibabacloud-oss-v2' 2>&1 | tail -1
+        if ! "$python_bin" -c "import alibabacloud_oss_v2" 2>/dev/null; then
+            echo -e "${RED}✗ Alibaba Cloud OSS SDK V2 安装失败${NC}"
+            echo "请手动运行: $python_bin -m pip install alibabacloud-oss-v2"
+            exit 1
+        fi
+    fi
+    echo -e "  ${GREEN}✓${NC} Alibaba Cloud OSS SDK V2 可用"
+
     # The Feishu Agent Chat channel uses an isolated Node worker. Dependency
     # failures are Chat-only: keep VO and the notification app startable and
     # expose the actionable failure through the Chat status surface.

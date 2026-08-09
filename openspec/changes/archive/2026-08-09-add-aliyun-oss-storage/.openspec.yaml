@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-08
+goal: Provide configurable, secure, backend-only remote object storage for
+  future VO materials.
