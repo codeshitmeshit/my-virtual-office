@@ -78,11 +78,7 @@ function _mmLoadCurrentSettings() {
         var feishuReceiveId = document.getElementById('mm-feishu-receive-id');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
-        // Parse "City,State" or "City+Name,State" back into separate fields
-        var _wloc = (cfg.weather || {}).location || '';
-        var _wparts = _wloc.split(',');
-        if (weatherCityInput) weatherCityInput.value = (_wparts[0] || '').replace(/\+/g, ' ');
-        if (weatherStateInput) weatherStateInput.value = (_wparts[1] || '').replace(/\+/g, ' ');
+        if (window.VOWeatherSettings) window.VOWeatherSettings.fill(cfg.weather || {});
         if (pathInput) pathInput.value = (cfg.openclaw || {}).homePath || '';
         var hermesCfg = cfg.hermes || {};
         var hermesEnabled = hermesCfg.enabled !== false;
@@ -519,24 +515,26 @@ function _buildWeatherLocation(city, state) {
 function mmTestWeather() {
     var statusEl = document.getElementById('mm-weather-status');
     if (!statusEl) return;
-    var location = _buildWeatherLocation(
-        (document.getElementById('mm-weather-city') || {}).value,
-        (document.getElementById('mm-weather-state') || {}).value
-    );
-    if (!location) {
+    var weatherConfig = window.VOWeatherSettings
+        ? window.VOWeatherSettings.read(_buildWeatherLocation)
+        : { location: _buildWeatherLocation((document.getElementById('mm-weather-city') || {}).value, (document.getElementById('mm-weather-state') || {}).value) };
+    if (!weatherConfig.location) {
         statusEl.innerHTML = '<div class="mm-status err">' + _tr('weather_test_location_required') + '</div>';
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_weather') + '</div>';
-    fetch('/api/weather/test?location=' + encodeURIComponent(location))
+    var weatherRequest = window.VOWeatherSettings
+        ? window.VOWeatherSettings.requestTest(weatherConfig, i18n.managementFetch.bind(i18n))
+        : fetch('/api/weather/test?location=' + encodeURIComponent(weatherConfig.location));
+    weatherRequest
         .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
         .then(function(d) {
             if (!d.ok) {
                 statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
                 return;
             }
-            _applyWeatherTestResult(location, d);
-            var details = escHtml(d.resolvedLocation || location) + ' · ' + escHtml(d.weather || '') + ' · ' + escHtml(String(d.tempF || '?')) + '°F / ' + escHtml(String(d.tempC || '?')) + '°C';
+            _applyWeatherTestResult(weatherConfig.location, d);
+            var details = escHtml(d.resolvedLocation || weatherConfig.location) + ' · ' + escHtml(d.provider || '') + ' · ' + escHtml(d.weather || '') + ' · ' + escHtml(String(d.tempC !== undefined ? d.tempC : '?')) + '°C';
             statusEl.innerHTML = '<div class="mm-status ok">✅ ' + _tr('weather_test_ok') + '<br>' + details + '</div>';
         }).catch(function(e) {
             statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(e.message) + '</div>';
@@ -756,7 +754,9 @@ function mmSaveSettings() {
         config.hermes = hermesSettings;
     }
     config.office = { name: officeName || 'Virtual Office' };
-    config.weather = { location: weather || null };
+    config.weather = window.VOWeatherSettings
+        ? window.VOWeatherSettings.read(_buildWeatherLocation)
+        : { location: weather || null };
     config.meetings = {
         preparingTimeoutSec: _mtgNormalizePreparingTimeoutSec((document.getElementById('mm-meeting-preparing-timeout') || {}).value)
     };
@@ -807,8 +807,9 @@ function mmSaveSettings() {
         body: JSON.stringify(config)
     }).then(function(r){ return r.json(); }).then(function(d) {
         if (d.ok) {
-            _acpShowToast('💾 Settings saved! Hard refresh (Ctrl+Shift+R) to apply all changes.');
+            _acpShowToast('💾 ' + _tr('settings_save_success_refresh'), 'success');
             _voWeatherLocation = (config.weather || {}).location || '';
+            lastWeatherPoll = 0;
             pollWeather();
             // Update brand title live
             var brandEl = document.getElementById('brand-title');
@@ -821,10 +822,10 @@ function mmSaveSettings() {
                 window.setApiUsageEnabled(config.features.apiUsage === true);
             }
         } else {
-            _acpShowToast('❌ Save failed');
+            _acpShowToast('❌ ' + _tr('settings_save_failed'), 'error');
         }
     }).catch(function(e) {
-        _acpShowToast('❌ Save failed: ' + e.message);
+        _acpShowToast('❌ ' + _tr('settings_save_failed') + ': ' + e.message, 'error');
     });
 }
 

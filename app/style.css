@@ -24,7 +24,7 @@
     background: #0d0d1e;
     border-bottom: 1px solid #2a2a4e;
     color: #ffd700;
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     font-size: 10px;
     flex-shrink: 0;
 }
@@ -44,7 +44,7 @@
     background: rgba(0,0,0,0.2);
 }
 .mm-section-title {
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     font-size: 7px;
     color: #ffd700;
     margin-bottom: 8px;
@@ -120,7 +120,7 @@
 .mm-help b { color: #ccc; }
 .mm-save-all {
     margin-top: 8px;
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     font-size: 8px;
     padding: 10px;
 }
@@ -133,19 +133,15 @@
 .mm-status.ok { background: rgba(76,175,80,0.15); color: #81c784; border: 1px solid #4caf50; }
 .mm-status.err { background: rgba(244,67,54,0.15); color: #ef9a9a; border: 1px solid #f44336; }
 .mm-status.info { background: rgba(33,150,243,0.15); color: #90caf9; border: 1px solid #2196f3; }
-@import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
-
 :root {
     --vo-font-scale: 1;
-    --ui-bg: #0a0a0f;
-    --ui-surface: #1a1a2e;
-    --ui-border: #2a2a3e;
-    --ui-text: #e8e8f0;
+    --ui-bg: var(--ui-canvas);
+    --ui-text: var(--ui-text-primary);
     --pq-blue: #1976d2;
     --pq-dark: #0d47a1;
     --eng-orange: #e65100;
     --eng-dark: #bf360c;
-    --gold: #ffd700;
+    --gold: var(--ui-accent);
     --gba-cream: #f8f8d8;
 }
 
@@ -158,7 +154,7 @@ select.mm-input {
 html, body {
     background: var(--ui-bg);
     color: var(--ui-text);
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     height: 100%;
     overflow: hidden;
     -webkit-overflow-scrolling: touch;
@@ -290,7 +286,7 @@ html, body {
 #agent-workspace-subtitle {
     margin-top: 4px;
     color: #93a4bd;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 11px;
 }
 .agent-workspace-controls {
@@ -337,7 +333,7 @@ html, body {
     min-height: 0;
     overflow: auto;
     padding: 12px;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     color: #d8e0ee;
 }
@@ -359,7 +355,7 @@ html, body {
     color: #ffd700;
     font-size: 11px;
     margin: 0 0 8px 0;
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
 }
 .agent-workspace-list {
     display: flex;
@@ -424,7 +420,7 @@ html, body {
 .agent-workspace-editor textarea {
     min-height: 110px;
     resize: vertical;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-family: var(--ui-font-family);
 }
 .agent-workspace-editor textarea {
     min-height: 280px;
@@ -459,7 +455,7 @@ html, body {
     margin-bottom: 8px;
     color: #ffd700;
     font-size: 11px;
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
 }
 .agent-workspace-panel-heading button {
     border: 1px solid #3a3a5e;
@@ -468,7 +464,7 @@ html, body {
     border-radius: 4px;
     padding: 7px 9px;
     cursor: pointer;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 12px;
 }
 .agent-workspace-files-shell,
@@ -607,7 +603,7 @@ html, body {
     color: #ffd700;
     font-size: 11px;
     margin: 0 0 10px 0;
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
 }
 .agent-workspace-settings-grid {
     display: grid;
@@ -771,7 +767,7 @@ html, body {
     border: 1px solid #30363d;
     border-radius: 4px;
     padding: 8px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--ui-font-family);
     font-size: 11px;
     line-height: 1.4;
     resize: vertical;
@@ -866,7 +862,7 @@ html, body {
 }
 
 button {
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     background: linear-gradient(180deg, #2a2a3e, #1a1a2e);
     border: 2px solid #3a3a4e;
     border-radius: 4px;
@@ -912,6 +908,11 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-bottom: 2px solid var(--gold);
     margin-bottom: 4px;
 }
+/* 办公室品牌标题属于像素场景的一部分，保留像素字体；普通 UI 不继承该字体。 */
+.brand h2,
+.brand h3 {
+    font-family: var(--ui-font-family);
+}
 .brand h2 { color: var(--gold); font-size: 13px; text-shadow: 0 0 10px rgba(255,215,0,0.4); }
 .brand h3 { color: #fff; font-size: 11px; margin-top: 6px; letter-spacing: 4px; }
 
@@ -934,7 +935,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius:4px;
     padding:4px 6px;
     font-size:7px;
-    font-family:'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     cursor:pointer;
 }
 .branch-actions {
@@ -1117,7 +1118,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .scroll-box {
     max-height: 80px; overflow-y: auto;
     background: rgba(0,0,0,0.4); border: 1px solid var(--ui-border);
-    padding: 6px; font-family: monospace; font-size: 9px; color: #aaa;
+    padding: 6px; font-family: var(--ui-font-family); font-size: 9px; color: #aaa;
     border-radius: 3px;
 }
 .scroll-box::-webkit-scrollbar { width: 6px; }
@@ -1128,7 +1129,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .io-box {
     max-height: 140px;
     overflow-y: auto;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     font-size: 8px;
     line-height: 1.8;
     background: rgba(0,0,0,0.5);
@@ -1180,7 +1181,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .management-token-close {
     border: 0;
     background: transparent;
-    font-family: inherit;
+    font-family: var(--ui-font-family);
 }
 .management-token-body {
     display: grid;
@@ -1294,7 +1295,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border: 1px solid var(--ui-border);
     border-radius: 4px;
     padding: 8px;
-    font-family: inherit;
+    font-family: var(--ui-font-family);
     font-size: 10px;
 }
 .agent-create-field input:focus {
@@ -1460,12 +1461,12 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .pc-label {
     font-size: 7px;
     color: #aaa;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
 }
 .pc-value {
     font-size: 9px;
     color: #fff;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     font-weight: bold;
 }
 .pc-bar-track {
@@ -1495,7 +1496,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .pc-detail {
     font-size: 6px;
     color: #777;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1503,7 +1504,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .pc-power-summary {
     font-size: 7px;
     color: #ffd700;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     text-align: center;
     padding: 6px 4px;
     border-top: 1px solid rgba(255,215,0,0.2);
@@ -1551,7 +1552,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     background: #111;
     color: #999;
     font-size: 6px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     line-height: 1.2;
     cursor: pointer;
     overflow: hidden;
@@ -1577,13 +1578,13 @@ button:active { transform: translateY(3px); box-shadow: none; }
     padding: 1px 4px;
     border: 1px solid;
     border-radius: 2px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 .api-warning {
     font-size: 6px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     padding: 3px 5px;
     border-radius: 3px;
     margin: 3px 0;
@@ -1612,7 +1613,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .api-health-ok {
     font-size: 6px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     color: #66bb6a;
     margin: 3px 0;
 }
@@ -2025,7 +2026,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     max-width: 82%;
     padding: 8px 12px;
     border-radius: 12px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     line-height: 1.5;
     word-break: break-word;
@@ -2109,7 +2110,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border: 1px solid var(--ui-border);
     border-radius: 8px;
     padding: 8px 12px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     resize: none;
 }
@@ -2177,7 +2178,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     align-items: center;
     justify-content: center;
     padding: 0;
-    font-family: sans-serif;
+    font-family: var(--ui-font-family);
 }
 .chat-toggle-btn:hover { transform: scale(1.1); box-shadow: 0 6px 24px rgba(255,215,0,0.6); }
 .chat-toggle-btn.active { display: none !important; }
@@ -2249,7 +2250,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 12px 12px 0 0;
     font-size: 10px;
     color: var(--gold);
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     overflow: hidden;
 }
 /* Agent selector dropdown */
@@ -2257,7 +2258,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     background: rgba(0,0,0,0.5);
     border: 1px solid var(--ui-border);
     color: var(--gold);
-    font-family: 'Press Start 2P', cursive;
+    font-family: var(--ui-font-family);
     font-size: 8px;
     padding: 4px 8px;
     border-radius: 6px;
@@ -2273,7 +2274,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .chat-agent-select option, .chat-agent-select optgroup {
     background: #1a1a2e;
     color: #eee;
-    font-family: Arial, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     padding: 4px 8px;
 }
@@ -2440,7 +2441,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     justify-content: center;
     cursor: pointer;
     transition: background 0.15s, border-color 0.15s, color 0.15s;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
 }
 
 .chat-slot-tab:hover {
@@ -2724,7 +2725,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     color: #e8e8f0;
     border-radius: 4px;
     padding: 10px;
-    font-family: monospace;
+    font-family: var(--ui-font-family);
     font-size: 12px;
     line-height: 1.4;
 }
@@ -2755,7 +2756,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border: 1px solid #30363d;
     color: #c9d1d9;
     border-radius: 4px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--ui-font-family);
     font-size: 11px;
     line-height: 1.4;
     resize: vertical;
@@ -2784,7 +2785,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     min-width: 0;
     max-width: calc(100% - 60px);
     padding: 5px 6px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     font-size: 6px;
     background: #0d0d1a;
     color: #ccc;
@@ -2797,7 +2798,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .model-settings-row button {
     flex-shrink: 0;
     padding: 5px 6px;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     font-size: 6px;
     background: #e6a800;
     color: #000;
@@ -2859,7 +2860,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-sessions-title {
     color: #ffd700;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 9px;
     font-weight: 600;
     line-height: 1.2;
@@ -2885,7 +2886,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     display: flex;
     flex-direction: column;
     gap: 4px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     scrollbar-width: thin;
     scrollbar-color: #2a2a4e transparent;
 }
@@ -2924,7 +2925,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-session-item .cs-title {
     color: #ddd;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 9px;
     font-weight: 500;
     line-height: 1.35;
@@ -2935,7 +2936,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-session-item .cs-preview {
     color: #888;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 8.5px;
     line-height: 1.35;
     margin-top: 1px;
@@ -2945,7 +2946,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .chat-session-item .cs-meta {
     color: #666;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 7.5px;
     line-height: 1.25;
     margin-top: 2px;
@@ -3001,7 +3002,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-bottom: 1px solid rgba(255,255,255,0.08);
     font-size: 8px;
     color: #aaa;
-    font-family: 'Press Start 2P', monospace;
+    font-family: var(--ui-font-family);
     letter-spacing: 0.3px;
     line-height: 1.4;
 }
@@ -3063,7 +3064,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     max-width: 85%;
     padding: 8px 12px;
     border-radius: 12px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     line-height: 1.5;
     word-break: break-word;
@@ -3120,7 +3121,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 8px;
     background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(255,255,255,0.035));
     color: var(--ui-text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     overflow: hidden;
     animation: hermes-card-in 220ms cubic-bezier(.2,.7,.2,1) both;
     transition: border-color .18s ease, background .18s ease, box-shadow .18s ease, transform .18s ease;
@@ -3228,7 +3229,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     text-overflow: ellipsis;
     white-space: nowrap;
     color: rgba(255,255,255,0.78);
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    font-family: var(--ui-font-family);
     font-size: 11px;
     font-weight: 700;
 }
@@ -3579,7 +3580,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 8px;
     padding: 8px 12px;
     color: var(--ui-text);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     resize: none;
     outline: none;
@@ -4278,7 +4279,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   border: 1px solid #4caf50;
   color: #e8e8f0;
   font-size: 8px;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   padding: 4px 10px;
   border-radius: 4px;
   cursor: pointer;
@@ -4321,7 +4322,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   padding: 2px 8px;
   border-radius: 4px;
   line-height: 1;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   font-size: 10px;
 }
 .browser-minimize:hover {
@@ -4343,7 +4344,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   border-bottom: 1px solid #333;
   font-size: 8px;
   color: #aaa;
-  font-family: monospace;
+  font-family: var(--ui-font-family);
   min-height: 22px;
   display: flex;
   align-items: center;
@@ -4393,7 +4394,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   border: 1px solid #555;
   color: #aaa;
   font-size: 7px;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   width: 20px;
   height: 20px;
   border-radius: 3px;
@@ -4440,7 +4441,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   background: #0d0d1e;
   border-bottom: 1px solid #2a2a4e;
   color: #ffd600;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   font-size: 8px;
   flex-shrink: 0;
   letter-spacing: 0.5px;
@@ -4453,7 +4454,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   font-size: 11px;
   padding: 2px 7px;
   border-radius: 3px;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   transition: all 0.15s;
 }
 .catalog-close-btn:hover {
@@ -4477,7 +4478,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   padding: 7px 12px;
   background: #12122a;
   color: #ffd600;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   font-size: 7px;
   cursor: pointer;
   user-select: none;
@@ -4497,7 +4498,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   padding: 7px 14px;
   cursor: pointer;
   color: #bbb;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   font-size: 8px;
   line-height: 1.4;
   border-left: 3px solid transparent;
@@ -4524,7 +4525,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   width: 100%;
   padding: 5px 8px;
   font-size: 7px;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   background: #151520;
   color: #e8e8f0;
   border: 1px solid #2a2a4e;
@@ -4537,7 +4538,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   padding: 8px 12px;
   color: #555;
   font-size: 6px;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   border-top: 1px solid #2a2a4e;
   line-height: 1.8;
   flex-shrink: 0;
@@ -4585,7 +4586,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
   overflow: hidden;
   box-shadow: 4px 0 20px rgba(0,0,0,0.7);
   transition: left 0.25s ease;
-  font-family: Arial, sans-serif;
+  font-family: var(--ui-font-family);
 }
 .agent-panel.visible { left: 0; }
 .agent-panel-header {
@@ -4599,7 +4600,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 }
 .agent-panel-title {
   color: #ffd600;
-  font-family: 'Press Start 2P', cursive;
+  font-family: var(--ui-font-family);
   font-size: 8px;
   letter-spacing: 0.5px;
 }
@@ -4881,7 +4882,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .mtg-conflict-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 10px; color: #eee; }
 .mtg-conflict-advisory { background: rgba(16, 16, 27, 0.72); }
 .mtg-history-tools { margin: 0 0 10px; }
-.mtg-search-input { width: 100%; background: #12121e; border: 1px solid #2a2a4e; color: #ddd; font-size: 10px; padding: 8px 10px; border-radius: 4px; font-family: inherit; }
+.mtg-search-input { width: 100%; background: #12121e; border: 1px solid #2a2a4e; color: #ddd; font-size: 10px; padding: 8px 10px; border-radius: 4px; font-family: var(--ui-font-family); }
 .mtg-search-input:focus { border-color: var(--gold); outline: none; }
 .mtg-history-snippet { margin-bottom: 8px; color: #aaa; max-height: 42px; overflow: hidden; }
 .mtg-request-summary { display: grid; gap: 8px; }
@@ -5030,7 +5031,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
 
 .mtg-form { display: flex; flex-direction: column; gap: 8px; }
 .mtg-label { font-size: 9px; color: var(--gold); font-weight: bold; }
-.mtg-textarea { background: #12121e; border: 1px solid #2a2a4e; color: #ddd; font-size: 10px; padding: 8px; border-radius: 4px; resize: vertical; font-family: inherit; }
+.mtg-textarea { background: #12121e; border: 1px solid #2a2a4e; color: #ddd; font-size: 10px; padding: 8px; border-radius: 4px; resize: vertical; font-family: var(--ui-font-family); }
 .mtg-textarea:focus { border-color: var(--gold); outline: none; }
 .mtg-intervention { display: grid; gap: 6px; }
 .mtg-subsection { border-top: 1px solid #2a2a4e; display: grid; gap: 6px; margin-top: 4px; padding-top: 8px; }
@@ -5126,55 +5127,6 @@ button:active { transform: translateY(3px); box-shadow: none; }
 .sidebar-mtg-none { font-size: 9px; color: #555; padding: 4px 8px; }
 .sidebar-mtg-btn { display: block; width: calc(100% - 16px); margin: 6px 8px; padding: 6px; font-size: 9px; background: #12121e; border: 1px solid #2a2a4e; color: var(--gold); border-radius: 4px; cursor: pointer; text-align: center; }
 .sidebar-mtg-btn:hover { background: #1a1a2e; border-color: var(--gold); }
-
-/* === Skills Library === */
-.skills-library-modal { max-width: 520px; width: calc(100vw - 20px); min-height: 200px; max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
-.skl-topbar { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--ui-border); }
-.skl-topbar button, .skl-upload-label { font-size: 10px; padding: 4px 10px; }
-.skl-upload-label { cursor: pointer; }
-.skl-cards { display: flex; flex-direction: column; gap: 6px; padding-bottom: 12px; }
-.skl-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 10px 12px; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
-.skl-card-top { display: flex; justify-content: space-between; align-items: center; width: 100%; }
-.skl-card-name { font-size: 11px; font-weight: bold; color: #eee; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.skl-card-desc { display: none; }
-.skl-card-actions { display: flex; gap: 4px; flex-shrink: 0; }
-.skl-card-actions button { font-size: 9px; padding: 3px 7px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
-.skl-card-actions button:hover { background: #1e1e36; border-color: var(--gold); color: var(--gold); }
-.skl-apply-dropdown { margin-top: 10px; display: flex; gap: 10px; align-items: stretch; flex-wrap: wrap; width: 100%; }
-.skl-apply-dropdown button { font-size: 9px; padding: 4px 10px; background: #1b5e20; border: 1px solid #66bb6a; color: #66bb6a; border-radius: 4px; cursor: pointer; }
-.skl-editor-body { display: flex; flex-direction: column; gap: 10px; padding: 4px 0; }
-.skl-field-label { font-size: 10px; color: #888; }
-.skl-input { background: #12121e; border: 1px solid #2a2a4e; color: #eee; border-radius: 6px; padding: 8px 10px; font-size: 11px; width: 100%; box-sizing: border-box; }
-.skl-textarea { background: #12121e; border: 1px solid #2a2a4e; color: #eee; border-radius: 6px; padding: 10px; font-size: 11px; font-family: 'Courier New', monospace; min-height: 320px; resize: vertical; white-space: pre; width: 100%; box-sizing: border-box; }
-.skl-editor-actions { display: flex; gap: 8px; }
-
-/* === MCP Registry === */
-.mcp-registry-modal { max-width: 920px; width: min(94vw, 920px); max-height: 90vh; max-height: 90dvh; overflow-y: auto; }
-.mcp-registry-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 14px; align-items: start; }
-.mcp-form { display: flex; flex-direction: column; gap: 7px; padding-right: 12px; border-right: 1px solid var(--ui-border); }
-.mcp-description { min-height: 66px; resize: vertical; }
-.mcp-env { min-height: 72px; resize: vertical; font-family: 'Courier New', monospace; }
-.mcp-form-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-.mcp-registry-list { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
-.mcp-empty { color: #777; font-size: 11px; padding: 24px 12px; text-align: center; border: 1px dashed #2a2a4e; border-radius: 6px; }
-.mcp-card { background: #1a1a2e; border: 1px solid #2a2a4e; border-radius: 6px; padding: 10px 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: start; }
-.mcp-card-main { min-width: 0; }
-.mcp-card-title { color: #eee; font-size: 12px; font-weight: bold; overflow-wrap: anywhere; }
-.mcp-card-desc { color: #aaa; font-size: 10px; line-height: 1.45; margin-top: 4px; overflow-wrap: anywhere; }
-.mcp-card-command { display: block; color: #9fd3ff; background: #10101c; border: 1px solid #242447; border-radius: 4px; padding: 5px 6px; margin-top: 6px; font-size: 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.mcp-card-status { color: #8bd17c; font-size: 9px; margin-top: 5px; }
-.mcp-card-warning { color: #e6b85c; font-size: 9px; margin-top: 3px; }
-.mcp-card-assigned { color: #c9b27a; font-size: 9px; margin-top: 4px; overflow-wrap: anywhere; }
-.mcp-card-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
-.mcp-card-actions button, .mcp-guide-row button { font-size: 9px; padding: 4px 8px; background: #12121e; border: 1px solid #2a2a4e; color: #ccc; border-radius: 4px; cursor: pointer; }
-.mcp-card-actions button:hover, .mcp-guide-row button:hover { border-color: var(--gold); color: var(--gold); }
-
-@media (max-width: 760px) {
-    .mcp-registry-grid { grid-template-columns: 1fr; }
-    .mcp-form { border-right: 0; border-bottom: 1px solid var(--ui-border); padding-right: 0; padding-bottom: 12px; }
-    .mcp-card { grid-template-columns: 1fr; }
-    .mcp-card-actions { justify-content: flex-start; }
-}
 
 /* === Agent Guide === */
 .agent-guide-modal {
@@ -5375,7 +5327,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 6px;
     color: #e6e6e6;
     padding: 12px;
-    font-family: 'Courier New', monospace;
+    font-family: var(--ui-font-family);
     font-size: 11px;
     line-height: 1.55;
 }
@@ -5608,7 +5560,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 6px;
     box-shadow: 0 10px 28px rgba(0,0,0,0.45);
     color: #f4f4f8;
-    font-family: Arial, sans-serif;
+    font-family: var(--ui-font-family);
 }
 
 .bookshelf-action-title {
@@ -5684,7 +5636,7 @@ button:active { transform: translateY(3px); box-shadow: none; }
     border-radius: 8px;
     box-shadow: 0 18px 48px rgba(0,0,0,0.5);
     color: #f4f4f8;
-    font-family: Arial, sans-serif;
+    font-family: var(--ui-font-family);
 }
 
 .bookshelf-bind-head {

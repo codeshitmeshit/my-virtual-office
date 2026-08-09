@@ -1,0 +1,155 @@
+html.management-session-pending,
+html.management-session-pending body {
+    overflow: hidden;
+}
+
+html.management-session-pending body > :not(#management-session-gate) {
+    pointer-events: none;
+    user-select: none;
+}
+
+.management-session-gate {
+    align-items: center;
+    background: rgba(4, 6, 15, 0.82);
+    backdrop-filter: blur(8px);
+    display: flex;
+    inset: 0;
+    justify-content: center;
+    padding: 24px;
+    position: fixed;
+    z-index: 20000;
+}
+
+.management-session-card {
+    background: var(--ui-surface-elevated, #151526);
+    border: 1px solid var(--ui-border, #39394f);
+    border-radius: var(--ui-radius-lg, 12px);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
+    box-sizing: border-box;
+    color: var(--ui-text, #f2f2f7);
+    max-width: 100%;
+    padding: 24px;
+    width: 460px;
+}
+
+.management-session-heading {
+    align-items: center;
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.management-session-heading-icon {
+    font-size: 20px;
+}
+
+.management-session-title {
+    font-size: 16px;
+    margin: 0;
+}
+
+.management-session-description {
+    color: var(--ui-text-muted, #a4a4b5);
+    font-size: 11px;
+    line-height: 1.7;
+    margin: 0 0 18px;
+}
+
+.management-session-form[hidden],
+.management-session-checking[hidden] {
+    display: none;
+}
+
+.management-session-checking {
+    align-items: center;
+    color: var(--ui-text-muted, #a4a4b5);
+    display: flex;
+    font-size: 11px;
+    gap: 10px;
+    min-height: 44px;
+}
+
+.management-session-spinner {
+    animation: management-session-spin 0.8s linear infinite;
+    border: 2px solid rgba(255, 255, 255, 0.18);
+    border-radius: 50%;
+    border-top-color: var(--gold, #ffd700);
+    height: 18px;
+    width: 18px;
+}
+
+.management-session-label {
+    color: var(--gold, #ffd700);
+    display: block;
+    font-size: 9px;
+    margin-bottom: 7px;
+}
+
+.management-session-input {
+    background: rgba(0, 0, 0, 0.42);
+    border: 1px solid var(--ui-border, #39394f);
+    border-radius: var(--ui-radius-sm, 6px);
+    box-sizing: border-box;
+    color: var(--ui-text, #f2f2f7);
+    font: inherit;
+    font-size: 12px;
+    outline: none;
+    padding: 11px 12px;
+    width: 100%;
+}
+
+.management-session-input:focus {
+    border-color: var(--gold, #ffd700);
+    box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.14);
+}
+
+.management-session-status {
+    color: var(--ui-text-muted, #a4a4b5);
+    font-size: 10px;
+    line-height: 1.5;
+    min-height: 15px;
+    padding-top: 9px;
+}
+
+.management-session-status.is-error {
+    color: var(--ui-danger, #ff6b6b);
+}
+
+.management-session-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 18px;
+}
+
+.management-session-actions .mtg-btn {
+    min-height: 40px;
+    min-width: 112px;
+}
+
+.management-session-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+}
+
+@keyframes management-session-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (max-width: 560px) {
+    .management-session-gate {
+        align-items: stretch;
+        padding: 0;
+    }
+
+    .management-session-card {
+        border-radius: 0;
+        min-height: 100%;
+        padding: 28px 20px;
+        width: 100%;
+    }
+
+    .management-session-actions {
+        flex-direction: column-reverse;
+    }
+}

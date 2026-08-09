@@ -13,10 +13,11 @@ if (typeof WebSocket === 'undefined') {
   process.exit(child.status ?? 1);
 }
 
-const evidenceDir = 'openspec/changes/add-project-task-orchestration/evidence/figma';
-const screenshotPath = `${evidenceDir}/candidate-8.8-orchestration-overlay.png`;
-const referenceOverlayPath = `${evidenceDir}/figma-147-2-reference.png`;
-const referenceModalPath = `${evidenceDir}/figma-148-3-modal-reference.png`;
+const evidenceDir = 'openspec/changes/unify-all-frontend-ui/evidence/screenshots';
+const referenceDir = 'openspec/changes/archive/2026-08-02-add-project-task-orchestration/evidence/figma';
+const screenshotPath = `${evidenceDir}/final-project-orchestration.png`;
+const referenceOverlayPath = `${referenceDir}/figma-147-2-reference.png`;
+const referenceModalPath = `${referenceDir}/figma-148-3-modal-reference.png`;
 fs.mkdirSync(evidenceDir, { recursive: true });
 
 function pngSize(path) {
@@ -69,7 +70,9 @@ async function ensureCdp() {
 
 const css = [
   fs.readFileSync('app/fonts.css', 'utf8'),
+  fs.readFileSync('app/ui-system.css', 'utf8'),
   fs.readFileSync('app/project-orchestration.css', 'utf8'),
+  fs.readFileSync('app/ui-project-surfaces.css', 'utf8'),
 ].join('\n');
 const apiJs = fs.readFileSync('app/project-orchestration-api.js', 'utf8');
 const modalJs = fs.readFileSync('app/project-orchestration.js', 'utf8');
@@ -236,20 +239,20 @@ try {
   near(metrics.modal.width, 1220, 1, 'modal width');
   near(metrics.modal.height, 560, 1, 'modal height');
   near(metrics.header.height, 57, 2, 'header height');
-  near(metrics.notice.height, 30, 2, 'notice height');
+  near(metrics.notice.height, 32, 2, 'notice height');
   near(metrics.canvas.width, 1184, 2, 'canvas width');
-  near(metrics.canvas.height, 350, 1, 'canvas height');
-  near(metrics.footer.height, 53, 2, 'footer height');
+  near(metrics.canvas.height, 360, 1, 'canvas height');
+  near(metrics.footer.height, 55, 2, 'footer height');
   assert.equal(metrics.taskCount, 9);
   assert.equal(metrics.stageCount, 5);
   assert.equal(metrics.connectorCount, 4);
   assert.equal(metrics.saveButtonCount, 0);
   assert.equal(metrics.title, '任务流水线编排');
   assert.equal(metrics.count, '9 TASKS · 5 STEPS');
-  assert.match(metrics.modalStyle.fontFamily, /Press Start 2P|Fusion Pixel/);
-  assert.equal(metrics.modalStyle.backgroundColor, 'rgb(17, 17, 36)');
-  assert.equal(metrics.modalStyle.borderColor, 'rgb(255, 215, 0)');
-  assert.equal(metrics.canvasStyle.backgroundColor, 'rgb(9, 9, 26)');
+  assert.match(metrics.modalStyle.fontFamily, /Noto Sans SC|PingFang SC|Microsoft YaHei|system-ui/);
+  assert.equal(metrics.modalStyle.backgroundColor, 'rgb(18, 18, 30)');
+  assert.equal(metrics.modalStyle.borderColor, 'rgb(58, 58, 82)');
+  assert.equal(metrics.canvasStyle.backgroundColor, 'rgb(10, 10, 15)');
 
   const screenshot = await send('Page.captureScreenshot', { format: 'png', fromSurface: true, captureBeyondViewport: false });
   fs.writeFileSync(screenshotPath, Buffer.from(screenshot.data, 'base64'));
@@ -262,6 +265,21 @@ try {
   ws.close();
   await closeCdpPage(page);
   fixtureServer.close();
-  if (chromiumProcess) chromiumProcess.kill('SIGTERM');
-  if (ownedUserDataDir) fs.rmSync(ownedUserDataDir, { recursive: true, force: true });
+  if (chromiumProcess) {
+    chromiumProcess.kill('SIGTERM');
+    if (chromiumProcess.exitCode === null && chromiumProcess.signalCode === null) {
+      await Promise.race([
+        new Promise((resolve) => chromiumProcess.once('exit', resolve)),
+        new Promise((resolve) => setTimeout(resolve, 2000)),
+      ]);
+    }
+  }
+  if (ownedUserDataDir) {
+    fs.rmSync(ownedUserDataDir, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+  }
 }

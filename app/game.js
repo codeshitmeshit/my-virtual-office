@@ -686,7 +686,7 @@ function releaseObjectServiceQueueForAgent(agent, reason) {
 // ============================================================
 // REAL WEATHER SYSTEM — fetches weather for configured location, renders on windows
 // ============================================================
-var weatherData = { condition: 'clear', description: '', code: 113, temp: 0, tempC: null, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0, updatedAt: 0 };
+var weatherData = { condition: 'clear', description: '', code: 113, temp: 0, tempC: null, wind: 0, humidity: 0, feelsLike: 0, uvIndex: 0, visibility: 0, precipMM: 0, cloudcover: 0, updatedAt: 0, provider: '', stale: false };
 var _displayPrefs = { showBubbles: true, showWeather: true, showNames: true, internalBubbleTimeoutSec: 60, fontScale: 1 };
 try {
     var _dp = JSON.parse(localStorage.getItem("vo-display-prefs") || "{}");
@@ -710,6 +710,7 @@ if (typeof document !== 'undefined') {
     });
 }
 var lastWeatherPoll = 0;
+var weatherPollInFlight = false;
 var weatherParticles = []; // rain/snow particles
 var _weatherTick = 0;
 var _floorWindowTooltip = null;
@@ -723,57 +724,39 @@ var _snowAccum = []; // snow accumulation on window sill
 
 function pollWeather() {
     var now = Date.now();
-    if (now - lastWeatherPoll < 600000) return; // every 10 minutes
-    lastWeatherPoll = now;
+    if (weatherPollInFlight || now - lastWeatherPoll < 600000) return;
+    weatherPollInFlight = true;
     fetch('/weather-proxy').then(function(res) {
         if (!res.ok) throw new Error('Weather proxy error');
-        return res;
-    }).catch(function() {
-        // No fallback — weather requires server-side config
-        return null;
-    }).then(function(res) {
-        if (!res) return null;
-        if (!res || !res.ok) return null;
         return res.json();
     }).then(function(data) {
-        if (!data || !data.current_condition) return;
-        var c = data.current_condition[0];
-        var code = parseInt(c.weatherCode);
-        var cond = 'clear';
-        // Map weather codes to conditions — expanded categories
-        if ([113].includes(code)) cond = 'sunny';
-        else if ([116].includes(code)) cond = 'partly_cloudy';
-        else if ([119, 122].includes(code)) cond = 'overcast';
-        else if ([143, 248, 260].includes(code)) cond = 'foggy';
-        else if ([176, 263, 266].includes(code)) cond = 'drizzle';
-        else if ([293, 296].includes(code)) cond = 'light_rain';
-        else if ([299, 302, 353, 356].includes(code)) cond = 'rain';
-        else if ([305, 308, 359].includes(code)) cond = 'heavy_rain';
-        else if ([200, 386, 389].includes(code)) cond = 'thunderstorm';
-        else if ([392, 395].includes(code)) cond = 'snow_storm';
-        else if ([179, 323, 326].includes(code)) cond = 'light_snow';
-        else if ([227, 230, 329, 332, 335, 338, 368, 371].includes(code)) cond = 'snow';
-        else if ([182, 185, 281, 284, 311, 314, 317, 320, 362, 365, 374, 377].includes(code)) cond = 'sleet';
-        else cond = 'cloudy';
+        if (!data || !data.ok || !data.current) throw new Error('Weather payload error');
+        var c = data.current;
+        var tempC = Number(c.temperatureC);
+        var tempF = Number(c.temperatureF);
         weatherData = {
-            condition: cond,
-            description: ((c.weatherDesc || [{}])[0] || {}).value || '',
-            code: code,
-            temp: parseInt(c.temp_F) || 0,
-            tempC: Number.isFinite(parseInt(c.temp_C)) ? parseInt(c.temp_C) : null,
-            wind: parseInt(c.windspeedMiles) || 0,
-            humidity: parseInt(c.humidity) || 0,
-            feelsLike: parseInt(c.FeelsLikeF) || 0,
-            uvIndex: parseInt(c.uvIndex) || 0,
-            visibility: parseInt(c.visibility) || 10,
-            precipMM: parseFloat(c.precipMM) || 0,
-            cloudcover: parseInt(c.cloudcover) || 0,
-            updatedAt: Date.now()
+            condition: c.condition || 'cloudy',
+            description: c.description || '',
+            code: c.code || '',
+            temp: Number.isFinite(tempF) ? tempF : (Number.isFinite(tempC) ? Math.round(tempC * 9 / 5 + 32) : 0),
+            tempC: Number.isFinite(tempC) ? tempC : null,
+            wind: Math.round((Number(c.windKph) || 0) * 0.621371),
+            humidity: Number(c.humidity) || 0,
+            feelsLike: Math.round((Number(c.feelsLikeC) || 0) * 9 / 5 + 32),
+            uvIndex: Number(c.uvIndex) || 0,
+            visibility: Number(c.visibilityKm) || 0,
+            precipMM: Number(c.precipMm) || 0,
+            cloudcover: Number(c.cloudCover) || 0,
+            updatedAt: Date.parse(data.observedAt || '') || Number(data.fetchedAt) || Date.now(),
+            provider: data.provider || '',
+            stale: data.stale === true,
+            fallbackFrom: data.fallbackFrom || ''
         };
+        lastWeatherPoll = Date.now();
         // Reset droplets/accumulation on condition change
         _rainDroplets = [];
         _snowAccum = [];
-    }).catch(function() {});
+    }).catch(function() {}).finally(function() { weatherPollInFlight = false; });
 }
 
 function _refreshWeatherLocationFromConfig() {
@@ -788,6 +771,9 @@ pollWeather();
 setInterval(pollWeather, 600000);
 
 function _formatWeatherConditionLabel(condition) {
+    if (typeof VOWeatherLocalization !== 'undefined') {
+        return VOWeatherLocalization.translatedCondition(condition, typeof i18n !== 'undefined' ? i18n : null);
+    }
     var labels = {
         clear: 'weather_condition_clear',
         sunny: 'weather_condition_sunny',
@@ -807,6 +793,23 @@ function _formatWeatherConditionLabel(condition) {
     };
     var key = labels[condition] || 'weather_condition_unknown';
     return typeof i18n !== 'undefined' ? i18n.t(key) : (condition || 'Unknown').replace(/_/g, ' ');
+}
+
+function _formatWeatherDescription() {
+    if (typeof VOWeatherLocalization !== 'undefined') {
+        return VOWeatherLocalization.description(
+            weatherData.description,
+            weatherData.condition,
+            typeof i18n !== 'undefined' ? i18n : null
+        );
+    }
+    return weatherData.description || _formatWeatherConditionLabel(weatherData.condition);
+}
+
+function _formatWeatherHumidity() {
+    var humidity = Number(weatherData.humidity);
+    if (!Number.isFinite(humidity)) return '—';
+    return Math.max(0, Math.min(100, Math.round(humidity))) + '%';
 }
 
 function _getWeatherLocationLabel() {
@@ -835,9 +838,11 @@ function _formatWeatherUpdatedAt() {
 function _getFloorWindowWeatherTooltipLines() {
     return [
         (typeof i18n !== 'undefined' ? i18n.t('weather_location') : 'Weather Location') + ': ' + _getWeatherLocationLabel(),
-        (typeof i18n !== 'undefined' ? i18n.t('weather_label') : 'Weather') + ': ' + (weatherData.description || _formatWeatherConditionLabel(weatherData.condition)),
+        (typeof i18n !== 'undefined' ? i18n.t('weather_label') : 'Weather') + ': ' + _formatWeatherDescription(),
         (typeof i18n !== 'undefined' ? i18n.t('temperature') : 'Temperature') + ': ' + _getWeatherTemperatureC() + '°C',
-        (typeof i18n !== 'undefined' ? i18n.t('weather_updated_at') : 'Updated at') + ': ' + _formatWeatherUpdatedAt()
+        (typeof i18n !== 'undefined' ? i18n.t('humidity') : 'Humidity') + ': ' + _formatWeatherHumidity(),
+        (typeof i18n !== 'undefined' ? i18n.t('weather_updated_at') : 'Updated at') + ': ' + _formatWeatherUpdatedAt(),
+        (typeof i18n !== 'undefined' ? i18n.t('weather_provider') : 'Provider') + ': ' + (weatherData.provider || '—') + (weatherData.stale ? ' · ' + (typeof i18n !== 'undefined' ? i18n.t('weather_stale') : 'stale') : '')
     ];
 }
 
@@ -862,11 +867,15 @@ function _conditionFromWeatherDescription(desc) {
 function _applyWeatherTestResult(location, result) {
     if (!officeConfig.weather) officeConfig.weather = {};
     officeConfig.weather.location = location || result.location || officeConfig.weather.location || null;
-    weatherData.condition = _conditionFromWeatherDescription(result.weather);
-    weatherData.description = result.weather || '';
-    weatherData.temp = parseInt(result.tempF) || weatherData.temp || 0;
-    weatherData.tempC = Number.isFinite(parseInt(result.tempC)) ? parseInt(result.tempC) : weatherData.tempC;
+    var current = result.current || {};
+    weatherData.condition = current.condition || _conditionFromWeatherDescription(result.weather);
+    weatherData.description = current.description || result.weather || '';
+    weatherData.temp = Number.isFinite(Number(current.temperatureF)) ? Number(current.temperatureF) : (parseInt(result.tempF) || weatherData.temp || 0);
+    weatherData.tempC = Number.isFinite(Number(current.temperatureC)) ? Number(current.temperatureC) : (Number.isFinite(parseInt(result.tempC)) ? parseInt(result.tempC) : weatherData.tempC);
+    weatherData.humidity = Number.isFinite(Number(current.humidity)) ? Number(current.humidity) : weatherData.humidity;
     weatherData.updatedAt = parseInt(result.updatedAt, 10) || Date.now();
+    weatherData.provider = result.provider || weatherData.provider || '';
+    weatherData.stale = result.stale === true;
 }
 
 // --- Helper: pseudo-random from seed ---
@@ -5509,7 +5518,7 @@ function branchEditPrompt(branchId) {
 
     var popup = document.createElement('div');
     popup.id = 'branch-edit-popup';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     // Get the current branch color
     var currentColor = branch.color || _getThemeColor(branch.theme) || '#888888';
@@ -6949,7 +6958,7 @@ function _showTextLabelEditor(item) {
 
     var popup = document.createElement('div');
     popup.id = 'text-label-editor';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:280px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:280px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ ' + (typeof i18n !== 'undefined' ? i18n.t('edit_text_label') : 'Edit Text Label') + '</div>' +
         '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('text_label') : 'Text') + '</label>' +
@@ -7271,7 +7280,7 @@ function _showInteractiveWindowEditor(item) {
 
     var popup = document.createElement('div');
     popup.id = 'iw-editor';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:300px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:300px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     var weatherChecked = item.weather !== false ? 'checked' : '';
     var sunChecked = item.showSun ? 'checked' : '';
@@ -8217,6 +8226,7 @@ function _isFunctionalBookshelf(item) {
 }
 
 function _archiveToast(message, type) {
+    if (window.VOFeedback) return window.VOFeedback.legacy(message, type);
     var el = document.createElement('div');
     el.textContent = message;
     var border = type === 'error' ? '#ef5350' : '#4caf50';
@@ -14144,11 +14154,10 @@ function _mmLoadCurrentSettings() {
         var feishuReceiveId = document.getElementById('mm-feishu-receive-id');
         if (gwInput) gwInput.value = (cfg.openclaw || {}).gatewayUrl || '';
         if (nameInput) nameInput.value = (cfg.office || {}).name || '';
-        // Parse "City,State" or "City+Name,State" back into separate fields
-        var _wloc = (cfg.weather || {}).location || '';
-        var _wparts = _wloc.split(',');
-        if (weatherCityInput) weatherCityInput.value = (_wparts[0] || '').replace(/\+/g, ' ');
-        if (weatherStateInput) weatherStateInput.value = (_wparts[1] || '').replace(/\+/g, ' ');
+        if (window.VOOfficeBranding && typeof window.VOOfficeBranding.loadFromConfig === 'function') {
+            window.VOOfficeBranding.loadFromConfig(cfg.office || {});
+        }
+        if (window.VOWeatherSettings) window.VOWeatherSettings.fill(cfg.weather || {});
         if (pathInput) pathInput.value = (cfg.openclaw || {}).homePath || '';
         var hermesCfg = cfg.hermes || {};
         var hermesEnabled = hermesCfg.enabled !== false;
@@ -14645,24 +14654,26 @@ function _buildWeatherLocation(city, state) {
 function mmTestWeather() {
     var statusEl = document.getElementById('mm-weather-status');
     if (!statusEl) return;
-    var location = _buildWeatherLocation(
-        (document.getElementById('mm-weather-city') || {}).value,
-        (document.getElementById('mm-weather-state') || {}).value
-    );
-    if (!location) {
+    var weatherConfig = window.VOWeatherSettings
+        ? window.VOWeatherSettings.read(_buildWeatherLocation)
+        : { location: _buildWeatherLocation((document.getElementById('mm-weather-city') || {}).value, (document.getElementById('mm-weather-state') || {}).value) };
+    if (!weatherConfig.location) {
         statusEl.innerHTML = '<div class="mm-status err">' + _tr('weather_test_location_required') + '</div>';
         return;
     }
     statusEl.innerHTML = '<div class="mm-status info">' + _tr('testing_weather') + '</div>';
-    fetch('/api/weather/test?location=' + encodeURIComponent(location))
+    var weatherRequest = window.VOWeatherSettings
+        ? window.VOWeatherSettings.requestTest(weatherConfig, i18n.managementFetch.bind(i18n))
+        : fetch('/api/weather/test?location=' + encodeURIComponent(weatherConfig.location));
+    weatherRequest
         .then(function(r) { return r.json().then(function(d) { d._httpOk = r.ok; return d; }); })
         .then(function(d) {
             if (!d.ok) {
                 statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(d.error || _tr('unknown')) + '</div>';
                 return;
             }
-            _applyWeatherTestResult(location, d);
-            var details = escHtml(d.resolvedLocation || location) + ' · ' + escHtml(d.weather || '') + ' · ' + escHtml(String(d.tempF || '?')) + '°F / ' + escHtml(String(d.tempC || '?')) + '°C';
+            _applyWeatherTestResult(weatherConfig.location, d);
+            var details = escHtml(d.resolvedLocation || weatherConfig.location) + ' · ' + escHtml(d.provider || '') + ' · ' + escHtml(d.weather || '') + ' · ' + escHtml(String(d.tempC !== undefined ? d.tempC : '?')) + '°C';
             statusEl.innerHTML = '<div class="mm-status ok">✅ ' + _tr('weather_test_ok') + '<br>' + details + '</div>';
         }).catch(function(e) {
             statusEl.innerHTML = '<div class="mm-status err">❌ ' + _tr('weather_test_failed') + ': ' + escHtml(e.message) + '</div>';
@@ -15134,7 +15145,10 @@ function mmTestFeishuNotification() {
     });
 }
 
+var _mmSaveSettingsRequest = null;
+
 function mmSaveSettings() {
+    if (_mmSaveSettingsRequest) return _mmSaveSettingsRequest;
     var gwUrl = document.getElementById('mm-gateway-url').value;
     var officeName = document.getElementById('mm-office-name').value;
     var weather = _buildWeatherLocation(
@@ -15230,8 +15244,12 @@ function mmSaveSettings() {
             registerNativeAgents: !!(document.getElementById('mm-claude-code-register-native') || {}).checked
         };
     }
-    config.office = { name: officeName || 'Virtual Office' };
-    config.weather = { location: weather || null };
+    config.office = window.VOOfficeBranding && typeof window.VOOfficeBranding.buildOfficePayload === 'function'
+        ? window.VOOfficeBranding.buildOfficePayload(officeName)
+        : { name: officeName || 'Virtual Office', iconDataUrl: null };
+    config.weather = window.VOWeatherSettings
+        ? window.VOWeatherSettings.read(_buildWeatherLocation)
+        : { location: weather || null };
     config.meetings = {
         preparingTimeoutSec: _mtgNormalizePreparingTimeoutSec((document.getElementById('mm-meeting-preparing-timeout') || {}).value)
     };
@@ -15305,19 +15323,29 @@ function mmSaveSettings() {
         if (_feishuChatAppSecretValue && !mmIsMaskedFeishuValue(_feishuChatAppSecretValue)) config.feishu.chatApp.appSecret = _feishuChatAppSecretValue;
     }
 
-    i18n.managementFetch('/setup/save', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(config)
-    }).then(function(r){ return r.json(); }).then(function(d) {
+    var saveFeedback = window.VOSettingsSaveFeedback;
+    if (saveFeedback && typeof saveFeedback.start === 'function') saveFeedback.start();
+    var saveTransport = window.VOSettingsSaveTransport;
+    var saveResponse = saveTransport && typeof saveTransport.request === 'function'
+        ? saveTransport.request(config, i18n.managementFetch.bind(i18n))
+        : i18n.managementFetch('/setup/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+    var request = saveResponse.then(function(r){ return r.json(); }).then(function(d) {
         if (d.ok) {
-            _showOfficeToast('💾 Settings saved! Hard refresh (Ctrl+Shift+R) to apply all changes.');
+            _showOfficeToast('💾 ' + _tr('settings_save_success_refresh'), 'success');
             _voWeatherLocation = (config.weather || {}).location || '';
+            lastWeatherPoll = 0;
             pollWeather();
-            // Update brand title live
-            var brandEl = document.getElementById('brand-title');
-            if (brandEl && officeName) brandEl.textContent = officeName.toUpperCase();
-            if (officeName) document.title = officeName;
+            if (window.VOOfficeBranding && typeof window.VOOfficeBranding.applySavedOffice === 'function') {
+                window.VOOfficeBranding.applySavedOffice(config.office);
+            } else {
+                var brandEl = document.getElementById('brand-title');
+                if (brandEl && officeName) brandEl.textContent = officeName.toUpperCase();
+                if (officeName) document.title = officeName;
+            }
             if (typeof window.setPcMonitorEnabled === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'pcMetrics')) {
                 window.setPcMonitorEnabled(config.features.pcMetrics === true);
             }
@@ -15327,12 +15355,22 @@ function mmSaveSettings() {
             if (typeof window.setVoChatShiftEnterToSend === 'function' && config.features && Object.prototype.hasOwnProperty.call(config.features, 'shiftEnterToSend')) {
                 window.setVoChatShiftEnterToSend(config.features.shiftEnterToSend === true);
             }
+            if (saveFeedback && typeof saveFeedback.success === 'function') saveFeedback.success();
         } else {
-            _showOfficeToast('❌ Save failed');
+            _showOfficeToast('❌ ' + _tr('settings_save_failed'), 'error');
+            if (saveFeedback && typeof saveFeedback.failure === 'function') saveFeedback.failure(d.error || '');
         }
+        return d;
     }).catch(function(e) {
-        _showOfficeToast('❌ Save failed: ' + e.message);
+        _showOfficeToast('❌ ' + _tr('settings_save_failed') + ': ' + e.message, 'error');
+        if (saveFeedback && typeof saveFeedback.failure === 'function') saveFeedback.failure(e.message || '');
+        return { ok: false, error: e.message || String(e) };
     });
+    var guardedRequest = request.finally(function() {
+        if (_mmSaveSettingsRequest === guardedRequest) _mmSaveSettingsRequest = null;
+    });
+    _mmSaveSettingsRequest = guardedRequest;
+    return guardedRequest;
 }
 
 function mmExportConfig() {
@@ -15402,7 +15440,8 @@ async function mmFullReset() {
     });
 }
 
-function _showOfficeToast(msg) {
+function _showOfficeToast(msg, type) {
+    if (window.VOFeedback) return window.VOFeedback.legacy(msg, type);
     var toast = document.createElement('div');
     toast.textContent = msg;
     toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e3a1e;border:1px solid #4caf50;color:#4caf50;padding:8px 20px;border-radius:4px;font-size:12px;z-index:9999;pointer-events:none';
@@ -15726,7 +15765,7 @@ function _createCatalogPanel() {
     floorSection.className = 'catalog-snap-section';
     var floorBtn = document.createElement('button');
     floorBtn.id = 'floor-edit-btn';
-    floorBtn.style.cssText = 'width:100%;padding:6px 8px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:7px;font-family:"Press Start 2P",cursive;';
+    floorBtn.style.cssText = 'width:100%;padding:6px 8px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:7px;font-family: var(--ui-font-family);';
     floorBtn.textContent = _tr('edit_floor_tiles');
     floorBtn.addEventListener('click', function() {
         _floorEditMode = !_floorEditMode;
@@ -15962,7 +16001,7 @@ function _showBranchAssignMenu() {
     }
 
     var title = document.createElement('div');
-    title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
+    title.style.cssText = 'color:#ffd600;font-size:10px;font-family: var(--ui-font-family);margin-bottom:6px;text-align:center;';
     title.textContent = _tr('assign_branch_title');
     menu.appendChild(title);
 
@@ -16035,7 +16074,7 @@ function _showDeskAssignMenu() {
     }
 
     var title = document.createElement('div');
-    title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
+    title.style.cssText = 'color:#ffd600;font-size:10px;font-family: var(--ui-font-family);margin-bottom:6px;text-align:center;';
     title.textContent = _tr('assign_desk_title');
     menu.appendChild(title);
 
@@ -16127,7 +16166,7 @@ function _ensureColorPicker() {
     el.style.cssText = [
         'position:fixed; z-index:400; background:#1a1a2e; border:1px solid #ffd600;',
         'border-radius:8px; padding:10px 14px; display:none; flex-direction:column; gap:8px;',
-        'box-shadow:0 4px 20px rgba(0,0,0,0.7); font-family:"Press Start 2P",cursive; font-size:7px; color:#ccc;',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.7); font-family: var(--ui-font-family); font-size:7px; color:#ccc;',
         'min-width:200px;'
     ].join('');
 
@@ -16139,7 +16178,7 @@ function _ensureColorPicker() {
     titleEl.textContent = _tr('color_title');
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:1px solid #444;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:3px;font-family:inherit;';
+    closeBtn.style.cssText = 'background:none;border:1px solid #444;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:3px;font-family: var(--ui-font-family);';
     closeBtn.addEventListener('click', _hideColorPicker);
     closeRow.appendChild(titleEl);
     closeRow.appendChild(closeBtn);
@@ -16200,7 +16239,7 @@ function _ensureColorPicker() {
     var favSaveBtn = document.createElement('button');
     favSaveBtn.id = 'edit-cp-save-favorite';
     favSaveBtn.textContent = _tr('save_current');
-    favSaveBtn.style.cssText = 'background:#2a2a4e;border:1px solid #555;color:#ddd;cursor:pointer;padding:3px 6px;border-radius:3px;font-family:inherit;font-size:10px;';
+    favSaveBtn.style.cssText = 'background:#2a2a4e;border:1px solid #555;color:#ddd;cursor:pointer;padding:3px 6px;border-radius:3px;font-family: var(--ui-font-family);font-size:10px;';
     favSaveBtn.addEventListener('click', function() { _saveCurrentColorFavorite(); });
     favHeader.appendChild(favTitle);
     favHeader.appendChild(favSaveBtn);

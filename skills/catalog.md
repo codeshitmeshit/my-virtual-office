@@ -9,6 +9,8 @@ Agents should read the skill files from the current local VO instance:
 - `/skills/vo-codex-communication/SKILL.md`
 - `/skills/vo-browser-control/SKILL.md`
 - `/skills/vo-agent-workspace/SKILL.md`
+- `/skills/vo-personal-assets/SKILL.md`
+- `/skills/vo-personal-context/SKILL.md`
 - `/skills/vo-agent-hr/SKILL.md`
 - `/skills/vo-project-authoring/SKILL.md`
 - `/skills/vo-project-workflow/SKILL.md`

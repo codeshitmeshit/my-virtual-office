@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-08
+goal: Replace the current settings side panel with a large, clearer settings
+  modal while preserving existing settings capabilities and observable behavior.

@@ -1,0 +1,95 @@
+.vo-dialog-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 15000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: var(--ui-space-2xl);
+    background: var(--ui-overlay);
+    backdrop-filter: blur(2px);
+}
+
+.vo-dialog-box {
+    width: min(460px, calc(100vw - 28px));
+    max-height: min(86vh, 560px);
+    overflow: auto;
+    padding: var(--ui-space-2xl);
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    background: var(--ui-surface);
+    box-shadow: var(--ui-shadow-panel);
+    color: var(--ui-text-primary);
+}
+
+.vo-dialog-title {
+    margin: 0 0 var(--ui-space-lg);
+    color: var(--ui-text-primary);
+    font-size: var(--ui-font-size-title);
+    line-height: var(--ui-line-height-title);
+}
+
+.vo-dialog-message {
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-body);
+    line-height: 1.65;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.vo-dialog-input {
+    display: block;
+    width: 100%;
+    box-sizing: border-box;
+    margin-top: var(--ui-space-xl);
+    padding: 10px 12px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-canvas);
+    color: var(--ui-text-primary);
+    font: inherit;
+    font-size: var(--ui-font-size-body);
+    line-height: var(--ui-line-height-body);
+}
+
+.vo-dialog-input:focus {
+    border-color: var(--ui-info);
+    outline: none;
+    box-shadow: var(--ui-focus-ring);
+}
+
+.vo-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--ui-space-md);
+    flex-wrap: wrap;
+    margin-top: var(--ui-space-2xl);
+}
+
+.vo-dialog-actions button {
+    min-width: 84px;
+}
+
+.vo-dialog-actions .vo-dialog-primary {
+    border-color: var(--ui-accent);
+    background: var(--ui-accent);
+    color: var(--ui-canvas);
+}
+
+.vo-dialog-actions .vo-dialog-danger {
+    border-color: var(--ui-danger);
+    background: var(--ui-danger);
+    color: #ffffff;
+}
+
+@media (max-width: 560px) {
+    .vo-dialog-overlay {
+        align-items: flex-end;
+        padding: var(--ui-space-lg);
+    }
+
+    .vo-dialog-box {
+        width: 100%;
+        max-height: calc(100vh - 24px);
+    }
+}

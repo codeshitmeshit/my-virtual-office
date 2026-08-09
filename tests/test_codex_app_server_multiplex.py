@@ -92,12 +92,18 @@ def test_two_native_threads_interleave_without_cross_delivery():
         client = CodexAppServerClient(workspace, binary=_make_server(workspace), max_concurrent_turns=2)
         results = {"one": {}, "two": {}}
         events = {"one": [], "two": []}
+        interaction_changed = threading.Condition()
+
+        def record_event(label, event):
+            with interaction_changed:
+                events[label].append(event)
+                interaction_changed.notify_all()
 
         def execute(label):
             results[label].update(client.execute(
                 f"message-{label}",
                 timeout_sec=5,
-                event_callback=events[label].append,
+                event_callback=lambda event: record_event(label, event),
                 allow_interaction=True,
             ))
 
@@ -105,14 +111,18 @@ def test_two_native_threads_interleave_without_cross_delivery():
         try:
             for worker in workers:
                 worker.start()
-            deadline = time.time() + 3
+            deadline = time.monotonic() + 10
             approval = None
             user_input = None
-            while time.time() < deadline and (not approval or not user_input):
-                for label in ("one", "two"):
-                    approval = approval or next((event for event in events[label] if event.get("interactionType") == "approval"), None)
-                    user_input = user_input or next((event for event in events[label] if event.get("interactionType") == "input"), None)
-                time.sleep(0.01)
+            with interaction_changed:
+                while not approval or not user_input:
+                    for label in ("one", "two"):
+                        approval = approval or next((event for event in events[label] if event.get("interactionType") == "approval"), None)
+                        user_input = user_input or next((event for event in events[label] if event.get("interactionType") == "input"), None)
+                    remaining = deadline - time.monotonic()
+                    if (approval and user_input) or remaining <= 0:
+                        break
+                    interaction_changed.wait(remaining)
             assert approval and user_input
             assert approval["threadId"] != user_input["threadId"]
             assert client.pending_approval(approval["threadId"])["pending_count"] == 1

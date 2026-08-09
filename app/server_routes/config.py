@@ -10,6 +10,9 @@ def _config_service():
 
 
 def _body(handler):
+    read_limited = getattr(handler, "_read_limited_json_body", None)
+    if callable(read_limited):
+        return read_limited()
     try:
         return read_json(handler), None
     except JsonBodyError as e:
@@ -43,9 +46,12 @@ def handle_get(handler, parsed_url):
 def handle_post(handler, parsed_url):
     service = _config_service()
     path = parsed_url.path
+    if path == "/api/weather/test":
+        body, error = _body(handler)
+        return send_json(handler, error or service._handle_weather_test(body))
     if path == "/setup/save":
         body, error = _body(handler)
-        return send_json(handler, error or service._persist_setup_payload(body), status=200 if not error else None)
+        return send_json(handler, error or service._persist_setup_payload(body))
     if path == "/api/office-config":
         raw = handler.rfile.read(int(handler.headers.get("Content-Length", 0) or 0))
         return send_json(handler, service._handle_office_config_save(raw))

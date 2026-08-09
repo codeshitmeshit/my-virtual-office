@@ -1,0 +1,720 @@
+.personal-assets-toggle.is-active {
+    background: var(--ui-success-soft) !important;
+    border-color: var(--ui-success) !important;
+    color: var(--ui-success) !important;
+    box-shadow: none;
+}
+
+.personal-assets-modal-content {
+    width: min(1400px, 94vw);
+    height: min(930px, 92vh);
+    max-height: min(930px, 92vh);
+    padding: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    background: var(--ui-surface);
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+    font-family: var(--ui-font-family);
+}
+
+.personal-assets-modal-content .modal-header {
+    position: static;
+    flex: 0 0 auto;
+    min-height: 92px;
+    margin: 0;
+    padding: 20px 24px;
+    background: var(--ui-toolbar);
+    border-bottom: 1px solid var(--ui-border);
+    box-sizing: border-box;
+}
+
+.personal-assets-modal-content .modal-emoji {
+    font-size: var(--ui-font-size-hero);
+}
+
+.personal-assets-modal-heading {
+    min-width: 0;
+}
+
+.personal-assets-modal-heading h2 {
+    margin: 0;
+    color: var(--ui-text-primary);
+    font-size: var(--ui-font-size-hero);
+    font-weight: 700;
+    line-height: var(--ui-line-height-hero);
+}
+
+.personal-assets-modal-heading p {
+    margin: 5px 0 0;
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-caption);
+    line-height: var(--ui-line-height-caption);
+}
+
+.personal-assets-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 24px;
+    color: var(--ui-text-primary);
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size-body);
+    line-height: 1.55;
+    box-sizing: border-box;
+}
+
+.personal-assets-toolbar,
+.personal-assets-subhead,
+.personal-assets-actions,
+.personal-assets-form-actions,
+.personal-assets-sync,
+.personal-assets-sync-heading,
+.personal-assets-sync-actions,
+.personal-assets-section-heading {
+    display: flex;
+    align-items: center;
+}
+
+.personal-assets-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+.personal-assets-overview-copy,
+.personal-assets-sync-copy {
+    min-width: 0;
+}
+
+.personal-assets-toolbar h3,
+.personal-assets-subhead h3,
+.personal-assets-suggestion h3,
+.personal-assets-section-heading h3,
+.personal-assets-field-description h4 {
+    margin: 0;
+    color: var(--ui-text-primary);
+    font-weight: 600;
+}
+
+.personal-assets-toolbar h3,
+.personal-assets-subhead h3,
+.personal-assets-section-heading h3 {
+    font-size: var(--ui-font-size-title);
+    line-height: var(--ui-line-height-title);
+}
+
+.personal-assets-toolbar p,
+.personal-assets-subhead p,
+.personal-assets-section-heading p {
+    margin: 4px 0 0;
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-caption);
+}
+
+.personal-assets-overview-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.personal-assets-total-count,
+.personal-assets-availability-chip,
+.personal-assets-section-heading > span,
+.personal-assets-sync-status {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 2px 8px;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-pill);
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-meta);
+    line-height: var(--ui-line-height-meta);
+    box-sizing: border-box;
+}
+
+.personal-assets-availability-chip.is-available,
+.personal-assets-sync-status.is-available,
+.personal-assets-sync-status.is-synced {
+    border-color: var(--ui-success);
+    background: var(--ui-success-soft);
+    color: var(--ui-success);
+}
+
+.personal-assets-availability-chip.is-checking,
+.personal-assets-sync-status.is-checking,
+.personal-assets-sync-status.is-sync-pending,
+.personal-assets-sync-status.is-sync-syncing,
+.personal-assets-sync-status.is-sync-restoring {
+    border-color: var(--ui-info);
+    background: var(--ui-info-soft);
+    color: var(--ui-info);
+}
+
+.personal-assets-availability-chip.is-unconfigured,
+.personal-assets-sync-status.is-unconfigured,
+.personal-assets-sync-status.is-sync-failed,
+.personal-assets-sync-status.is-sync-conflict {
+    border-color: var(--ui-warning);
+    background: var(--ui-warning-soft);
+    color: var(--ui-warning);
+}
+
+.personal-assets-availability-chip.is-unavailable,
+.personal-assets-sync-status.is-unavailable {
+    border-color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    color: var(--ui-danger);
+}
+
+.personal-assets-actions,
+.personal-assets-form-actions,
+.personal-assets-sync-actions,
+.personal-assets-sync-heading {
+    gap: 10px;
+}
+
+.personal-assets-actions button,
+.personal-assets-sync-actions button,
+.personal-assets-form button,
+.personal-assets-back,
+.personal-assets-link,
+.personal-assets-edit-action {
+    min-height: 34px;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-panel);
+    color: var(--ui-text-primary);
+    padding: 7px 12px;
+    font: inherit;
+    cursor: pointer;
+    box-sizing: border-box;
+}
+
+.personal-assets-actions button.is-primary,
+.personal-assets-sync-actions button.is-primary,
+.personal-assets-form button.is-primary {
+    border-color: var(--ui-info);
+    background: var(--ui-panel);
+    color: var(--ui-info);
+}
+
+.personal-assets-form button.is-danger {
+    border-color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    color: var(--ui-danger);
+}
+
+.personal-assets-count {
+    display: inline-flex;
+    min-width: 18px;
+    justify-content: center;
+    color: var(--ui-success);
+}
+
+.personal-assets-overview-layout {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr);
+    gap: 24px;
+    min-height: 560px;
+}
+
+.personal-assets-category-nav {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.personal-assets-nav-heading {
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-caption);
+    font-weight: 600;
+    line-height: var(--ui-line-height-caption);
+}
+
+.personal-assets-category-item {
+    width: 100%;
+    min-height: 58px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 8px;
+    padding: 11px 12px;
+    border: 1px solid transparent;
+    border-radius: var(--ui-radius-lg);
+    background: transparent;
+    color: var(--ui-text-primary);
+    text-align: left;
+    font-family: var(--ui-font-family);
+    cursor: pointer;
+}
+
+.personal-assets-category-item strong {
+    min-width: 0;
+    font-size: var(--ui-font-size-label);
+    font-weight: 500;
+}
+
+.personal-assets-category-item span,
+.personal-assets-category-item small {
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-meta);
+    line-height: var(--ui-line-height-meta);
+}
+
+.personal-assets-category-item small {
+    grid-column: 1 / -1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.personal-assets-category-item:hover {
+    border-color: var(--ui-border-strong);
+    background: var(--ui-panel);
+}
+
+.personal-assets-category-item.is-active {
+    border-color: var(--ui-accent);
+    background: var(--ui-panel);
+}
+
+.personal-assets-category-item.is-active strong {
+    color: var(--ui-accent);
+    font-weight: 700;
+}
+
+.personal-assets-sensitive-note {
+    margin-top: 4px;
+    padding: 10px;
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-panel);
+}
+
+.personal-assets-sensitive-note strong {
+    color: var(--ui-warning);
+    font-size: var(--ui-font-size-meta);
+}
+
+.personal-assets-sensitive-note p {
+    margin: 4px 0 0;
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-meta);
+    line-height: 1.5;
+}
+
+.personal-assets-profile-workspace {
+    min-width: 0;
+}
+
+.personal-assets-field-guide,
+.personal-assets-field-row {
+    display: grid;
+    grid-template-columns: 250px minmax(0, 1fr) 36px;
+    gap: 16px;
+}
+
+.personal-assets-field-guide {
+    align-items: center;
+    margin: 0 0 12px;
+    padding: 9px 10px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-surface);
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-meta);
+}
+
+.personal-assets-field-guide strong {
+    color: var(--ui-info);
+    font-weight: 600;
+}
+
+.personal-assets-field-guide em {
+    font-style: normal;
+    text-align: center;
+}
+
+.personal-assets-entry-group + .personal-assets-entry-group {
+    margin-top: 24px;
+}
+
+.personal-assets-section-heading {
+    min-height: 32px;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.personal-assets-field-row {
+    min-height: 84px;
+    align-items: start;
+    margin-bottom: 12px;
+    padding: 14px 16px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    background: var(--ui-panel);
+    box-sizing: border-box;
+}
+
+.personal-assets-field-row.is-sensitive {
+    border-color: color-mix(in srgb, var(--ui-warning) 72%, var(--ui-border));
+}
+
+.personal-assets-field-description {
+    min-width: 0;
+}
+
+.personal-assets-field-description h4 {
+    font-size: var(--ui-font-size-body);
+    line-height: var(--ui-line-height-body);
+}
+
+.personal-assets-field-description p {
+    margin: 4px 0 0;
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-caption);
+    line-height: 1.5;
+}
+
+.personal-assets-saved-value {
+    min-width: 0;
+    min-height: 54px;
+    padding: 10px 12px;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-canvas);
+    box-sizing: border-box;
+}
+
+.personal-assets-field-row.is-sensitive .personal-assets-saved-value {
+    border-color: var(--ui-warning);
+}
+
+.personal-assets-saved-value > span {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--ui-info);
+    font-size: var(--ui-font-size-meta);
+    font-weight: 600;
+}
+
+.personal-assets-field-row.is-sensitive .personal-assets-saved-value > span {
+    color: var(--ui-warning);
+}
+
+.personal-assets-saved-value pre,
+.personal-assets-suggestion pre {
+    max-height: 150px;
+    margin: 0;
+    overflow: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: var(--ui-text-primary);
+    font: inherit;
+}
+
+.personal-assets-edit-action {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    font-size: var(--ui-font-size-title);
+}
+
+.personal-assets-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.personal-assets-subhead {
+    justify-content: flex-start;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.personal-assets-suggestion,
+.personal-assets-empty,
+.personal-assets-message {
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    background: var(--ui-panel);
+    padding: 16px;
+}
+
+.personal-assets-category,
+.personal-assets-sensitivity {
+    color: var(--ui-info);
+    font-size: var(--ui-font-size-meta);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.personal-assets-sensitivity.is-sensitive {
+    color: var(--ui-warning);
+}
+
+.personal-assets-suggestion {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 12px;
+}
+
+.personal-assets-form {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.personal-assets-form label {
+    display: grid;
+    gap: 7px;
+    color: var(--ui-text-muted);
+}
+
+.personal-assets-form .is-wide {
+    grid-column: 1 / -1;
+}
+
+.personal-assets-form input,
+.personal-assets-form textarea,
+.personal-assets-form select {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-canvas);
+    color: var(--ui-text-primary);
+    padding: 10px;
+    font: inherit;
+}
+
+.personal-assets-message {
+    margin-bottom: 14px;
+    color: var(--ui-success);
+    background: var(--ui-success-soft);
+}
+
+.personal-assets-message.is-error {
+    border-color: var(--ui-danger);
+    color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+}
+
+.personal-assets-sync {
+    position: sticky;
+    bottom: -24px;
+    z-index: 2;
+    justify-content: space-between;
+    gap: 20px;
+    margin: 20px -24px -24px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--ui-border);
+    background: var(--ui-toolbar);
+}
+
+.personal-assets-sync.is-failed,
+.personal-assets-sync.is-conflict {
+    border-top-color: var(--ui-warning);
+}
+
+.personal-assets-sync-heading strong {
+    color: var(--ui-text-primary);
+    font-size: var(--ui-font-size-caption);
+    font-weight: 600;
+}
+
+.personal-assets-sync-copy p,
+.personal-assets-sync-copy small {
+    display: block;
+    margin: 4px 0 0;
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-meta);
+}
+
+.personal-assets-sync-error,
+.personal-assets-sync-availability-hint {
+    display: block;
+    margin-top: 4px;
+    color: var(--ui-warning);
+    font-size: var(--ui-font-size-meta);
+}
+
+.personal-assets-sync-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.personal-assets-sync-toggle i {
+    position: relative;
+    width: 28px;
+    height: 16px;
+    border-radius: var(--ui-radius-pill);
+    background: var(--ui-border-strong);
+}
+
+.personal-assets-sync-toggle i::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--ui-text-primary);
+    transition: transform var(--ui-transition-fast);
+}
+
+.personal-assets-sync-toggle[aria-pressed="true"] i {
+    background: var(--ui-success);
+}
+
+.personal-assets-sync-toggle[aria-pressed="true"] i::after {
+    transform: translateX(12px);
+}
+
+.personal-assets-empty {
+    min-height: 240px;
+    display: grid;
+    place-content: center;
+    text-align: center;
+    color: var(--ui-text-muted);
+}
+
+.personal-assets-actions button:hover,
+.personal-assets-sync-actions button:hover,
+.personal-assets-form button:hover,
+.personal-assets-back:hover,
+.personal-assets-link:hover,
+.personal-assets-edit-action:hover {
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.personal-assets-actions button:disabled,
+.personal-assets-sync-actions button:disabled,
+.personal-assets-form button:disabled {
+    opacity: .58;
+    cursor: not-allowed;
+}
+
+@media (max-width: 980px) {
+    .personal-assets-modal-content {
+        width: 96vw;
+        height: 94vh;
+        max-height: 94vh;
+    }
+
+    .personal-assets-toolbar {
+        grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .personal-assets-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-end;
+    }
+
+    .personal-assets-overview-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .personal-assets-category-nav {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .personal-assets-nav-heading,
+    .personal-assets-sensitive-note {
+        grid-column: 1 / -1;
+    }
+
+    .personal-assets-field-guide {
+        margin-top: 0;
+    }
+}
+
+@media (max-width: 720px) {
+    .personal-assets-modal-content .modal-header {
+        min-height: 78px;
+        padding: 14px 16px;
+    }
+
+    .personal-assets-content {
+        padding: 16px;
+    }
+
+    .personal-assets-toolbar,
+    .personal-assets-subhead,
+    .personal-assets-suggestion,
+    .personal-assets-sync {
+        align-items: stretch;
+        flex-direction: column;
+    }
+
+    .personal-assets-toolbar {
+        display: flex;
+    }
+
+    .personal-assets-overview-meta,
+    .personal-assets-actions,
+    .personal-assets-sync-actions {
+        flex-wrap: wrap;
+    }
+
+    .personal-assets-category-nav {
+        grid-template-columns: 1fr;
+    }
+
+    .personal-assets-nav-heading,
+    .personal-assets-sensitive-note {
+        grid-column: 1;
+    }
+
+    .personal-assets-field-guide {
+        display: none;
+    }
+
+    .personal-assets-field-row {
+        grid-template-columns: minmax(0, 1fr) 36px;
+        gap: 10px;
+    }
+
+    .personal-assets-field-description,
+    .personal-assets-saved-value {
+        grid-column: 1;
+    }
+
+    .personal-assets-edit-action {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+    }
+
+    .personal-assets-form {
+        grid-template-columns: 1fr;
+    }
+
+    .personal-assets-form .is-wide {
+        grid-column: 1;
+    }
+
+    .personal-assets-sync {
+        bottom: -16px;
+        margin: 18px -16px -16px;
+        padding: 14px 16px;
+    }
+}

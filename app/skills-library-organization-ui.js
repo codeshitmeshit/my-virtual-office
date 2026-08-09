@@ -710,7 +710,7 @@
             }
         } catch (error) {
             var toast = global._showOfficeToast || global._acpShowToast;
-            if (toast) toast('❌ ' + error.message);
+            if (toast) toast('❌ ' + error.message, 'error');
         } finally {
             state.moving = false;
             render();
@@ -745,7 +745,7 @@
             }
         } catch (error) {
             var toast = global._showOfficeToast || global._acpShowToast;
-            if (toast) toast('❌ ' + error.message);
+            if (toast) toast('❌ ' + error.message, 'error');
         } finally {
             state.starting = false;
             updateOrganizeButton();
@@ -778,7 +778,7 @@
             render();
         } catch (error) {
             var toast = global._showOfficeToast || global._acpShowToast;
-            if (toast) toast('❌ ' + error.message);
+            if (toast) toast('❌ ' + error.message, 'error');
         } finally {
             state.dismissing = false;
             renderMarker();

@@ -3,7 +3,7 @@
     min-height: 0;
     max-width: none;
     color: #f3f3fb;
-    font-family: var(--vo-pixel-ui-font);
+    font-family: var(--ui-font-family);
     font-size: 7px;
 }
 

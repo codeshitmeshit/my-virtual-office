@@ -253,6 +253,12 @@ def test_list_maps_provider_metadata_and_continuation_token():
     ("failure", "expected_code"),
     [
         (FakeServiceError(status_code=404, code="NoSuchKey"), "oss_not_found"),
+        (
+            FakeOperationError(
+                FakeServiceError(status_code=404, code="NoSuchKey")
+            ),
+            "oss_not_found",
+        ),
         (FakeServiceError(status_code=403, code="AccessDenied"), "oss_authentication_failed"),
         (FakeOperationError(TimeoutError("timeout")), "oss_connectivity_failed"),
         (FakeServiceError(status_code=500), "oss_provider_operation_failed"),
@@ -268,3 +274,12 @@ def test_sdk_errors_are_normalized_without_raw_provider_message(failure, expecte
     assert error.value.code == expected_code
     assert error.value.request_id in {"", "request-1"}
     assert "provider detail" not in str(error.value)
+
+
+def test_exists_treats_operation_error_wrapped_no_such_key_as_missing():
+    value, _sdk, client = provider()
+    client.failure = FakeOperationError(
+        FakeServiceError(status_code=404, code="NoSuchKey")
+    )
+
+    assert value.exists("vo/v1/caller/missing-object") is False

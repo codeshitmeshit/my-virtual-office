@@ -1,22 +1,23 @@
 /* Project task orchestration modal, scoped to the stage-pipeline workspace. */
 
-:root {
-    --project-orchestration-font: "Press Start 2P", "Fusion Pixel 12px Proportional SC", "Microsoft YaHei", monospace;
-    --project-orchestration-bg: #111124;
-    --project-orchestration-bg-deep: #09091a;
-    --project-orchestration-bg-header: #0d0d1e;
-    --project-orchestration-bg-notice: #0d1a29;
-    --project-orchestration-gold: #ffd700;
-    --project-orchestration-blue: #3c82f6;
-    --project-orchestration-blue-text: #8cb2eb;
-    --project-orchestration-text: #e8e8f0;
-    --project-orchestration-muted: #73738f;
-    --project-orchestration-line: #2b2b4f;
-    --project-orchestration-line-strong: #3a3a5e;
-    --project-orchestration-review: #ff7d0d;
-    --project-orchestration-success: #4caf50;
-    --project-orchestration-success-bg: #11351b;
-    --project-orchestration-card-bg: #15152e;
+.project-orchestration-overlay,
+.proj-orchestration-overlay {
+    --project-orchestration-font: var(--ui-font-family);
+    --project-orchestration-bg: var(--ui-surface);
+    --project-orchestration-bg-deep: var(--ui-canvas);
+    --project-orchestration-bg-header: var(--ui-toolbar);
+    --project-orchestration-bg-notice: var(--ui-info-soft);
+    --project-orchestration-gold: var(--ui-accent);
+    --project-orchestration-blue: var(--ui-info);
+    --project-orchestration-blue-text: var(--ui-info);
+    --project-orchestration-text: var(--ui-text-primary);
+    --project-orchestration-muted: var(--ui-text-muted);
+    --project-orchestration-line: var(--ui-border);
+    --project-orchestration-line-strong: var(--ui-border-strong);
+    --project-orchestration-review: var(--ui-warning);
+    --project-orchestration-success: var(--ui-success);
+    --project-orchestration-success-bg: var(--ui-success-soft);
+    --project-orchestration-card-bg: var(--ui-panel);
 }
 
 .project-orchestration-overlay,
@@ -55,7 +56,7 @@
     background: var(--project-orchestration-bg);
     color: var(--project-orchestration-text);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65);
-    font-family: var(--project-orchestration-font);
+    font-family: var(--ui-font-family);
 }
 
 .project-orchestration-header,
@@ -736,7 +737,7 @@
     border-radius: 8px;
     background: var(--project-orchestration-bg);
     color: var(--project-orchestration-text);
-    font-family: var(--project-orchestration-font);
+    font-family: var(--ui-font-family);
     box-shadow: 0 16px 36px rgba(0, 0, 0, 0.68);
 }
 

@@ -131,7 +131,7 @@ test('worker spools card actions separately and replays callback failures', asyn
     action: { value: { action: 'codex_approval_once', route_id: 'route-1', version: 1 }, tag: 'button' },
     raw: { header: { event_id: 'evt-action', tenant_key: 'tenant-1' }, operator: { union_id: 'on_origin' } },
   });
-  assert.deepEqual(response, { toast: { type: 'loading', content: '审批处理中' } });
+  assert.deepEqual(response, { toast: { type: 'loading', content: '处理中' } });
   await waitUntil(async () => actionDeliveries.length === 1 && worker.actionInFlight.size === 0 && (await worker.actionSpool.stats()).entries === 1);
   assert.equal(normalMessages.length, 0, 'card actions must not use the normal inbound-message callback');
   assert.equal(actionDeliveries[0].action.operator.unionId, 'on_origin');

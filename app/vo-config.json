@@ -16,7 +16,15 @@
     "inferenceIdleTimeoutSec": 300
   },
   "weather": {
-    "location": "Beijing"
+    "provider": "qweather",
+    "location": "北京市,海淀区",
+    "latitude": 39.96,
+    "longitude": 116.3,
+    "fallbackEnabled": true,
+    "qweather": {
+      "apiHost": "",
+      "apiKey": ""
+    }
   },
   "features": {
     "pcMetrics": true,

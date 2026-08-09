@@ -1,9 +1,16 @@
 (function (root) {
   'use strict';
 
+  function isLoopbackHost(hostname) {
+    var normalized = String(hostname || '').replace(/^\[|\]$/g, '').toLowerCase();
+    return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+  }
+
   function buildBrowserViewerUrl(viewerUrl, pageUrl) {
     var url = new URL(viewerUrl, pageUrl);
-    var shouldUseLocalProxy = url.username || url.password;
+    var page = new URL(pageUrl);
+    var shouldUseLocalProxy = url.username || url.password ||
+      (isLoopbackHost(url.hostname) && !isLoopbackHost(page.hostname));
     if (shouldUseLocalProxy && /^https?:$/.test(url.protocol)) {
       return new URL('/browser-viewer', pageUrl).toString();
     }

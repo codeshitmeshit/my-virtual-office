@@ -1639,7 +1639,7 @@ function _createCatalogPanel() {
     floorSection.className = 'catalog-snap-section';
     var floorBtn = document.createElement('button');
     floorBtn.id = 'floor-edit-btn';
-    floorBtn.style.cssText = 'width:100%;padding:6px 8px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:7px;font-family:"Press Start 2P",cursive;';
+    floorBtn.style.cssText = 'width:100%;padding:6px 8px;background:#2a2a4e;color:#ccc;border:1px solid #3a3a5e;border-radius:4px;cursor:pointer;font-size:7px;font-family: var(--ui-font-family);';
     floorBtn.textContent = _tr('edit_floor_tiles');
     floorBtn.addEventListener('click', function() {
         _floorEditMode = !_floorEditMode;
@@ -1875,7 +1875,7 @@ function _showBranchAssignMenu() {
     }
 
     var title = document.createElement('div');
-    title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
+    title.style.cssText = 'color:#ffd600;font-size:10px;font-family: var(--ui-font-family);margin-bottom:6px;text-align:center;';
     title.textContent = _tr('assign_branch_title');
     menu.appendChild(title);
 
@@ -1948,7 +1948,7 @@ function _showDeskAssignMenu() {
     }
 
     var title = document.createElement('div');
-    title.style.cssText = 'color:#ffd600;font-size:10px;font-family:"Press Start 2P",monospace;margin-bottom:6px;text-align:center;';
+    title.style.cssText = 'color:#ffd600;font-size:10px;font-family: var(--ui-font-family);margin-bottom:6px;text-align:center;';
     title.textContent = _tr('assign_desk_title');
     menu.appendChild(title);
 
@@ -2040,7 +2040,7 @@ function _ensureColorPicker() {
     el.style.cssText = [
         'position:fixed; z-index:400; background:#1a1a2e; border:1px solid #ffd600;',
         'border-radius:8px; padding:10px 14px; display:none; flex-direction:column; gap:8px;',
-        'box-shadow:0 4px 20px rgba(0,0,0,0.7); font-family:"Press Start 2P",cursive; font-size:7px; color:#ccc;',
+        'box-shadow:0 4px 20px rgba(0,0,0,0.7); font-family: var(--ui-font-family); font-size:7px; color:#ccc;',
         'min-width:200px;'
     ].join('');
 
@@ -2052,7 +2052,7 @@ function _ensureColorPicker() {
     titleEl.textContent = _tr('color_title');
     var closeBtn = document.createElement('button');
     closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:1px solid #444;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:3px;font-family:inherit;';
+    closeBtn.style.cssText = 'background:none;border:1px solid #444;color:#aaa;cursor:pointer;padding:2px 6px;border-radius:3px;font-family: var(--ui-font-family);';
     closeBtn.addEventListener('click', _hideColorPicker);
     closeRow.appendChild(titleEl);
     closeRow.appendChild(closeBtn);
@@ -2113,7 +2113,7 @@ function _ensureColorPicker() {
     var favSaveBtn = document.createElement('button');
     favSaveBtn.id = 'edit-cp-save-favorite';
     favSaveBtn.textContent = _tr('save_current');
-    favSaveBtn.style.cssText = 'background:#2a2a4e;border:1px solid #555;color:#ddd;cursor:pointer;padding:3px 6px;border-radius:3px;font-family:inherit;font-size:10px;';
+    favSaveBtn.style.cssText = 'background:#2a2a4e;border:1px solid #555;color:#ddd;cursor:pointer;padding:3px 6px;border-radius:3px;font-family: var(--ui-font-family);font-size:10px;';
     favSaveBtn.addEventListener('click', function() { _saveCurrentColorFavorite(); });
     favHeader.appendChild(favTitle);
     favHeader.appendChild(favSaveBtn);

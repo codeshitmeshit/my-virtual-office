@@ -1564,7 +1564,7 @@ function _showTextLabelEditor(item) {
 
     var popup = document.createElement('div');
     popup.id = 'text-label-editor';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:280px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:280px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     popup.innerHTML = '<div style="font-size:14px;font-weight:bold;color:#ffd700;margin-bottom:14px;">✏️ ' + (typeof i18n !== 'undefined' ? i18n.t('edit_text_label') : 'Edit Text Label') + '</div>' +
         '<label style="font-size:12px;color:#aaa;">' + (typeof i18n !== 'undefined' ? i18n.t('text_label') : 'Text') + '</label>' +
@@ -1886,7 +1886,7 @@ function _showInteractiveWindowEditor(item) {
 
     var popup = document.createElement('div');
     popup.id = 'iw-editor';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:300px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:300px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     var weatherChecked = item.weather !== false ? 'checked' : '';
     var sunChecked = item.showSun ? 'checked' : '';

@@ -161,7 +161,7 @@ function branchEditPrompt(branchId) {
 
     var popup = document.createElement('div');
     popup.id = 'branch-edit-popup';
-    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family:Arial,sans-serif;color:#e0e0e0;';
+    popup.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:#1a1a2e;border:2px solid #ffd700;border-radius:12px;padding:20px;min-width:320px;max-width:400px;box-shadow:0 8px 40px rgba(0,0,0,0.6);font-family: var(--ui-font-family);color:#e0e0e0;';
 
     // Get the current branch color
     var currentColor = branch.color || _getThemeColor(branch.theme) || '#888888';

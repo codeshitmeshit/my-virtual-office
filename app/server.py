@@ -98,14 +98,17 @@ from services import archive_manager_lifecycle as archive_manager_lifecycle_serv
 from server_services.agents import _handle_agents_list
 from server_services.browser_runtime import _handle_browser_status
 from server_services.config_runtime import _handle_health
+from server_services import config_runtime as config_runtime_service
 from server_services import mcp_registry as mcp_registry_service
-from services.weather_config import resolve_weather_location
+from services.weather_config import resolve_weather_config
+from services import office_branding as office_branding_service
 from services import hr_bootstrap as hr_bootstrap_service
 from services import hr_config as hr_config_service
+from services.settings_probe_cache import SettingsProbeCache
 from services.aliyun_oss_storage import AliyunOssProvider
 from services.oss_runtime import OssRuntime
 from services.oss_settings import OssSettingsStore
-from services.settings_probe_cache import SettingsProbeCache
+from services.oss_storage import OssStorageService
 from services import hr_lifecycle as hr_lifecycle_service
 from services import hr_agent_auth as hr_agent_auth_service
 from services import hr_http as hr_http_service
@@ -113,6 +116,10 @@ from services import hr_information_completion as hr_information_completion_serv
 from services import hr_manual_daily_sync as hr_manual_daily_sync_service
 from services import hr_runtime as hr_runtime_service
 from services import hr_scheduler as hr_scheduler_service
+from services import personal_asset_agent_auth as personal_asset_agent_auth_service
+from services import personal_asset_http as personal_asset_http_service
+from services import personal_asset_runtime as personal_asset_runtime_service
+from services import personal_asset_feishu_onboarding as personal_asset_feishu_onboarding_service
 from services import vo_agent_communication as vo_agent_communication_service
 from services import archive_prompt_documents
 from services.agent_platform_prompt_formatting import (
@@ -911,6 +918,7 @@ def _load_vo_config():
     return {
         "office": {
             "name": _env_or("VO_OFFICE_NAME", office.get("name", "Virtual Office")),
+            "iconDataUrl": office_branding_service.safe_icon_data_url(office.get("iconDataUrl")),
             "port": int(_env_or("VO_PORT", office.get("port", 8090))),
             "wsPort": int(_env_or("VO_WS_PORT", office.get("wsPort", 8091))),
             "wsPath": _env_or("VO_WS_PATH", office.get("wsPath", "/ws")),
@@ -947,9 +955,7 @@ def _load_vo_config():
         "meetings": {
             "preparingTimeoutSec": meetings_cfg.get("preparingTimeoutSec", 300),
         },
-        "weather": {
-            "location": resolve_weather_location(os.environ, weather_cfg),
-        },
+        "weather": resolve_weather_config(os.environ, weather_cfg),
         "sms": {
             "ownerAgentId": _env_or("VO_SMS_OWNER_AGENT_ID", _env_or("VO_SMS_AGENT_ID", sms_cfg.get("ownerAgentId") or sms_cfg.get("agentId"))),
             "agentId": _env_or("VO_SMS_OWNER_AGENT_ID", _env_or("VO_SMS_AGENT_ID", sms_cfg.get("ownerAgentId") or sms_cfg.get("agentId"))),
@@ -1315,7 +1321,7 @@ def _save_feishu_chat_bindings_config(body):
         if not value:
             continue
         clean[key] = value
-    result = _persist_setup_payload({"feishu": {"bindings": clean}, "_preferStatusDir": True})
+    result = config_runtime_service._persist_setup_payload({"feishu": {"bindings": clean}, "_preferStatusDir": True})
     if not result.get("ok"):
         return result
     return {"ok": True, "bindings": clean, "count": len(clean)}
@@ -1323,127 +1329,6 @@ def _save_feishu_chat_bindings_config(body):
 
 def _chat_source_metadata(body):
     return feishu_chat_channel.chat_source_metadata(body)
-
-
-def _merge_setup_config(existing, incoming):
-    """Merge setup/settings payloads without erasing saved secrets with empty fields."""
-    merged = copy.deepcopy(existing) if isinstance(existing, dict) else {}
-    if not isinstance(incoming, dict):
-        return merged
-    for key, value in incoming.items():
-        if str(key).startswith("_"):
-            continue
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            target = merged[key]
-            for child_key, child_value in value.items():
-                if str(child_key).startswith("_"):
-                    continue
-                if child_key in _SETUP_SECRET_KEYS and child_value in ("", None):
-                    continue
-                if isinstance(child_value, dict) and isinstance(target.get(child_key), dict):
-                    target[child_key] = _merge_setup_config(target[child_key], child_value)
-                else:
-                    target[child_key] = child_value
-        else:
-            if key in _SETUP_SECRET_KEYS and value in ("", None):
-                continue
-            merged[key] = value
-    if isinstance(merged.get("codex"), dict):
-        # Keep deterministic Codex replies as an explicit env-only test hook.
-        # Persisting it in normal setup config silently disables live Codex.
-        merged["codex"].pop("replyText", None)
-    return merged
-
-
-def _clear_setup_secret_paths(config, paths):
-    allowed = {"notifications.feishuWebhook", "feishu.chatApp.appSecret"}
-    if not isinstance(config, dict) or not isinstance(paths, list):
-        return
-    for path in paths:
-        if path not in allowed:
-            continue
-        node = config
-        parts = path.split(".")
-        for part in parts[:-1]:
-            next_node = node.get(part)
-            if not isinstance(next_node, dict):
-                node = None
-                break
-            node = next_node
-        if isinstance(node, dict):
-            node[parts[-1]] = ""
-
-
-def _persist_setup_payload(body):
-    cfg_path = _resolve_config_path()
-    data_dir = os.environ.get("VO_STATUS_DIR", "/data")
-    persistent_path = os.path.join(data_dir, "vo-config.json")
-    prefer_status_dir = isinstance(body, dict) and (
-        body.pop("_preferStatusDir", False) is True
-        or "feishu" in body
-        or "notifications" in body
-    )
-    if os.path.isdir(data_dir) and cfg_path != persistent_path and (
-        prefer_status_dir or not os.environ.get("VO_CONFIG")
-    ):
-        cfg_path = persistent_path
-    existing = {}
-    for try_path in [cfg_path, os.path.join(os.path.dirname(__file__), "vo-config.json")]:
-        try:
-            with open(try_path, "r", encoding="utf-8") as f:
-                existing = json.load(f)
-            break
-        except (FileNotFoundError, json.JSONDecodeError):
-            continue
-    incoming_feishu = body.get("feishu") if isinstance(body, dict) and isinstance(body.get("feishu"), dict) else {}
-    incoming_chat = incoming_feishu.get("chatApp") if isinstance(incoming_feishu.get("chatApp"), dict) else {}
-    if incoming_chat.get("groupChatEnabled") is True:
-        existing_chat = ((existing.get("feishu") or {}).get("chatApp") or {}) if isinstance(existing, dict) else {}
-        selected_transport = str(
-            os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
-            or incoming_chat.get("transportImplementation")
-            or existing_chat.get("transportImplementation")
-            or "channel-sdk-node"
-        ).strip().lower()
-        if selected_transport != "channel-sdk-node":
-            return {
-                "ok": False,
-                "error": "Feishu group chat requires the Channel SDK (Node) transport",
-                "code": "group_chat_requires_channel_sdk",
-                "_status": 400,
-            }
-    existing = _merge_setup_config(existing, body)
-    _clear_setup_secret_paths(existing, body.get("_clearSecrets") if isinstance(body, dict) else None)
-    existing["_setupComplete"] = True
-    os.makedirs(os.path.dirname(cfg_path), exist_ok=True)
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(existing, f, indent=2)
-
-    global VO_CONFIG, WORKSPACE_BASE, STATUS_DIR, _discovered_roster, _discovered_at
-    old_gw = GATEWAY_URL
-    old_token = _get_gateway_token()
-    if prefer_status_dir and os.environ.get("VO_CONFIG"):
-        explicit_config = os.environ.pop("VO_CONFIG")
-        try:
-            VO_CONFIG = _load_vo_config()
-        finally:
-            os.environ["VO_CONFIG"] = explicit_config
-    else:
-        VO_CONFIG = _load_vo_config()
-    STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
-    WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
-    _reload_gateway_globals()
-    _discovered_roster = _discover_roster()
-    _discovered_at = time.time()
-    refresh_agent_maps()
-    new_token = _get_gateway_token()
-    if GATEWAY_URL != old_gw or new_token != old_token:
-        gateway_presence.stop()
-        if new_token:
-            gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
-    if isinstance(body, dict) and isinstance(body.get("feishu"), dict) and "chatApp" in body.get("feishu", {}):
-        _start_feishu_chat_long_connection()
-    return {"ok": True}
 
 
 def _build_safe_vo_config():
@@ -1477,7 +1362,9 @@ def _build_safe_vo_config():
             "catalog": "/skills/catalog.md",
         },
         "features": VO_CONFIG["features"],
-        "weather": VO_CONFIG["weather"],
+        "weather": config_runtime_service.WeatherSettings.from_mapping(
+            VO_CONFIG.get("weather", {}), os.environ
+        ).safe_dict(),
         "openclaw": {
             "gatewayUrl": VO_CONFIG["openclaw"]["gatewayUrl"],
             "gatewayHttp": VO_CONFIG["openclaw"]["gatewayHttp"],
@@ -13882,7 +13769,7 @@ def _save_feishu_notification_config(body):
     payload = {"notifications": notifications, "_preferStatusDir": True}
     if (body or {}).get("clearWebhook"):
         payload.setdefault("_clearSecrets", []).append("notifications.feishuWebhook")
-    result = _persist_setup_payload(payload)
+    result = config_runtime_service._persist_setup_payload(payload)
     if not result.get("ok"):
         return result
     _reset_feishu_notification_topic_runtime()
@@ -13938,7 +13825,7 @@ def _save_feishu_chat_config(body):
     payload = {"feishu": {"chatApp": chat_app}, "_preferStatusDir": True}
     if body.get("clearApp"):
         payload.setdefault("_clearSecrets", []).append("feishu.chatApp.appSecret")
-    result = _persist_setup_payload(payload)
+    result = config_runtime_service._persist_setup_payload(payload)
     if not result.get("ok"):
         return result
     _start_feishu_chat_long_connection()
@@ -14526,7 +14413,35 @@ def _handle_feishu_card_action(body):
     project_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
     hermes_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") or project_outcome.get("handled") else _dispatch_feishu_hermes_approval_action(action, value, event)
     codex_outcome = {"handled": False} if human_decision_outcome.get("handled") or meeting_outcome.get("handled") or project_outcome.get("handled") or hermes_outcome.get("handled") else _dispatch_feishu_codex_approval_action(action, value, event)
-    outcome = human_decision_outcome if human_decision_outcome.get("handled") else (meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else (hermes_outcome if hermes_outcome.get("handled") else (codex_outcome if codex_outcome.get("handled") else None))))
+    personal_asset_outcome = (
+        {"handled": False}
+        if any(
+            candidate.get("handled")
+            for candidate in (
+                human_decision_outcome,
+                meeting_outcome,
+                project_outcome,
+                hermes_outcome,
+                codex_outcome,
+            )
+        )
+        else _get_personal_asset_feishu_onboarding().handle_action(event, value)
+    )
+    outcome = next(
+        (
+            candidate
+            for candidate in (
+                human_decision_outcome,
+                meeting_outcome,
+                project_outcome,
+                hermes_outcome,
+                codex_outcome,
+                personal_asset_outcome,
+            )
+            if candidate.get("handled")
+        ),
+        None,
+    )
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if human_decision_outcome.get("handled"):
         return {
@@ -14569,6 +14484,13 @@ def _handle_feishu_card_action(body):
             "toast": codex_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in codex_outcome.items() if k not in {"toast"}},
+        }
+    if personal_asset_outcome.get("handled"):
+        return {
+            "ok": bool(personal_asset_outcome.get("ok")),
+            "toast": personal_asset_outcome.get("toast") or _feishu_card_action_success("表单已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in personal_asset_outcome.items() if k not in {"toast"}},
         }
     return {
         "ok": True,
@@ -22920,6 +22842,10 @@ _hr_scheduler_runtime = hr_scheduler_service.HRLoopRuntime()
 _hr_command_router = hr_runtime_service.HRCommandRouter()
 _hr_application_runtime = None
 _hr_application_runtime_lock = threading.Lock()
+_personal_asset_runtime = None
+_personal_asset_runtime_lock = threading.Lock()
+_personal_asset_feishu_onboarding = None
+_personal_asset_feishu_onboarding_lock = threading.Lock()
 _agent_management_runtime = None
 _agent_management_runtime_lock = threading.Lock()
 _agent_management_session_mint = None
@@ -22999,6 +22925,52 @@ def _get_hr_application_runtime():
             if _hr_application_runtime.scheduler_loop is not None:
                 _install_hr_scheduler_loop(_hr_application_runtime.scheduler_loop)
         return _hr_application_runtime
+
+
+def _get_personal_asset_feishu_onboarding():
+    global _personal_asset_feishu_onboarding
+    with _personal_asset_feishu_onboarding_lock:
+        if _personal_asset_feishu_onboarding is None:
+            _personal_asset_feishu_onboarding = (
+                personal_asset_feishu_onboarding_service.PersonalAssetFeishuOnboarding(
+                    deliver_form=lambda message_id, intent: reply_feishu_notification(
+                        message_id,
+                        dict(intent or {}),
+                        app_config=_feishu_chat_app_send_config(),
+                        status_dir=STATUS_DIR,
+                    ),
+                    dispatch_agent=_dispatch_representative_agent_message,
+                    deliver_reply=lambda message_id, text: reply_feishu_message(
+                        message_id,
+                        text,
+                        content_type="markdown",
+                        reply_in_thread=True,
+                        app_config=_feishu_chat_app_send_config(),
+                    ),
+                    update_form=lambda message_id, intent: update_feishu_notification(
+                        message_id,
+                        dict(intent or {}),
+                        app_config=_feishu_chat_app_send_config(),
+                        status_dir=STATUS_DIR,
+                    ),
+                )
+            )
+        return _personal_asset_feishu_onboarding
+
+
+def _get_personal_asset_runtime():
+    global _personal_asset_runtime
+    with _personal_asset_runtime_lock:
+        if _personal_asset_runtime is None:
+            _personal_asset_runtime = personal_asset_runtime_service.build_personal_asset_runtime(
+                status_dir=STATUS_DIR,
+                decision_workflow=HUMAN_DECISION_WORKFLOW,
+                oss_storage=OssStorageService(_oss_runtime().active_context),
+                oss_context_provider=_oss_runtime().active_context,
+                start_sync_worker=True,
+                feishu_onboarding=_get_personal_asset_feishu_onboarding(),
+            )
+        return _personal_asset_runtime
 
 
 def _get_agent_management_runtime():
@@ -28847,7 +28819,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             "ok": False,
             "error": "A valid Virtual Office management token is required",
             "code": "management_token_required",
-        }, status=403)
+        }, status=403, allow_origin="*")
         return True
 
     def _reject_untrusted_agent_authoring_request(self):
@@ -29365,6 +29337,62 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             )
             return None
 
+    def _personal_asset_routes(self):
+        try:
+            return _get_personal_asset_runtime().routes
+        except Exception:
+            self._send_json(
+                {"ok": False, "code": "personal_asset_runtime_unavailable"},
+                status=503,
+            )
+            return None
+
+    def _personal_asset_agent_auth_request(self):
+        try:
+            remote_host = str(self.client_address[0])
+        except (AttributeError, IndexError, TypeError):
+            remote_host = ""
+        return personal_asset_agent_auth_service.PersonalAssetAgentAuthRequest(
+            remote_host=remote_host,
+            origin=self.headers.get("Origin"),
+            action=self.headers.get("X-VO-Agent-Action"),
+            ai_id=self.headers.get("X-VO-Agent-Id"),
+        )
+
+    def _handle_personal_asset_get(self, request_path):
+        if not personal_asset_http_service.PersonalAssetHTTPRoutes.is_management(request_path):
+            self._send_json({"ok": False, "code": "personal_asset_route_not_found"}, status=404)
+            return
+        if self._reject_untrusted_management_request():
+            return
+        routes = self._personal_asset_routes()
+        if routes is None:
+            return
+        response = routes.management_get(request_path)
+        self._send_json(response.payload, status=response.status)
+
+    def _handle_personal_asset_post(self, request_path):
+        is_management = personal_asset_http_service.PersonalAssetHTTPRoutes.is_management(request_path)
+        if is_management and self._reject_untrusted_management_request():
+            return
+        body, error = self._read_limited_json_body(limit=self._MANAGEMENT_BODY_LIMIT)
+        if error:
+            self._send_json(
+                {"ok": False, "code": "personal_asset_invalid"},
+                status=int(error.get("_status") or 400),
+            )
+            return
+        routes = self._personal_asset_routes()
+        if routes is None:
+            return
+        if is_management:
+            response = routes.management_post(request_path, body)
+        else:
+            response = routes.agent_post(
+                request_path, body, self._personal_asset_agent_auth_request()
+            )
+        self._send_json(response.payload, status=response.status)
+
     def _agent_management_routes(self):
         try:
             return _get_agent_management_runtime().routes
@@ -29765,6 +29793,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
         query_params = urllib.parse.parse_qs(parsed_url.query)
+        if request_path == server_routes.management_session.GET_PATH:
+            if server_routes.management_session.handle_get(self, parsed_url):
+                return
         if request_path == server_routes.oss_settings.GET_PATH:
             # OSS 设置包含凭证状态，必须在读取 runtime 前复用现有管理令牌边界。
             if self._reject_untrusted_management_request():
@@ -29776,6 +29807,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 return
         if request_path == "/api/mcp-registry" or request_path.startswith("/api/mcp-registry/"):
             if server_routes.mcp_registry.handle_get(self, parsed_url):
+                return
+        if request_path in {"/weather-proxy", "/api/weather/test"}:
+            if server_routes.config.handle_get(self, parsed_url):
                 return
         if (
             request_path
@@ -29794,6 +29828,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             "GET", request_path
         ):
             self._handle_agent_management_get(request_path)
+            return
+        if personal_asset_http_service.PersonalAssetHTTPRoutes.handles(request_path):
+            self._handle_personal_asset_get(request_path)
             return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_get(request_path, query_params)
@@ -30833,67 +30870,6 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             self.end_headers()
             result = self._test_gateway_connection()
             self.wfile.write(json.dumps(result).encode())
-        elif self.path == "/weather-proxy":
-            _wloc = VO_CONFIG["weather"].get("location")
-            if not _wloc:
-                self.send_response(404)
-                self.end_headers()
-                self.wfile.write(b'{"error":"Weather location not configured. Set weather.location in vo-config.json"}')
-                return
-            try:
-                _wloc_encoded = urllib.parse.quote(_wloc, safe='')
-                req = urllib.request.Request(f"https://wttr.in/{_wloc_encoded}?format=j1", headers={"User-Agent": "curl/7.68"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = resp.read()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(data)
-            except Exception as e:
-                self.send_response(502)
-                self.end_headers()
-                self.wfile.write(json.dumps({"error": str(e)}).encode())
-        elif urllib.parse.urlparse(self.path).path == "/api/weather/test":
-            parsed_weather = urllib.parse.urlparse(self.path)
-            qs = urllib.parse.parse_qs(parsed_weather.query or "")
-            _wloc = (qs.get("location") or [""])[0].strip()
-            if not _wloc:
-                self.send_response(400)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": "Weather location is required"}).encode())
-                return
-            try:
-                _wloc_encoded = urllib.parse.quote(_wloc, safe='')
-                req = urllib.request.Request(f"https://wttr.in/{_wloc_encoded}?format=j1", headers={"User-Agent": "curl/7.68"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                current = (data.get("current_condition") or [{}])[0]
-                area = (((data.get("nearest_area") or [{}])[0]).get("areaName") or [{}])[0].get("value") or _wloc
-                region = (((data.get("nearest_area") or [{}])[0]).get("region") or [{}])[0].get("value") or ""
-                desc = ((current.get("weatherDesc") or [{}])[0].get("value") or "")
-                result = {
-                    "ok": True,
-                    "location": _wloc,
-                    "resolvedLocation": (area + ((", " + region) if region else "")).strip(),
-                    "weather": desc,
-                    "tempF": current.get("temp_F"),
-                    "tempC": current.get("temp_C"),
-                    "updatedAt": int(time.time() * 1000),
-                }
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps(result).encode())
-            except Exception as e:
-                self.send_response(502)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps({"ok": False, "error": str(e)}).encode())
         elif self.path == "/api/skills-library":
             result = _handle_skills_library_list()
             self.send_response(200)
@@ -32400,6 +32376,22 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_OPTIONS(self):
         request_path = urllib.parse.urlparse(self.path).path
+        if personal_asset_http_service.PersonalAssetHTTPRoutes.handles(request_path):
+            if not personal_asset_http_service.PersonalAssetHTTPRoutes.is_management(request_path):
+                self._send_json(
+                    {"ok": False, "code": "personal_asset_agent_browser_origin_forbidden"},
+                    status=403,
+                )
+                return
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header(
+                "Access-Control-Allow-Headers",
+                "Content-Type, X-VO-Management-Token",
+            )
+            self.send_header("Access-Control-Max-Age", "600")
+            self.end_headers()
+            return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             if not hr_http_service.HRHTTPRoutes.is_management(request_path):
                 self._send_json(
@@ -32425,6 +32417,11 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     def do_POST(self):
         parsed_url = urllib.parse.urlparse(self.path)
         request_path = parsed_url.path
+        if request_path == "/api/weather/test":
+            if self._reject_untrusted_management_request():
+                return
+            if server_routes.config.handle_post(self, parsed_url):
+                return
         if request_path == server_routes.oss_settings.ACTIVATE_PATH:
             # 鉴权必须先于 body 解析，避免未授权请求触发候选凭证处理或云端探测。
             if self._reject_untrusted_management_request():
@@ -32511,6 +32508,9 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
             "POST", request_path
         ):
             self._handle_agent_management_post(request_path)
+            return
+        if personal_asset_http_service.PersonalAssetHTTPRoutes.handles(request_path):
+            self._handle_personal_asset_post(request_path)
             return
         if hr_http_service.HRHTTPRoutes.handles(request_path):
             self._handle_hr_post(request_path)
@@ -32838,20 +32838,8 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
         elif self.path == "/setup/save":
             if self._reject_untrusted_management_request():
                 return
-            body, error = self._read_limited_json_body()
-            if error:
-                self.send_response(error.pop("_status"))
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(json.dumps(error).encode())
-                return
             try:
-                result = _persist_setup_payload(body)
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Access-Control-Allow-Origin", "*")
-                self.end_headers()
-                self.wfile.write(json.dumps(result).encode())
+                server_routes.config.handle_post(self, parsed_url)
             except Exception as e:
                 self.send_response(500)
                 self.send_header("Content-Type", "application/json")

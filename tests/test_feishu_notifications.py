@@ -24,6 +24,7 @@ from feishu_notifications import (  # noqa: E402
     validate_notification_intent,
 )
 import feishu_chat_channel  # noqa: E402
+from server_services import config_runtime  # noqa: E402
 from services.agent_platform_prompt_formatting import render_feishu_group_message_prompt  # noqa: E402
 
 
@@ -488,6 +489,37 @@ def test_update_notification_uses_common_card_builder_and_records_message_id():
         assert "update-token-secret" not in serialized
 
 
+def test_update_notification_preserves_explicit_card_v2_schema():
+    calls = []
+
+    def fake_urlopen(request, timeout=0):
+        calls.append(request)
+        if "/auth/v3/tenant_access_token/internal" in request.full_url:
+            return FakeResponse('{"code":0,"msg":"ok","tenant_access_token":"v2-token","expire":7200}')
+        body = json.loads(request.data.decode("utf-8"))
+        card = json.loads(body["content"])
+        assert card["schema"] == "2.0"
+        assert "body" in card
+        assert "elements" not in card
+        return FakeResponse('{"code":0,"msg":"success"}')
+
+    result = update_feishu_notification(
+        "om_v2_update",
+        {
+            **base_intent("application_form"),
+            "card_schema": "2.0",
+            "state": "processing",
+            "inputs": [],
+            "actions": [],
+        },
+        app_config={"appId": "cli_v2", "appSecret": "v2-secret"},
+        urlopen=fake_urlopen,
+    )
+
+    assert result["ok"] is True
+    assert [request.get_method() for request in calls] == ["POST", "PATCH"]
+
+
 def test_update_notification_records_feishu_and_configuration_failures():
     with tempfile.TemporaryDirectory() as status_dir:
         def fake_urlopen(request, timeout=0):
@@ -693,7 +725,7 @@ def test_setup_config_masks_feishu_webhook_and_preserves_blank_secret():
         "feishuAppSecret": "original-app-secret",
         "feishuEnabled": True,
     }}
-    merged = server._merge_setup_config(existing, {"notifications": {"feishuWebhook": "", "feishuAppSecret": "", "feishuEnabled": False}})
+    merged = config_runtime._merge_setup_config(existing, {"notifications": {"feishuWebhook": "", "feishuAppSecret": "", "feishuEnabled": False}})
     assert merged["notifications"]["feishuWebhook"].endswith("original-token")
     assert merged["notifications"]["feishuAppSecret"] == "original-app-secret"
     assert merged["notifications"]["feishuEnabled"] is False
@@ -726,7 +758,7 @@ def test_feishu_config_save_returns_app_mask_and_clears_webhook():
     previous_receiver = server._FEISHU_LONG_CONNECTION_RECEIVER
     server.FeishuLongConnectionReceiver = FakeReceiver
     server._FEISHU_LONG_CONNECTION_RECEIVER = None
-    server._persist_setup_payload({
+    config_runtime._persist_setup_payload({
         "notifications": {
             "feishuWebhook": "https://open.feishu.cn/open-apis/bot/v2/hook/old-token",
             "feishuEnabled": True,
@@ -1235,7 +1267,7 @@ def test_feishu_chat_config_is_separate_from_notification_app():
     previous_chat_receiver = server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER
     server.FeishuChatWorkerProcess = FakeChatWorker
     server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = None
-    server._persist_setup_payload({
+    config_runtime._persist_setup_payload({
         "notifications": {
             "feishuEnabled": True,
             "feishuAppId": "cli_notification",
@@ -1305,7 +1337,7 @@ def test_feishu_group_chat_config_switch_overrides_and_legacy_guard():
             "groupChatEnabled": True,
             "transportImplementation": "legacy-python",
         })
-        merged = server._merge_setup_config(
+        merged = config_runtime._merge_setup_config(
             {"feishu": {"chatApp": {"groupChatEnabled": True, "transportImplementation": "channel-sdk-node"}}},
             {"notifications": {"feishuEnabled": False}},
         )
@@ -1432,7 +1464,7 @@ def test_setup_save_disabling_feishu_chat_stops_existing_long_connection():
     }
     server._FEISHU_CHAT_LONG_CONNECTION_RECEIVER = receiver
     try:
-        result = server._persist_setup_payload({"feishu": {"chatApp": {"enabled": False}}})
+        result = config_runtime._persist_setup_payload({"feishu": {"chatApp": {"enabled": False}}})
         response = server._feishu_chat_config_response()
     finally:
         server.STATUS_DIR = previous_status_dir

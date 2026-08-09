@@ -1,8 +1,9 @@
-from . import agent_bridges, agents, archive_room, browser, config, mcp_registry, meetings, notifications, oss_settings, projects, providers, skill_library_organization, skills, workflow
+from . import agent_bridges, agents, archive_room, browser, config, management_session, mcp_registry, meetings, notifications, oss_settings, projects, providers, skill_library_organization, skills, workflow
 
 
 ROUTE_MODULES = (
     config,
+    management_session,
     browser,
     notifications,
     providers,

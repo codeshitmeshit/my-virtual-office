@@ -1,0 +1,153 @@
+.standalone-page {
+    --bg: var(--ui-canvas);
+    --surface: var(--ui-surface);
+    --surface2: var(--ui-panel);
+    --border: var(--ui-border);
+    --text: var(--ui-text-primary);
+    --text-dim: var(--ui-text-muted);
+    --dim: var(--ui-text-muted);
+    --gold: var(--ui-accent);
+    --accent: var(--ui-accent);
+    --green: var(--ui-success);
+    --red: var(--ui-danger);
+    --blue: var(--ui-info);
+    --orange: var(--ui-warning);
+    --purple: var(--ui-info);
+
+    min-height: 100dvh;
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size-body);
+    line-height: var(--ui-line-height-body);
+}
+
+.standalone-page :is(h1, h2, h3, button, input, select, textarea, label, a) {
+    font-family: var(--ui-font-family);
+}
+
+.standalone-page :is(h1, h2, h3) { color: var(--ui-text-primary); }
+.standalone-page :is(.subtitle, .muted, .note, .form-hint, .provider-current, .job-meta) { color: var(--ui-text-muted); }
+
+.standalone-page :is(.setup-card, .card, .job-card, .modal) {
+    color: var(--ui-text-primary);
+    background: var(--ui-surface);
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+}
+
+.standalone-page :is(.header, .toolbar, .tabs) {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+}
+
+.standalone-page :is(input:not([type="checkbox"]):not([type="radio"]), select, textarea) {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    font-family: var(--ui-font-family);
+}
+
+.standalone-page :is(input, select, textarea):focus-visible,
+.standalone-page :is(button, a, .tab):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+    border-color: var(--ui-info);
+}
+
+.standalone-page :is(button, .btn, .back-btn, .tab, .job-actions button, .modal-actions button) {
+    min-height: 34px;
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    font-family: var(--ui-font-family);
+}
+
+.standalone-page :is(button, .btn, .back-btn, .tab, .job-actions button, .modal-actions button):hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.standalone-page :is(.btn-gold, .toolbar > button, .modal-actions .save) {
+    color: var(--ui-canvas);
+    background: var(--ui-accent);
+    border-color: var(--ui-accent);
+}
+
+.standalone-page :is(.btn-green, .job-actions button.run) {
+    color: var(--ui-success);
+    background: var(--ui-success-soft);
+    border-color: var(--ui-success);
+}
+
+.standalone-page :is(.btn-blue) {
+    color: var(--ui-info);
+    background: var(--ui-info-soft);
+    border-color: var(--ui-info);
+}
+
+.standalone-page :is(.btn-red, .job-actions button.delete) {
+    color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    border-color: var(--ui-danger);
+}
+
+.standalone-page :is(button, input, select, textarea):disabled {
+    opacity: .58;
+    cursor: not-allowed;
+}
+
+.standalone-page :is(.status-box, .status-msg, .toast, .badge, .header .status) {
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md);
+}
+
+.standalone-page :is(.success, .ok, .online) {
+    color: var(--ui-success);
+    background: var(--ui-success-soft);
+    border-color: var(--ui-success);
+}
+
+.standalone-page :is(.error, .err, .offline) {
+    color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    border-color: var(--ui-danger);
+}
+
+.standalone-page :is(.info, .connecting, .pending) {
+    color: var(--ui-info);
+    background: var(--ui-info-soft);
+    border-color: var(--ui-info);
+}
+
+.standalone-page :is(code, pre, .model-editor, .job-schedule) {
+    font-family: var(--ui-font-family);
+}
+
+.standalone-page .tab.active {
+    color: var(--ui-accent);
+    background: var(--ui-accent-soft);
+    border-color: var(--ui-accent);
+}
+
+.standalone-page .dot.active { background: var(--ui-accent); }
+.standalone-page .dot.done { background: var(--ui-success); }
+.standalone-page .modal-overlay { background: var(--ui-overlay); }
+
+/* display 与运行时尺寸由原处理器动态写入，保留其状态职责。 */
+.standalone-page .step:not(.active),
+.standalone-page .panel:not(.active),
+.standalone-page .modal-overlay:not(.open) { display: none; }
+
+@media (max-width: 700px) {
+    .standalone-page { padding: var(--ui-space-lg); }
+    .standalone-page .setup-card { padding: var(--ui-space-xl); }
+    .standalone-page :is(.grid, .native-grid) { grid-template-columns: 1fr; }
+    .standalone-page :is(.btn-row, .modal-actions) { flex-wrap: wrap; }
+}

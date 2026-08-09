@@ -7,10 +7,11 @@ var _sklSkills = [];
 var _sklLibraryData = { skills: [], categories: [] };
 var _sklEditingName = null; // null = new, string = editing existing
 
-function _sklToast(message) {
+function _sklToast(message, type) {
+    if (window.VOFeedback) return window.VOFeedback.legacy(message, type);
     var toast = window._acpShowToast || window._showOfficeToast;
     if (typeof toast === 'function') {
-        toast(message);
+        toast(message, type);
     }
 }
 

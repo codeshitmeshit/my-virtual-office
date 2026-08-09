@@ -73,11 +73,11 @@ def _classified_error(sdk, exc: Exception) -> OssStorageError:
             underlying = exc.unwrap()
         except Exception:
             underlying = None
-        if isinstance(underlying, (TimeoutError, ConnectionError, OSError)):
-            return OssStorageError(
-                "Alibaba Cloud OSS is unreachable",
-                code="oss_connectivity_failed",
-            )
+        # OSS SDK V2 wraps service responses, including 404 NoSuchKey, in an
+        # OperationError. Re-run the same safe classifier on the unwrapped
+        # exception so exists() can treat a missing first-sync object as false.
+        if underlying is not None and underlying is not exc:
+            return _classified_error(sdk, underlying)
     if isinstance(exc, (TimeoutError, ConnectionError)):
         return OssStorageError(
             "Alibaba Cloud OSS is unreachable", code="oss_connectivity_failed"

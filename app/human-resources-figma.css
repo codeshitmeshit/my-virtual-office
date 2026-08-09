@@ -17,7 +17,7 @@
     gap: 10px;
     overflow: hidden;
     color: #e9ecff;
-    font-family: var(--vo-pixel-ui-font, "Press Start 2P", monospace);
+    font-family: var(--ui-font-family);
     font-size: 7px;
 }
 

@@ -17,6 +17,8 @@
         'vo-codex-communication': 'communication',
         'vo-browser-control': 'browser',
         'vo-agent-workspace': 'workspace',
+        'vo-personal-assets': 'workspace',
+        'vo-personal-context': 'workspace',
         'vo-agent-hr': 'human-resources',
         'vo-project-authoring': 'workflow',
         'vo-project-workflow': 'workflow',

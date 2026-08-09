@@ -55,7 +55,11 @@
     }
 
     function stagePipelineWorkflowActive(project, activeIds) {
-        if (activeIds && activeIds.length) return true;
+        return !!(activeIds && activeIds.length);
+    }
+
+    function stagePipelinePollingActive(project, activeIds) {
+        if (stagePipelineWorkflowActive(project, activeIds)) return true;
         if (project && project.projectExecutionActive) return true;
         const orchestration = project && project.orchestration || {};
         const phase = String((project && (project.projectExecutionPhase || project.orchestrationState)) || orchestration.state || '').toLowerCase();
@@ -731,6 +735,9 @@
             .replace(/\n/g, '<br>');
     }
     function toast(msg, type = 'info') {
+        if (window.VOFeedback) {
+            return window.VOFeedback.legacy(msg, type);
+        }
         let el = document.getElementById('proj-toast');
         if (!el) {
             el = document.createElement('div');
@@ -2580,7 +2587,7 @@
 
     function projectExecutionHasRunningTask(project) {
         if (isStagePipelineProject(project)) {
-            return stagePipelineWorkflowActive(project, projectActiveTaskIds(project));
+            return stagePipelinePollingActive(project, projectActiveTaskIds(project));
         }
         const runningStates = ['validating', 'executing', 'retrying', 'reworking', 'reviewing'];
         return ((project && project.tasks) || []).some(task => task.activeAttemptId && runningStates.includes(task.executionState));

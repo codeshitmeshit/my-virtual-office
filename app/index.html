@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="management-session-pending">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
@@ -9,11 +9,20 @@
     <link rel="apple-touch-icon" href="icon-192.png">
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#1a1a2e">
-    <link rel="stylesheet" href="style.css?v=1785328545-management-token-layer">
+    <link rel="stylesheet" href="fonts.css?v=20260809-unified-font">
+    <link rel="stylesheet" href="ui-system.css?v=20260809-unified-font">
+    <link rel="stylesheet" href="ui-components.css?v=20260809-ui-components">
+    <link rel="stylesheet" href="ui-dialogs.css?v=20260809-ui-dialogs">
+    <link rel="stylesheet" href="ui-feedback.css?v=20260810-notification">
+    <link rel="stylesheet" href="style.css?v=20260809-ui-foundation-chat-bottom-follow-weather-form-layout">
+    <link rel="stylesheet" href="management-session-gate.css?v=20260810-entry-auth">
+    <link rel="stylesheet" href="settings-modal.css?v=20260809-large-modal-office-branding">
+    <link rel="stylesheet" href="weather-settings.css?v=20260810-location-notification">
     <link rel="stylesheet" href="projects.css?v=1785328545-project-board-scroll">
     <link rel="stylesheet" href="project-orchestration.css?v=1785328545-canvas-scrollbar">
     <link rel="stylesheet" href="archive-room.css?v=1785328545-phase13">
     <link rel="stylesheet" href="human-resources.css?v=20260731-hr-report-rendering">
+    <link rel="stylesheet" href="personal-assets.css?v=20260809-grouped-overview">
     <link rel="stylesheet" href="human-resources-figma.css?v=20260731-hr-report-rendering">
     <link rel="stylesheet" href="human-decision-center.css?v=20260803-vo-shell">
     <link rel="stylesheet" href="agent-management.css?v=1785328545-entry-visibility">
@@ -22,8 +31,11 @@
     <link rel="stylesheet" href="skills-library-organization.css?v=20260730d">
     <link rel="stylesheet" href="mcp-registry.css?v=20260730-managed-launcher">
     <link rel="stylesheet" href="branch-agent-selector.css?v=20260730b">
-    <link rel="stylesheet" href="fonts.css?v=1785328545.05.07">
-    <link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="ui-main-shell.css?v=20260809-chat-header-controls">
+    <link rel="stylesheet" href="ui-management-surfaces.css?v=20260809-ui-management">
+    <link rel="stylesheet" href="ui-project-surfaces.css?v=20260809-ui-projects">
+    <link rel="stylesheet" href="ui-collaboration-surfaces.css?v=20260809-ui-collaboration">
+    <link rel="stylesheet" href="ui-catalog-surfaces.css?v=20260809-ui-catalogs">
     <!-- i18n: inline locale data for immediate init -->
     <script id="locale-en" type="application/json">{}</script>
     <script id="locale-zh" type="application/json">{}</script>
@@ -40,6 +52,7 @@
     </script>
 </head>
 <body>
+    <script src="management-session-gate.js?v=20260810-entry-auth"></script>
     <div class="main-container">
         <div class="left-column">
             <div class="game-wrapper">
@@ -61,7 +74,7 @@
                             <input type="text" id="mm-gateway-url" class="mm-input" placeholder="ws://127.0.0.1:18789">
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="gateway_url_desc">How the server reaches OpenClaw. Default works for local installs.</div>
                             <label class="mm-label"><span data-i18n="gateway_token">Gateway Token</span> <span style="color:#666;font-size:9px" data-i18n="gateway_token_hint">(auto-detected)</span></label>
-                            <input type="text" id="mm-gateway-token" class="mm-input" placeholder="Auto-detected from openclaw.json" style="font-family:monospace;font-size:11px;">
+                            <input type="text" id="mm-gateway-token" class="mm-input" placeholder="Auto-detected from openclaw.json" style="font-family: var(--ui-font-family);font-size:11px;">
                             <div style="font-size:9px;color:#666;margin:4px 0 8px;" data-i18n="gateway_token_desc">Auth token for chat & live status. Auto-read from OpenClaw config. Override to connect to a different instance.</div>
                             <button class="mm-btn mm-btn-primary" onclick="mmTestConnection()" data-i18n="test_connection">🔍 Test Connection</button>
                             <div id="mm-conn-status"></div>
@@ -164,12 +177,68 @@
                         <!-- Office Settings -->
                         <div class="mm-section">
                             <div class="mm-section-title" data-i18n="office_section">🏢 Office</div>
-                            <label class="mm-label" data-i18n="office_name">Office Name</label>
-                            <input type="text" id="mm-office-name" class="mm-input" placeholder="My Virtual Office">
+                            <div class="office-branding-fields">
+                                <label class="mm-label" for="mm-office-name" data-i18n="office_name">Office Name</label>
+                                <input type="text" id="mm-office-name" class="mm-input" maxlength="80" placeholder="My Virtual Office">
+                                <label class="mm-label" for="mm-office-icon-file" data-i18n="office_icon">Office Icon</label>
+                                <div class="office-branding-icon-row">
+                                    <img id="mm-office-icon-preview" class="office-branding-icon-preview is-default" src="favicon.png" data-default-src="favicon.png" alt="" aria-hidden="true">
+                                    <div class="office-branding-icon-actions">
+                                        <input type="file" id="mm-office-icon-file" class="office-branding-file-input" accept="image/png,image/jpeg,image/webp,image/x-icon,image/vnd.microsoft.icon">
+                                        <button type="button" id="mm-office-icon-clear" class="mm-btn" data-i18n="office_icon_remove">Remove icon</button>
+                                    </div>
+                                </div>
+                                <div id="mm-office-icon-status" class="mm-help office-branding-status" role="status" aria-live="polite" data-i18n="office_icon_hint">PNG, JPG, WebP, or ICO. Images are resized for the browser tab and saved only after Save Settings succeeds.</div>
+                            </div>
+                        </div>
+                        <!-- Weather Settings -->
+                        <div class="mm-section" data-settings-card="weather-location">
+                            <div class="mm-section-title" data-i18n="weather_location">Weather Location</div>
+                            <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
+                                <input type="checkbox" id="mm-show-weather" checked> <span data-i18n="show_weather">Show weather effects</span>
+                            </label>
                             <label class="mm-label" data-i18n="weather_location">Weather Location</label>
                             <div class="mm-weather-row">
                                 <input type="text" id="mm-weather-city" class="mm-input mm-weather-city" placeholder="Beijing" data-i18n-placeholder="weather_city_placeholder">
                                 <input type="text" id="mm-weather-state" class="mm-input mm-weather-state" placeholder="Optional" data-i18n-placeholder="weather_region_placeholder">
+                            </div>
+                            <div class="weather-provider-grid">
+                                <div class="weather-provider-field">
+                                    <label class="mm-label" for="mm-weather-longitude" data-i18n="weather_longitude">Longitude</label>
+                                    <input type="number" id="mm-weather-longitude" class="mm-input" min="-180" max="180" step="0.000001" placeholder="116.30">
+                                </div>
+                                <div class="weather-provider-field">
+                                    <label class="mm-label" for="mm-weather-latitude" data-i18n="weather_latitude">Latitude</label>
+                                    <input type="number" id="mm-weather-latitude" class="mm-input" min="-90" max="90" step="0.000001" placeholder="39.96">
+                                </div>
+                            </div>
+                            <div class="weather-location-actions">
+                                <button type="button" id="mm-weather-locate" class="mm-btn" onclick="VOWeatherSettings.locateCurrentPosition()" data-i18n="weather_use_current_location">⌖ Use current location</button>
+                                <div id="mm-weather-location-status" class="weather-location-status" role="status" aria-live="polite"></div>
+                            </div>
+                            <div class="weather-provider-secret-help" data-i18n="weather_location_privacy_hint">Your coordinates stay in this draft until you test or save.</div>
+                        </div>
+                        <div class="mm-section" data-settings-card="weather-provider">
+                            <div class="mm-section-title" data-i18n="weather_provider">Weather Provider</div>
+                            <label class="mm-label" for="mm-weather-provider" data-i18n="weather_provider">Weather Provider</label>
+                            <select id="mm-weather-provider" class="mm-input" onchange="VOWeatherSettings.toggleProviderFields()">
+                                <option value="qweather" data-i18n="weather_provider_qweather">QWeather (recommended for China)</option>
+                                <option value="wttr" data-i18n="weather_provider_wttr">wttr.in (compatibility)</option>
+                            </select>
+                            <div id="mm-qweather-fields">
+                                <label class="mm-label" for="mm-qweather-api-host" data-i18n="qweather_api_host">QWeather API Host</label>
+                                <input type="text" id="mm-qweather-api-host" class="mm-input" placeholder="abc1234xyz.def.qweatherapi.com" autocomplete="off">
+                                <label class="mm-label" for="mm-qweather-api-key" data-i18n="qweather_api_key">QWeather API Key</label>
+                                <input type="password" id="mm-qweather-api-key" class="mm-input" autocomplete="new-password">
+                                <div class="weather-provider-secret-help" data-i18n="qweather_secret_hint">Stored on the server only. Leave the masked value unchanged to keep the saved key.</div>
+                            </div>
+                            <label class="mm-label weather-provider-fallback">
+                                <input type="checkbox" id="mm-weather-fallback" checked>
+                                <span data-i18n="weather_fallback">Use wttr.in compatibility fallback when QWeather is temporarily unavailable</span>
+                            </label>
+                            <div class="weather-provider-attribution">
+                                <span data-i18n="weather_attribution">Weather data:</span>
+                                <a href="https://www.qweather.com/" target="_blank" rel="noopener noreferrer">QWeather</a>
                             </div>
                             <div class="mm-weather-actions">
                                 <button type="button" class="mm-btn mm-weather-test-btn" onclick="mmTestWeather()" data-i18n="test_weather">🔍 Test</button>
@@ -266,13 +335,7 @@
                                 <div id="mm-viewer-status" style="margin:4px 0;"></div>
                             </div>
                         </div>
-                        <div class="mm-section">
-                            <div class="mm-section-title" data-i18n="weather_section">🌤️ Weather</div>
-                            <label class="mm-label">
-                                <input type="checkbox" id="mm-show-weather" checked> <span data-i18n="show_weather">Show weather effects</span>
-                            </label>
-                        </div>
-                        <div class="mm-section">
+                        <div class="mm-section" data-settings-card="feishu-notifications">
                             <div class="mm-section-title" data-i18n="feishu_notifications_section">📣 Feishu Notifications</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
                                 <input type="checkbox" id="mm-feishu-enable" checked> <span data-i18n="feishu_enable_webhook">Enable Feishu notification webhook</span>
@@ -300,8 +363,9 @@
                             </div>
                             <div id="mm-feishu-status"></div>
                             <div style="font-size:9px;color:#666;margin:6px 0 0;line-height:1.4;" data-i18n="feishu_secret_note">The full webhook is stored server-side and only shown as a mask here. Leave the field blank to keep the saved value.</div>
-                            <div style="height:1px;background:#2b2b3f;margin:12px 0;"></div>
-                            <div class="mm-section-title" style="font-size:10px;margin:0 0 8px;" data-i18n="feishu_chat_app_section">💬 Feishu Chat App</div>
+                        </div>
+                        <div class="mm-section" data-settings-card="feishu-chat-app">
+                            <div class="mm-section-title" data-i18n="feishu_chat_app_section">💬 Feishu Chat App</div>
                             <label class="mm-label" style="display:flex;align-items:center;gap:6px;">
                                 <input type="checkbox" id="mm-feishu-chat-enable"> <span data-i18n="feishu_chat_enable">Enable Feishu chat channel</span>
                             </label>
@@ -371,7 +435,8 @@
                 <a href="/cron.html" style="text-decoration:none"><button title="Cron Job Manager" data-i18n="cron" data-i18n-title="cron_manager_title">⏰ Cron</button></a>
                 <button title="Project Manager" onclick="openProjectsManager()" data-i18n="projects" data-i18n-title="projects_title">📋 Projects</button>
                 <button title="Archive Room" onclick="openArchiveRoom()" data-i18n="archive_room" data-i18n-title="archive_room">🗄️ Archive Room</button>
-                <button id="btn-agent-settings" title="Human Resources" onclick="openAgentManagement('humanResources')" data-i18n="agent_management" data-i18n-title="agent_management">👥 Human Resources</button>
+                <button id="personal-assets-toggle" class="personal-assets-toggle" title="View and maintain personal information that Agents may use when relevant" onclick="openPersonalAssets()" data-i18n="personal_assets" data-i18n-title="personal_assets_description">🧠 Personal Assets</button>
+                <button id="btn-agent-settings" title="Human Resources" onclick="openAgentManagement('humanResources')" data-i18n-title="agent_management"><span aria-hidden="true">🧑‍💼</span> <span data-i18n="agent_management">Human Resources</span></button>
                 <button title="Reset canvas zoom" onclick="resetCamera()" data-i18n="reset_zoom" data-i18n-title="reset_zoom">🔍 Reset</button>
                 <button id="sms-toggle" title="SMS/Phone Panel" data-i18n="sms" data-i18n-title="sms_phone_panel">📞 SMS</button>
                 <button id="browser-toggle" title="Agent Browser" class="browser-toggle-btn" data-i18n="browser" data-i18n-title="agent_browser_title">🌐 Browser</button>
@@ -386,15 +451,6 @@
                 <h2 id="brand-title" data-i18n="virtual">VIRTUAL</h2>
                 <h3 data-i18n="dashboard">⚡ DASHBOARD ⚡</h3>
             </div>
-            <script>
-            // Load office name from config
-            fetch('/vo-config').then(r=>r.json()).then(d=>{
-                var el=document.getElementById('brand-title');
-                if(el&&d.office&&d.office.name) el.textContent=d.office.name.toUpperCase();
-                document.title=d.office.name||'My Virtual Office';
-            }).catch(()=>{});
-            </script>
-
             <div class="sidebar-bulk-actions">
                 <button class="sidebar-bulk-btn" onclick="sidebarExpandAll()" title="Expand all widgets" data-i18n="sidebar_expand_all">▼ Expand All</button>
                 <button class="sidebar-bulk-btn" onclick="sidebarCollapseAll()" title="Collapse all widgets" data-i18n="sidebar_collapse_all">▲ Collapse All</button>
@@ -898,7 +954,7 @@
         <div class="modal-content projects-modal-content">
             <div class="modal-header" style="flex-shrink:0;padding:10px 16px;background:#0d0d1e;border-bottom:2px solid #ffd700">
                 <span class="modal-emoji">📋</span>
-                <h2 style="font-size:16px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif" data-i18n="projects_title">Projects</h2>
+                <h2 style="font-size:16px;font-family:var(--ui-font-family)" data-i18n="projects_title">Projects</h2>
                 <span class="close-btn" onclick="closeProjectsModal()">&times;</span>
             </div>
             <div id="proj-main-content" style="flex:1;min-height:0;display:flex;flex-direction:column;overflow-x:hidden;overflow-y:auto">
@@ -964,6 +1020,21 @@
                 </div>
                 <div id="archive-artifact-modal-body" class="archive-artifact-modal-body"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- Personal Assets Modal: management only; onboarding lives in the manual Skill. -->
+    <div id="personalAssetsModal" class="modal hidden" onclick="if(event.target===this)closePersonalAssets()">
+        <div class="modal-content personal-assets-modal-content" role="dialog" aria-modal="true" aria-labelledby="personal-assets-title">
+            <div class="modal-header">
+                <span class="modal-emoji">🧠</span>
+                <div class="personal-assets-modal-heading">
+                    <h2 id="personal-assets-title" data-i18n="personal_assets_title">Personal Assets</h2>
+                    <p data-i18n="personal_assets_header_hint">All Agents can maintain long-term profile data directly; sensitive reads remain governed by Decisions.</p>
+                </div>
+                <span class="close-btn" onclick="closePersonalAssets()">&times;</span>
+            </div>
+            <div id="personal-assets-content" class="personal-assets-content"></div>
         </div>
     </div>
 
@@ -1083,12 +1154,12 @@
             </select>
             <span id="chat-status" class="chat-status" data-i18n="offline_status">Offline</span>
             <span class="chat-feishu-live-status" data-i18n="chat_feishu_live_disconnected" hidden>Feishu live: disconnected</span>
-            <span style="flex:1"></span>
-            <div class="chat-header-btns">
-                <button id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context">🗜</button>
-                <button id="chat-new-session" class="chat-new-session" data-i18n-title="chat_new_session" title="New Session">🔄</button>
-                <button id="chat-move" class="chat-move-btn" title="Move/snap chat window" data-i18n-title="move_chat_window">⇱</button>
-                <button id="chat-close" class="chat-close">&times;</button>
+            <span class="chat-header-spacer" aria-hidden="true"></span>
+            <div class="chat-header-btns" role="toolbar" aria-label="Chat window actions" data-i18n-aria-label="chat_window_actions">
+                <button type="button" id="chat-compact-context" class="chat-compact-context" title="Compress Codex context" aria-label="Compress Codex context" style="display:none" data-i18n-title="compress_codex_context" data-i18n-aria-label="compress_codex_context">⇲</button>
+                <button type="button" id="chat-new-session" class="chat-new-session" title="New Session" aria-label="New Session" data-i18n-title="chat_new_session" data-i18n-aria-label="chat_new_session">↻</button>
+                <button type="button" id="chat-move" class="chat-move-btn" title="Move/snap chat window" aria-label="Move/snap chat window" data-i18n-title="move_chat_window" data-i18n-aria-label="move_chat_window">⇱</button>
+                <button type="button" id="chat-close" class="chat-close" title="Close chat window" aria-label="Close chat window" data-i18n-title="close_chat_window" data-i18n-aria-label="close_chat_window">&times;</button>
             </div>
         </div>
         <div id="chat-model-bar" class="chat-model-bar">
@@ -1235,11 +1306,18 @@
         setTimeout(resizeCanvas, 320);
     }
     </script>
+    <script src="ui-feedback.js?v=20260810-notification"></script>
     <script src="vo-dialogs.js?v=20260731"></script>
     <script src="internal-bubble.js?v=1785328545"></script>
     <script src="meeting-human-decision-ui.js?v=20260808-meeting-center-record"></script>
-    <script src="game.js?v=1785328545-intervention-auto-continue"></script>
+    <script src="weather-settings.js?v=20260810-location-notification"></script>
+    <script src="weather-localization.js?v=20260810-humidity-zh"></script>
+    <script src="game.js?v=20260810-settings-save-i18n"></script>
+    <script src="office-branding.js?v=20260809-office-title-favicon"></script>
     <script src="oss-settings.js?v=20260808"></script>
+    <script src="settings-modal-ui.js?v=20260810-provider-under-office"></script>
+    <script src="settings-save-feedback.js?v=20260809-save-feedback"></script>
+    <script src="settings-save-transport.js?v=20260809-save-transport-b"></script>
     <script src="branch-agent-selector.js?v=20260730b"></script>
     <script src="skill-library-agent-usage-ui.js?v=20260730"></script>
     <script src="skills-library-organization-ui.js?v=20260730d"></script>
@@ -1258,6 +1336,7 @@
     <script src="project-human-decision-comment-ui.js?v=20260808b"></script>
     <script src="projects.js?v=1785328545-dedupe-exec-reason"></script>
     <script src="archive-room.js?v=1785328545-phase13"></script>
+    <script src="personal-assets.js?v=20260809-grouped-overview"></script>
     <script src="human-resources.js?v=20260731-hr-report-rendering"></script>
     <script src="agent-appearance-preview.js?v=1785328545-pixel-preview"></script>
     <script src="agent-appearance-dropdown.js?v=1785328545-upward-dropdown"></script>

@@ -1,0 +1,115 @@
+/*
+ * Virtual Office canonical UI foundation.
+ * 这里只定义系统级语义；办公室像素场景、编排画布和营销插画等领域视觉在各自作用域内保留。
+ */
+:root {
+    color-scheme: dark;
+
+    --ui-canvas: #0a0a0f;
+    --ui-surface: #12121e;
+    --ui-toolbar: #151520;
+    --ui-panel: #1a1a2e;
+    --ui-overlay: rgba(4, 5, 12, 0.78);
+
+    --ui-text-primary: #e8e8f0;
+    --ui-text-muted: #888888;
+    --ui-border: #2a2a3e;
+    --ui-border-strong: #3a3a52;
+
+    --ui-accent: #ffd700;
+    --ui-success: #4caf50;
+    --ui-info: #4fc3f7;
+    --ui-warning: #ffb300;
+    --ui-danger: #f44336;
+
+    --ui-accent-soft: rgba(255, 215, 0, 0.12);
+    --ui-success-soft: rgba(76, 175, 80, 0.14);
+    --ui-info-soft: rgba(79, 195, 247, 0.14);
+    --ui-warning-soft: rgba(255, 179, 0, 0.14);
+    --ui-danger-soft: rgba(244, 67, 54, 0.14);
+
+    --ui-space-xxs: 2px;
+    --ui-space-xs: 4px;
+    --ui-space-sm: 6px;
+    --ui-space-md: 8px;
+    --ui-space-lg: 12px;
+    --ui-space-xl: 16px;
+    --ui-space-2xl: 24px;
+    --ui-space-3xl: 32px;
+
+    --ui-radius-sm: 4px;
+    --ui-radius-md: 6px;
+    --ui-radius-lg: 8px;
+    --ui-radius-xl: 12px;
+    --ui-radius-pill: 999px;
+
+    --ui-font-size-meta: 8px;
+    --ui-font-size-caption: 9px;
+    --ui-font-size-label: 10px;
+    --ui-font-size-body: 12px;
+    --ui-font-size-title: 14px;
+    --ui-font-size-hero: 18px;
+    --ui-line-height-meta: 12px;
+    --ui-line-height-caption: 14px;
+    --ui-line-height-label: 16px;
+    --ui-line-height-body: 16px;
+    --ui-line-height-title: 20px;
+    --ui-line-height-hero: 24px;
+
+    --ui-font-family: "VO Sans", sans-serif;
+    --vo-pixel-ui-font: var(--ui-font-family);
+    --vo-technical-font: var(--ui-font-family);
+
+    --ui-focus-ring: 0 0 0 2px rgba(79, 195, 247, 0.38);
+    --ui-shadow-panel: 0 18px 60px rgba(0, 0, 0, 0.52);
+    --ui-transition-fast: 120ms ease;
+    --ui-transition-normal: 180ms ease;
+
+    /* 旧名称只作为兼容别名，值仍由本文件的 canonical token 唯一提供。 */
+    --ui-bg: var(--ui-canvas);
+    --ui-text: var(--ui-text-primary);
+    --ui-muted: var(--ui-text-muted);
+    --ui-text-dim: var(--ui-text-muted);
+    --text-primary: var(--ui-text-primary);
+    --gold: var(--ui-accent);
+    --green: var(--ui-success);
+    --blue: var(--ui-info);
+    --red: var(--ui-danger);
+}
+
+html,
+body,
+button,
+input,
+select,
+textarea {
+    font-family: var(--ui-font-family);
+}
+
+body {
+    background: var(--ui-canvas);
+    color: var(--ui-text-primary);
+    text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* DOM 产品界面统一使用 VO Sans；办公室 Canvas 的绘制字体由场景代码独立维护。 */
+.vo-pixel-ui,
+[data-ui-font="pixel"] {
+    font-family: var(--ui-font-family);
+}
+
+code,
+pre,
+kbd,
+samp,
+[data-ui-font="technical"] {
+    font-family: var(--ui-font-family);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --ui-transition-fast: 0ms;
+        --ui-transition-normal: 0ms;
+    }
+}

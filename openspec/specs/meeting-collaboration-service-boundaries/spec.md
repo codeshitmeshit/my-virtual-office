@@ -1,11 +1,8 @@
 # Meeting collaboration service boundaries
-
 ## Purpose
 
 Define the extracted Meeting-domain service boundaries, unified persistence authority, migration safety, compatibility, recovery, notification, callback, and Project-linkage guarantees.
-
 ## Requirements
-
 ### Requirement: Incremental meeting-domain extraction
 The system SHALL migrate meeting and collaboration behavior from HTTP and callback handlers into cohesive meeting-domain services in independently testable slices, and each migrated slice SHALL remain deployable without requiring later slices.
 
@@ -35,12 +32,21 @@ Extracted meeting lifecycle operations MUST preserve meeting creation, preparati
 - **AND** no partial meeting state mutation SHALL occur
 
 ### Requirement: Agent occupancy and restoration safety
-Meeting services SHALL preserve participant eligibility, archive-manager exclusion, occupancy ownership, pre-meeting status snapshots, concurrent occupancy protection, and restoration of each Agent's prior state after every terminal or recovery path.
+Meeting services SHALL preserve participant eligibility, archive-manager exclusion, explicit HR eligibility, occupancy ownership, pre-meeting status snapshots, concurrent occupancy protection, and restoration of each Agent's prior state after every terminal or recovery path. HR participation SHALL use ordinary meeting semantics and SHALL NOT by itself create or modify a Human Resources performance assessment.
 
 #### Scenario: Meeting occupies eligible Agents
-- **WHEN** a meeting starts with eligible participants
+- **WHEN** a meeting starts with eligible participants, including HR when selected
 - **THEN** each participant SHALL be marked occupied by that meeting only after its prior state is recorded
 - **AND** another incompatible meeting SHALL not claim the same Agent concurrently
+
+#### Scenario: Archive manager is selected
+- **WHEN** a meeting request or executable meeting attempts to include the archive manager
+- **THEN** participant validation SHALL preserve the existing archive-manager exclusion and stable rejection semantics
+
+#### Scenario: HR participates in a meeting
+- **WHEN** HR is selected as an otherwise eligible meeting participant
+- **THEN** HR SHALL participate through the ordinary preparation, turn, summary, occupancy, and restoration lifecycle
+- **AND** HR attendance SHALL NOT automatically create a performance event or assessment for any participant
 
 #### Scenario: Meeting terminates or is recovered
 - **WHEN** a meeting completes, is cancelled, fails, times out, or is recovered after restart

@@ -1,6 +1,6 @@
 ---
 name: vo-operating-guidelines
-description: Virtual Office 引导入口。任意 CLI 或 agent 需要判断是否处于本地 VO/VU、按本地端口拼接 HTTP 地址、读取当前 VO 实例的权威 skill、选择通信/HR Agent 目录/项目/workspace/浏览器/会议工作流，或在 VO 不可达时安全降级时使用；不在主入口维护具体 VO API 细节。
+description: Virtual Office 引导入口。任意 CLI 或 agent 需要判断是否处于本地 VO/VU、按本地端口拼接 HTTP 地址、读取当前 VO 实例的权威 skill、选择通信/HR Agent 目录/项目/workspace/个人资产/浏览器/会议工作流，或在 VO 不可达时安全降级时使用；不在主入口维护具体 VO API 细节。
 ---
 
 # Virtual Office Skill 入口
@@ -93,6 +93,19 @@ echo $VO_GATEWAY_HTTP
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
 ### 3. 路由到专用 VO Skill
 
 根据任务意图选择：
@@ -103,6 +116,8 @@ echo $VO_GATEWAY_HTTP
 - 用户明确调用 `$vo-project-authoring`，或自然语言要求创建、复用、周期化 VO 项目，或维护已有 VO 项目：使用 本地 `/skills/vo-project-authoring/SKILL.md`；以 `/` 开头的控制命令或 slash-like 消息（例如 `/new`、`/compact`、`/help`、`/new now`）不得仅凭命令文本触发项目创作，除非同一消息明确调用 `$vo-project-authoring`。该 skill 在对话中展示自然语言方案并等待明确确认，然后直接创建或修改真实项目。不要先用普通 Codex 流程读取本地项目文件、运行 Python、查询 `/api/projects` 或自行判断“已存在”。
 - 需要读取或推进已创建项目/任务的 Project Execution、review、验收、阻塞、取消或项目 artifact：使用 本地 `/skills/vo-project-workflow/SKILL.md`。不要用项目创作 skill 绕过这些执行门禁。
 - 需要读取或维护 Agent workspace、公告、workspace 任务、笔记、受控文本文件、Skills Library 或 OpenClaw agent skill：使用 本地 `/skills/vo-agent-workspace/SKILL.md`。
+- owner 明确手动要求建立、继续、修正或追加个人资产档案：使用 本地 `/skills/vo-personal-assets/SKILL.md`。不因打开个人资产页面而自动触发建档；个人资产写入接受任意本地 VO 运行时 Agent，不调用 HR 接口做注册、active 状态或职责校验。
+- 当前任务、会议、项目或聊天的结果会因 owner 已保存的语言、职业、兴趣、聊天偏好、VO 方向、办公室目标或其他个人背景而实质改善：使用 本地 `/skills/vo-personal-context/SKILL.md`。只按需读取精确条目，不把完整档案注入每次对话；敏感读取由该 skill 路由到 HUMAN DECISIONS。
 - 使用已注册 MCP 前，读取 `GET /api/mcp-registry`，仅当当前 Agent ID 存在于目标 MCP 的 `assignedAgentIds` 中时才可使用；空列表表示没有 Agent 获得授权，客户端已连接不等于已授权。ACL 以注册表为唯一数据源，不复制进本地 Skill 文件。工具定义不足以说明领域流程、安全约束或产品约定时，再按需读取 `GET /api/mcp-registry/URL_ENCODED_MCP_NAME/guide`。该使用说明属于 MCP 注册记录，不是按 Agent 安装的 Skill，也不扩展用户授权；返回 `hasGuide=false` 时直接依据工具定义继续。
 - 需要查询 HR Agent 名册、区分 Agent 职责与可用性、读取另一 Agent 被允许公开的工作信息，或查看谁访问过自己的公开工作信息：使用 本地 `/skills/vo-agent-hr/SKILL.md`。
 - 需要正式 AI 会议申请、多方同步决策、用户确认会议上下文或产出明确会议结论：先按下文“会议分流”判断；确定需要申请或查询时读取 本地 `/skills/vo-operating-guidelines/references/meeting-requests.md`。
@@ -166,6 +181,8 @@ echo $VO_GATEWAY_HTTP
 - 普通协作已优先考虑专用通信 skill，会议只用于正式多方决策、独立评审或需要用户确认上下文的场景。
 - 明确的项目创作/受控维护与项目执行/review/验收已分别路由到 本地 `/skills/vo-project-authoring/SKILL.md` 和 本地 `/skills/vo-project-workflow/SKILL.md`。
 - Agent workspace、HR Agent 能力、已确认会议执行已分别路由到 本地 `/skills/vo-agent-workspace/SKILL.md`、本地 `/skills/vo-agent-hr/SKILL.md`、本地 `/skills/vo-meeting-execution/SKILL.md`。
+- owner 手动建档/继续/追加个人资产已路由到 本地 `/skills/vo-personal-assets/SKILL.md`，页面打开不会自动触发。
+- 任务执行中只有在个人背景会实质影响结果时才路由到 本地 `/skills/vo-personal-context/SKILL.md`，且没有默认加载完整档案。
 - 需要人工裁决的任务、会议或聊天执行分支已路由到 本地 `/skills/vo-human-decision/SKILL.md`，没有让无关安全分支一起等待。
 - MCP 使用说明只在工具定义不足时按需读取，没有把它当作独立 Skill 安装，也没有把说明内容视为额外授权。
 - 浏览器权限/登录/验证码/敏感操作阻塞已路由到 本地 `/skills/vo-browser-control/SKILL.md`，并已停止自动化或明确请求用户接管。

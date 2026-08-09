@@ -2,6 +2,13 @@
 
 import sys
 
+from services import office_branding as office_branding_service
+from services.weather_providers import (
+    DEFAULT_WEATHER_SERVICE,
+    WeatherProviderError,
+    WeatherSettings,
+)
+
 __all__ = ['_merge_setup_config', '_clear_setup_secret_paths', '_persist_setup_payload', '_build_safe_vo_config', '_handle_health', '_handle_e2e_health', '_handle_status', '_handle_vo_config', '_handle_license_status', '_handle_license_activate', '_handle_license_deactivate', '_handle_office_config_get', '_handle_office_config_save', '_weather_fetch', '_handle_weather_proxy', '_handle_weather_test']
 
 
@@ -78,11 +85,15 @@ def _merge_setup_config(existing, incoming):
             if key in _SETUP_SECRET_KEYS and value in ("", None):
                 continue
             merged[key] = value
+    if isinstance(merged.get("codex"), dict):
+        # Keep deterministic Codex replies as an explicit env-only test hook.
+        # Persisting it in normal setup config silently disables live Codex.
+        merged["codex"].pop("replyText", None)
     return merged
 
 
 def _clear_setup_secret_paths(config, paths):
-    allowed = {"notifications.feishuWebhook"}
+    allowed = {"notifications.feishuWebhook", "feishu.chatApp.appSecret"}
     if not isinstance(config, dict) or not isinstance(paths, list):
         return
     for path in paths:
@@ -101,10 +112,23 @@ def _clear_setup_secret_paths(config, paths):
 
 
 def _persist_setup_payload(body):
+    if isinstance(body, dict) and "office" in body:
+        try:
+            body = copy.deepcopy(body)
+            body["office"] = office_branding_service.normalize_office_patch(body.get("office"))
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc), "code": "invalid_office_branding", "_status": 400}
     cfg_path = _resolve_config_path()
     data_dir = os.environ.get("VO_STATUS_DIR", "/data")
     persistent_path = os.path.join(data_dir, "vo-config.json")
-    if os.path.isdir(data_dir) and cfg_path != persistent_path:
+    prefer_status_dir = isinstance(body, dict) and (
+        body.get("_preferStatusDir") is True
+        or "feishu" in body
+        or "notifications" in body
+    )
+    if os.path.isdir(data_dir) and cfg_path != persistent_path and (
+        prefer_status_dir or not os.environ.get("VO_CONFIG")
+    ):
         cfg_path = persistent_path
     existing = {}
     for try_path in [cfg_path, os.path.join(os.path.dirname(__file__), "vo-config.json")]:
@@ -114,6 +138,23 @@ def _persist_setup_payload(body):
             break
         except (FileNotFoundError, json.JSONDecodeError):
             continue
+    incoming_feishu = body.get("feishu") if isinstance(body, dict) and isinstance(body.get("feishu"), dict) else {}
+    incoming_chat = incoming_feishu.get("chatApp") if isinstance(incoming_feishu.get("chatApp"), dict) else {}
+    if incoming_chat.get("groupChatEnabled") is True:
+        existing_chat = ((existing.get("feishu") or {}).get("chatApp") or {}) if isinstance(existing, dict) else {}
+        selected_transport = str(
+            os.environ.get("VO_FEISHU_CHAT_TRANSPORT")
+            or incoming_chat.get("transportImplementation")
+            or existing_chat.get("transportImplementation")
+            or "channel-sdk-node"
+        ).strip().lower()
+        if selected_transport != "channel-sdk-node":
+            return {
+                "ok": False,
+                "error": "Feishu group chat requires the Channel SDK (Node) transport",
+                "code": "group_chat_requires_channel_sdk",
+                "_status": 400,
+            }
     existing = _merge_setup_config(existing, body)
     _clear_setup_secret_paths(existing, body.get("_clearSecrets") if isinstance(body, dict) else None)
     existing["_setupComplete"] = True
@@ -121,12 +162,19 @@ def _persist_setup_payload(body):
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(existing, f, indent=2)
 
-    global VO_CONFIG, WORKSPACE_BASE, _discovered_roster, _discovered_at
+    global VO_CONFIG, WORKSPACE_BASE, STATUS_DIR, _discovered_roster, _discovered_at
     old_gw = GATEWAY_URL
     old_token = _get_gateway_token()
-    VO_CONFIG = _load_vo_config()
+    if prefer_status_dir and os.environ.get("VO_CONFIG"):
+        explicit_config = os.environ.pop("VO_CONFIG")
+        try:
+            VO_CONFIG = _load_vo_config()
+        finally:
+            os.environ["VO_CONFIG"] = explicit_config
+    else:
+        VO_CONFIG = _load_vo_config()
+    STATUS_DIR = VO_CONFIG["presence"]["statusDir"]
     WORKSPACE_BASE = VO_CONFIG["openclaw"]["homePath"]
-    _sync_runtime_globals_to_loaded_modules(["VO_CONFIG", "WORKSPACE_BASE"])
     _reload_gateway_globals()
     for key in ("GATEWAY_URL", "GATEWAY_HTTP", "OPENCLAW_BIN", "HERMES_HOME", "HERMES_BIN"):
         server = _server_module()
@@ -134,6 +182,7 @@ def _persist_setup_payload(body):
             globals()[key] = getattr(server, key)
     _sync_runtime_globals_to_loaded_modules([
         "VO_CONFIG",
+        "STATUS_DIR",
         "WORKSPACE_BASE",
         "GATEWAY_URL",
         "GATEWAY_HTTP",
@@ -150,6 +199,8 @@ def _persist_setup_payload(body):
         gateway_presence.stop()
         if new_token:
             gateway_presence.start(GATEWAY_URL, new_token, port=PORT, client_version=_get_openclaw_version())
+    if isinstance(body, dict) and isinstance(body.get("feishu"), dict) and "chatApp" in body.get("feishu", {}):
+        _start_feishu_chat_long_connection()
     return {"ok": True}
 
 
@@ -159,7 +210,9 @@ def _build_safe_vo_config():
     return {
         "office": VO_CONFIG["office"],
         "features": VO_CONFIG["features"],
-        "weather": VO_CONFIG["weather"],
+        "weather": WeatherSettings.from_mapping(
+            VO_CONFIG.get("weather", {}), os.environ
+        ).safe_dict(),
         "openclaw": {
             "gatewayUrl": VO_CONFIG["openclaw"]["gatewayUrl"],
             "gatewayHttp": VO_CONFIG["openclaw"]["gatewayHttp"],
@@ -321,43 +374,70 @@ def _handle_office_config_save(raw_body):
     return {"ok": True}
 
 
-def _weather_fetch(location):
-    loc = (location or "").strip()
-    if not loc:
-        return {"error": "Weather location not configured. Set weather.location in vo-config.json", "_status": 404}
-    loc_encoded = urllib.parse.quote(loc, safe="")
-    req = urllib.request.Request(f"https://wttr.in/{loc_encoded}?format=j1", headers={"User-Agent": "curl/7.68"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+def _weather_settings(candidate=None):
+    merged = copy.deepcopy(VO_CONFIG.get("weather", {}))
+    candidate = candidate if isinstance(candidate, dict) else {}
+    if candidate:
+        if "weather" in candidate and isinstance(candidate.get("weather"), dict):
+            candidate = candidate["weather"]
+        for key in ("provider", "location", "latitude", "longitude", "fallbackEnabled"):
+            value = candidate.get(key)
+            if isinstance(value, list):
+                value = value[0] if value else None
+            if value not in (None, ""):
+                merged[key] = value
+        qweather = candidate.get("qweather") if isinstance(candidate.get("qweather"), dict) else {}
+        if candidate.get("apiHost"):
+            qweather = {**qweather, "apiHost": candidate.get("apiHost")}
+        if candidate.get("apiKey"):
+            qweather = {**qweather, "apiKey": candidate.get("apiKey")}
+        if qweather:
+            target = merged.get("qweather") if isinstance(merged.get("qweather"), dict) else {}
+            target = {**target, **{key: value for key, value in qweather.items() if value and "••" not in str(value)}}
+            merged["qweather"] = target
+    return WeatherSettings.from_mapping(merged, os.environ)
+
+
+def _weather_fetch(location=None, candidate=None, *, force=False):
+    payload = dict(candidate or {})
+    if location and not payload.get("location"):
+        payload["location"] = location
+    return DEFAULT_WEATHER_SERVICE.current(_weather_settings(payload), force=force)
 
 
 def _handle_weather_proxy():
     try:
-        return _weather_fetch(VO_CONFIG["weather"].get("location"))
-    except Exception as e:
-        return {"error": str(e), "_status": 502}
+        return _weather_fetch()
+    except WeatherProviderError as exc:
+        status = 400 if exc.code in {"invalid_location", "invalid_qweather_host", "unsupported_provider"} else 503
+        return {"ok": False, "code": exc.code, "error": str(exc), "_status": status}
+    except Exception:
+        return {"ok": False, "code": "weather_unavailable", "error": "Weather is temporarily unavailable", "_status": 503}
 
 
 def _handle_weather_test(query):
-    loc = ((query or {}).get("location") or [""])[0].strip()
-    if not loc:
-        return {"ok": False, "error": "Weather location is required", "_status": 400}
     try:
-        data = _weather_fetch(loc)
-        current = (data.get("current_condition") or [{}])[0]
-        area = (((data.get("nearest_area") or [{}])[0]).get("areaName") or [{}])[0].get("value") or loc
-        region = (((data.get("nearest_area") or [{}])[0]).get("region") or [{}])[0].get("value") or ""
-        desc = ((current.get("weatherDesc") or [{}])[0].get("value") or "")
+        data = _weather_fetch(candidate=query, force=True)
+        current = data.get("current") or {}
+        location = data.get("location") or {}
         return {
-            "ok": True,
-            "location": loc,
-            "resolvedLocation": (area + ((", " + region) if region else "")).strip(),
-            "weather": desc,
-            "tempF": current.get("temp_F"),
-            "tempC": current.get("temp_C"),
+            **data,
+            "resolvedLocation": location.get("name") or _weather_settings(query).location,
+            "weather": current.get("description"),
+            "tempF": current.get("temperatureF"),
+            "tempC": current.get("temperatureC"),
+            "updatedAt": data.get("fetchedAt") or int(time.time() * 1000),
         }
-    except Exception as e:
-        return {"ok": False, "error": str(e), "_status": 502}
+    except WeatherProviderError as exc:
+        status = 400 if exc.code in {
+            "invalid_location",
+            "invalid_qweather_host",
+            "unsupported_provider",
+            "qweather_location_required",
+        } else 503
+        return {"ok": False, "code": exc.code, "error": str(exc), "_status": status}
+    except Exception:
+        return {"ok": False, "code": "weather_unavailable", "error": "Weather is temporarily unavailable", "_status": 503}
 
 _wrap_exports()
 _hydrate()

@@ -299,7 +299,14 @@ def _v2_button_row(buttons: list[dict[str, Any]]) -> dict[str, Any]:
 
 def _v2_input_form(normalized: dict[str, Any], actions: list[dict[str, Any]]) -> dict[str, Any]:
     elements: list[dict[str, Any]] = []
+    active_section = ""
     for item in normalized["inputs"]:
+        section = item.get("section") or ""
+        if section and section != active_section:
+            if active_section:
+                elements.append({"tag": "hr"})
+            elements.append({"tag": "markdown", "content": f"**{section}**"})
+            active_section = section
         label = item["label"] + (" *" if item["required"] else "")
         elements.append({
             "tag": "input",
@@ -389,6 +396,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
         inputs.append({
             "name": name,
             "label": _string(item.get("label") or name, 80),
+            "section": _string(item.get("section") or "", 80),
             "placeholder": _string(item.get("placeholder") or "", 200),
             "multiline": bool(item.get("multiline", True)),
             "required": bool(item.get("required")),
@@ -422,6 +430,9 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
 
     audit = intent.get("audit") if isinstance(intent.get("audit"), dict) else {}
     topic_context = _normalize_topic_context(intent.get("topicContext"))
+    card_schema = _string(intent.get("card_schema") or intent.get("cardSchema"), 20)
+    if card_schema not in {"", "2.0"}:
+        raise FeishuNotificationError(f"unsupported card schema: {card_schema}")
     return {
         "id": _string(intent.get("id") or str(uuid.uuid4()), 120),
         "type": kind,
@@ -443,6 +454,7 @@ def validate_notification_intent(intent: dict[str, Any]) -> dict[str, Any]:
             if audit.get(key)
         },
         "topicContext": topic_context,
+        "card_schema": card_schema,
     }
 
 
@@ -452,7 +464,7 @@ def build_feishu_card(intent: dict[str, Any]) -> dict[str, Any]:
     header_template = _TYPE_TEMPLATE[kind]
     if kind == "application_form":
         header_template = _APPLICATION_STATE_TEMPLATE.get(normalized["state"], header_template)
-    if normalized["inputs"]:
+    if normalized["inputs"] or normalized["card_schema"] == "2.0":
         return _build_feishu_card_v2_with_inputs(normalized, header_template)
 
     elements = _base_content_elements(normalized)

@@ -1,5 +1,13 @@
 const assert = require('assert');
+const fs = require('fs');
+const path = require('path');
 const fontScale = require('../app/font-scale.js');
+
+const root = path.resolve(__dirname, '..');
+const style = fs.readFileSync(path.join(root, 'app', 'style.css'), 'utf8');
+const systemStyle = fs.readFileSync(path.join(root, 'app', 'ui-system.css'), 'utf8');
+assert.match(style, /--vo-font-scale:\s*1/);
+assert.match(systemStyle, /--ui-font-size-body:\s*12px/);
 
 function storage(initial) {
   const data = new Map(Object.entries(initial || {}));

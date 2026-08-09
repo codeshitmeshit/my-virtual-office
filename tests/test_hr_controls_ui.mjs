@@ -38,7 +38,7 @@ assert.deepEqual(hr.helpers.commandSpec('complete_information'), {
 assert.equal(hr.helpers.commandSpec('unknown'), null);
 
 const requests = [];
-globalThis.confirm = () => true;
+globalThis.voConfirm = async () => true;
 globalThis.i18n = {
   managementFetch: async (url, options = {}) => {
     requests.push({ url, options });
@@ -102,12 +102,12 @@ assert.deepEqual(JSON.parse(requests[dailyRequestStart].options.body), { agentId
 assert.equal(hr.state.dailySyncOpen, false);
 assert.deepEqual(hr.state.dailySyncSelected, []);
 
-globalThis.confirm = () => false;
+globalThis.voConfirm = async () => false;
 const requestCount = requests.length;
 assert.equal(await hr.runCommand('resume'), false);
 assert.equal(requests.length, requestCount, 'cancelled confirmation performs no request');
 
-globalThis.confirm = () => true;
+globalThis.voConfirm = async () => true;
 globalThis.i18n.managementFetch = async (url, options = {}) => {
   if (options.method === 'POST') return response({ ok: false, code: 'hr_disabled' }, false);
   throw new Error(`unexpected read after failed command: ${url}`);

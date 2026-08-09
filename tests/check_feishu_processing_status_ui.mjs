@@ -55,6 +55,10 @@ const context = {
   setInterval(_callback, delay) { intervalDelay = delay; return 73; },
   clearInterval(timer) { clearedTimer = timer; },
 };
+context._mmFetchFeishuChatConfig = async () => {
+  const response = await context.fetch('/api/feishu-chat/config');
+  return response.json();
+};
 vm.createContext(context);
 vm.runInContext(game.slice(start, end), context);
 

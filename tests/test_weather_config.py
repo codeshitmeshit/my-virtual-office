@@ -9,7 +9,13 @@ APP_DIR = ROOT / "app"
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from services.weather_config import DEFAULT_WEATHER_LOCATION, resolve_weather_location
+from services.weather_config import (
+    DEFAULT_WEATHER_LATITUDE,
+    DEFAULT_WEATHER_LOCATION,
+    DEFAULT_WEATHER_LONGITUDE,
+    resolve_weather_config,
+    resolve_weather_location,
+)
 
 
 def test_default_weather_location_is_beijing_haidian():
@@ -30,3 +36,27 @@ def test_environment_weather_location_has_highest_precedence():
         )
         == "深圳市,南山区"
     )
+
+
+def test_default_weather_config_uses_qweather_with_precise_haidian_coordinates():
+    config = resolve_weather_config({}, {})
+
+    assert config["provider"] == "qweather"
+    assert config["latitude"] == DEFAULT_WEATHER_LATITUDE
+    assert config["longitude"] == DEFAULT_WEATHER_LONGITUDE
+    assert config["fallbackEnabled"] is True
+
+
+def test_qweather_credentials_can_be_supplied_by_environment():
+    config = resolve_weather_config(
+        {
+            "VO_QWEATHER_API_HOST": "demo.def.qweatherapi.com",
+            "VO_QWEATHER_API_KEY": "secret",
+        },
+        {},
+    )
+
+    assert config["qweather"] == {
+        "apiHost": "demo.def.qweatherapi.com",
+        "apiKey": "secret",
+    }

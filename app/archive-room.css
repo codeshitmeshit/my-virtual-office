@@ -9,7 +9,7 @@
     padding: 0;
     overflow: hidden;
     background: #171724;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
 }
 
 .archive-room-header {

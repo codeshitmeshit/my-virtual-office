@@ -1,0 +1,159 @@
+/* Skills, MCP Registry and branch selection catalogs. Legacy rules were moved out of style.css. */
+.skills-library-modal,
+.mcp-registry-modal {
+    width: min(94vw, 1080px);
+    max-height: 90dvh;
+    overflow: auto;
+    color: var(--ui-text-primary);
+    background: var(--ui-surface);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+    font-family: var(--ui-font-family);
+}
+
+.skl-modal-header,
+.skl-topbar,
+.mcp-guide-header {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+}
+
+.skl-workspace,
+.skl-list-panel,
+.skl-category-panel,
+.skl-detail-panel,
+.mcp-registry-list,
+.mcp-registry-section {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border);
+}
+
+.skl-cards { display: flex; flex-direction: column; gap: var(--ui-space-sm); padding-bottom: var(--ui-space-lg); }
+.skl-card,
+.skl-category-item,
+.skl-organization-marker,
+.skl-agent-usage-group,
+.mcp-card,
+.mcp-client-item,
+.branch-agent-selector {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: none;
+}
+
+.skl-card { padding: 10px 12px; }
+.skl-card-top { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+.skl-card-name { color: var(--ui-text-primary); font-size: 11px; font-weight: 700; }
+.skl-card-desc { color: var(--ui-text-muted); }
+.skl-card-actions,
+.skl-editor-actions,
+.mcp-card-actions,
+.mcp-form-actions { display: flex; gap: var(--ui-space-md); flex-wrap: wrap; }
+
+.skl-organize-btn,
+.skl-close-btn,
+.skl-marker-dismiss,
+.skl-marker-open,
+.skl-tag-action,
+.skl-card-actions button,
+.skl-upload-label,
+.mcp-card-actions button,
+.mcp-guide-row button,
+.mcp-copy-button,
+.mcp-client-connect,
+.branch-agent-selector-group-toggle,
+.branch-agent-selector-option,
+.skl-apply-dropdown button {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    font-family: var(--ui-font-family);
+}
+
+.skl-organize-btn,
+.skl-apply-dropdown button,
+.mcp-client-connect {
+    color: var(--ui-canvas);
+    background: var(--ui-accent);
+    border-color: var(--ui-accent);
+}
+
+.skl-close-btn,
+.skl-marker-dismiss {
+    color: var(--ui-text-muted);
+    background: transparent;
+}
+
+.skl-card:hover,
+.skl-category-item:hover,
+.mcp-card:hover,
+.branch-agent-selector-option:hover,
+.branch-agent-selector-option[aria-selected="true"] {
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.skills-library-modal :is(button, input, select, textarea, a):focus-visible,
+.mcp-registry-modal :is(button, input, select, textarea, a):focus-visible,
+.branch-agent-selector :is(button, input):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+}
+
+.skl-search,
+.skl-input,
+.skl-textarea,
+.skl-category-select,
+.mcp-form :is(input, select, textarea) {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    font-family: var(--ui-font-family);
+}
+
+.skl-textarea,
+.mcp-env,
+.mcp-card-command { font-family: var(--ui-font-family); }
+
+.skl-editor-body { display: flex; flex-direction: column; gap: var(--ui-space-lg); padding: var(--ui-space-xs) 0; }
+.skl-field-label,
+.skl-subtitle,
+.skl-empty,
+.skl-detail-empty,
+.mcp-card-desc,
+.mcp-registry-eyebrow,
+.branch-agent-selector-hint { color: var(--ui-text-muted); }
+
+.skl-tag,
+.skl-failure-badge,
+.mcp-transport-badge,
+.mcp-client-state,
+.skl-agent-usage-chip { border-radius: var(--ui-radius-pill); }
+.skl-failure-badge,
+.skl-detail-failure,
+.mcp-guide-error,
+.is-unavailable { color: var(--ui-danger); border-color: var(--ui-danger); }
+.mcp-card-warning { color: var(--ui-warning); }
+.is-connected { color: var(--ui-success); }
+
+.mcp-registry-grid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: var(--ui-space-lg); align-items: start; }
+.mcp-form { display: flex; flex-direction: column; gap: var(--ui-space-md); padding-right: var(--ui-space-lg); border-right: 1px solid var(--ui-border); }
+.mcp-description { min-height: 66px; resize: vertical; }
+.mcp-env { min-height: 72px; resize: vertical; }
+.mcp-card { padding: 12px; }
+.mcp-card-command { color: var(--ui-info); background: var(--ui-canvas); border-color: var(--ui-border); }
+
+@media (max-width: 760px) {
+    .skills-library-modal,
+    .mcp-registry-modal { width: calc(100dvw - 16px); max-height: calc(100dvh - 16px); }
+    .mcp-registry-grid { grid-template-columns: 1fr; }
+    .mcp-form { border-right: 0; border-bottom: 1px solid var(--ui-border); padding-right: 0; padding-bottom: var(--ui-space-lg); }
+}

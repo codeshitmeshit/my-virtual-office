@@ -393,7 +393,7 @@ export class FeishuChannelWorker {
       await this.status.increment('counters.cardActionReceived');
       await this.status.increment('counters.cardActionSpooled', state.duplicate ? 0 : 1);
       this._attemptAction(envelope).catch(() => {});
-      return { toast: { type: 'loading', content: '审批处理中' } };
+      return { toast: { type: 'loading', content: '处理中' } };
     } catch (error) {
       await this.status.increment('counters.cardActionRejected');
       this.logger.warn('Feishu card action rejected', { category: error?.code || 'invalid_card_action' });

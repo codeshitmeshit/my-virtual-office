@@ -17,9 +17,10 @@ assert.ok(
 );
 
 assert.ok(
+  projectsJs.includes('function stagePipelinePollingActive(project, activeIds)') &&
   projectsJs.includes('project.projectExecutionActive') &&
     projectsJs.includes("['running', 'dispatching', 'executing', 'reviewing', 'reworking'") &&
-    projectsJs.includes('return stagePipelineWorkflowActive(project, projectActiveTaskIds(project));'),
+    projectsJs.includes('return stagePipelinePollingActive(project, projectActiveTaskIds(project));'),
   'stage-pipeline polling should stay active across inter-stage gaps without an active task attempt'
 );
 

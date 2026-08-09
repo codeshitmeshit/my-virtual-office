@@ -1,0 +1,214 @@
+/* Shared component semantics. Feature styles may own layout, never action meaning. */
+
+:where(
+    .ui-button,
+    .mm-btn,
+    .proj-btn,
+    .settings-modal-nav-button,
+    .meeting-center-new,
+    .meeting-center-close,
+    .hr-command-button,
+    .hr-back-button,
+    .skl-btn,
+    .mcp-btn,
+    .branch-agent-selector button
+) {
+    min-height: 32px;
+    padding: var(--ui-space-md) var(--ui-space-lg);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-panel);
+    color: var(--ui-text-primary);
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size-label);
+    line-height: var(--ui-line-height-label);
+    cursor: pointer;
+    transition: background-color var(--ui-transition-fast), border-color var(--ui-transition-fast), color var(--ui-transition-fast), box-shadow var(--ui-transition-fast), transform var(--ui-transition-fast);
+}
+
+:where(
+    .ui-button,
+    .mm-btn,
+    .proj-btn,
+    .settings-modal-nav-button,
+    .meeting-center-new,
+    .meeting-center-close,
+    .hr-command-button,
+    .hr-back-button,
+    .skl-btn,
+    .mcp-btn,
+    .branch-agent-selector button
+):hover:not(:disabled) {
+    border-color: var(--ui-border-strong);
+    background: color-mix(in srgb, var(--ui-panel) 82%, var(--ui-text-primary));
+    color: var(--ui-text-primary);
+}
+
+:where(
+    .ui-button,
+    .mm-btn,
+    .proj-btn,
+    .settings-modal-nav-button,
+    .meeting-center-new,
+    .meeting-center-close,
+    .hr-command-button,
+    .hr-back-button,
+    .skl-btn,
+    .mcp-btn,
+    .branch-agent-selector button
+):active:not(:disabled) {
+    transform: translateY(1px);
+}
+
+:where(.ui-button--primary, .mm-save-all, .proj-btn-gold, .proj-btn-primary) {
+    border-color: var(--ui-accent);
+    background: var(--ui-accent);
+    color: var(--ui-canvas);
+}
+
+:where(.ui-button--secondary, .mm-btn:not(.mm-btn-primary):not(.mm-btn-danger)) {
+    border-color: var(--ui-border-strong);
+    background: var(--ui-panel);
+    color: var(--ui-text-primary);
+}
+
+:where(.ui-button--danger, .mm-btn-danger, .proj-btn-danger, .danger, [data-action-tone="danger"]) {
+    border-color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    color: var(--ui-danger);
+}
+
+:where(.ui-button--danger, .mm-btn-danger, .proj-btn-danger, .danger, [data-action-tone="danger"]):hover:not(:disabled) {
+    background: var(--ui-danger);
+    color: #ffffff;
+}
+
+:where(.ui-button--test, [data-action-tone="test"]) {
+    border-color: var(--ui-success);
+    background: var(--ui-success-soft);
+    color: var(--ui-success);
+}
+
+:where(
+    .ui-input,
+    .mm-input,
+    .proj-input,
+    .proj-select,
+    .proj-textarea,
+    .settings-modal-dialog input:not([type="checkbox"]):not([type="radio"]),
+    .settings-modal-dialog select,
+    .settings-modal-dialog textarea,
+    .personal-assets-modal-content input:not([type="checkbox"]):not([type="radio"]),
+    .personal-assets-modal-content select,
+    .personal-assets-modal-content textarea
+) {
+    min-height: 32px;
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-md);
+    background: var(--ui-surface);
+    color: var(--ui-text-primary);
+    font-family: var(--ui-font-family);
+    font-size: var(--ui-font-size-body);
+    line-height: var(--ui-line-height-body);
+    transition: border-color var(--ui-transition-fast), box-shadow var(--ui-transition-fast), background-color var(--ui-transition-fast);
+}
+
+:where(
+    .ui-input,
+    .mm-input,
+    .proj-input,
+    .proj-select,
+    .proj-textarea,
+    .settings-modal-dialog input:not([type="checkbox"]):not([type="radio"]),
+    .settings-modal-dialog select,
+    .settings-modal-dialog textarea,
+    .personal-assets-modal-content input:not([type="checkbox"]):not([type="radio"]),
+    .personal-assets-modal-content select,
+    .personal-assets-modal-content textarea
+):focus {
+    border-color: var(--ui-info);
+    outline: none;
+    box-shadow: var(--ui-focus-ring);
+}
+
+:where(input, select, textarea)[aria-invalid="true"],
+:where(input, select, textarea):user-invalid,
+.ui-input.is-error {
+    border-color: var(--ui-danger);
+    box-shadow: 0 0 0 2px var(--ui-danger-soft);
+}
+
+.ui-field-error,
+[data-ui-field-error] {
+    color: var(--ui-danger);
+    font-size: var(--ui-font-size-caption);
+    line-height: var(--ui-line-height-caption);
+}
+
+:where(button, input, select, textarea, [role="button"], [tabindex]):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+    box-shadow: var(--ui-focus-ring);
+}
+
+:where(button, input, select, textarea):disabled,
+:where([role="button"])[aria-disabled="true"],
+.is-disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    filter: saturate(0.55);
+}
+
+:where(button, [role="button"])[aria-busy="true"],
+.is-loading {
+    cursor: progress;
+}
+
+:where(button, [role="button"])[aria-busy="true"]::after,
+.is-loading::after {
+    content: "";
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-left: var(--ui-space-sm);
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: var(--ui-radius-pill);
+    animation: ui-component-spin 700ms linear infinite;
+}
+
+:where(.ui-card, .mm-section, .proj-card, .personal-assets-card, .mcp-card) {
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    background: var(--ui-panel);
+    color: var(--ui-text-primary);
+}
+
+:where(.ui-badge, [data-ui-badge]) {
+    display: inline-flex;
+    min-height: 20px;
+    align-items: center;
+    gap: var(--ui-space-xs);
+    padding: var(--ui-space-xxs) var(--ui-space-md);
+    border: 1px solid var(--ui-border);
+    border-radius: var(--ui-radius-pill);
+    color: var(--ui-text-muted);
+    font-size: var(--ui-font-size-caption);
+    line-height: var(--ui-line-height-caption);
+}
+
+@keyframes ui-component-spin {
+    to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :where(.ui-button, button, input, select, textarea) {
+        scroll-behavior: auto !important;
+        transition: none !important;
+    }
+
+    :where(button, [role="button"])[aria-busy="true"]::after,
+    .is-loading::after {
+        animation-duration: 1.4s;
+    }
+}

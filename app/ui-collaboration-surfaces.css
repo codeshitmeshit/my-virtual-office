@@ -1,0 +1,196 @@
+/* Meetings, Archive Room and Human Decisions share chrome, while retaining domain state meaning. */
+.meetings-modal-content,
+.archive-room-modal-content,
+.archive-artifact-modal,
+.archive-governance-dialog,
+.archive-manager-activity-dialog,
+.human-decision-center {
+    color: var(--ui-text-primary);
+    background: var(--ui-surface);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+    font-family: var(--ui-font-family);
+}
+
+.meeting-center-header,
+.meeting-center-live-header,
+.meeting-center-record-header,
+.archive-room-header,
+.archive-detail-head,
+.archive-artifact-modal-head,
+.archive-governance-dialog-head,
+.archive-manager-activity-head,
+.human-decision-center__header,
+.human-decision-center__tabs {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+}
+
+.meeting-center-list,
+.meeting-center-main,
+.meeting-center-workspace,
+.archive-room-list,
+.archive-room-detail,
+.human-decision-center__rail,
+.human-decision-center__detail {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border);
+}
+
+.meeting-center-item,
+.meeting-center-round-card,
+.meeting-center-turn,
+.meeting-center-control,
+.meeting-center-conflict-card,
+.meeting-center-original-context,
+.archive-section,
+.archive-entry,
+.archive-project-card,
+.archive-metric,
+.archive-summary-item,
+.archive-pending-item,
+.archive-artifact-row,
+.archive-maintenance-item,
+.human-decision-center__list-item,
+.human-decision-center__context,
+.human-decision-center__task-detail,
+.human-decision-center__meta-item,
+.human-decision-center__option,
+.human-decision-center__resolution {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: none;
+}
+
+.meeting-center-item:hover,
+.archive-entry:hover,
+.archive-project-card:hover,
+.human-decision-center__list-item:hover,
+.human-decision-center__option:hover {
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.meeting-center-item.is-selected,
+.human-decision-center__list-item[aria-current="true"],
+.human-decision-center__option:has(.human-decision-center__option-input:checked) {
+    background: var(--ui-info-soft);
+    border-color: var(--ui-info);
+}
+
+.meeting-center-close,
+.archive-room-content .close-btn,
+.archive-artifact-modal-actions .close-btn,
+.human-decision-center__close {
+    color: var(--ui-text-muted);
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.meeting-center-close:hover,
+.archive-room-content .close-btn:hover,
+.human-decision-center__close:hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+}
+
+.meeting-center-new,
+.meeting-center-control-actions button,
+.meeting-center-arb-actions button,
+.archive-primary-btn,
+.archive-secondary-btn,
+.archive-filter-btn,
+.archive-copy-btn,
+.archive-open-link,
+.archive-governance-dialog-actions button,
+.human-decision-center__back,
+.human-decision-center__secondary-button,
+.human-decision-center__submit,
+.human-decision-center__tab {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    font-family: var(--ui-font-family);
+}
+
+.meeting-center-new,
+.archive-primary-btn,
+.human-decision-center__submit {
+    color: var(--ui-canvas);
+    background: var(--ui-accent);
+    border-color: var(--ui-accent);
+}
+
+.archive-secondary-btn.danger,
+.archive-governance-dialog.danger .archive-primary-btn {
+    color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    border-color: var(--ui-danger);
+}
+
+.meetings-modal-content :is(button, input, select, textarea, a):focus-visible,
+.archive-room-content :is(button, input, select, textarea, a):focus-visible,
+.archive-artifact-overlay :is(button, input, select, textarea, a):focus-visible,
+.archive-governance-dialog-backdrop :is(button, input, select, textarea):focus-visible,
+.human-decision-center :is(button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+}
+
+.meeting-center-control :is(input, select, textarea),
+.archive-room-content :is(input, select, textarea),
+.archive-governance-dialog :is(input, select, textarea),
+.human-decision-center :is(input, select, textarea) {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    font-family: var(--ui-font-family);
+}
+
+.meeting-center-note,
+.meeting-center-item-meta,
+.meeting-center-detail-label,
+.archive-detail-subtitle,
+.archive-artifact-meta,
+.archive-pending-meta,
+.human-decision-center__meta-label,
+.human-decision-center__kicker,
+.human-decision-center__eyebrow { color: var(--ui-text-muted); }
+
+/* 状态色保留业务含义，但统一映射到系统语义色。 */
+.meeting-center-item[data-tone="running"],
+.meeting-center-control[data-tone="lifecycle"],
+.human-decision-center__option.is-recommended { border-color: var(--ui-success); }
+.meeting-center-item[data-tone="request"],
+.meeting-center-control[data-tone="question"],
+.meeting-center-control[data-tone="decision"],
+.archive-pending-item.conflict { border-color: var(--ui-warning); }
+.meeting-center-item[data-tone="cancelled"],
+.meeting-center-item[data-tone="failed"],
+.meeting-center-control[data-tone="danger"],
+.archive-room-error,
+.archive-manager-error,
+.archive-governance-dialog-error,
+.human-decision-center__error { color: var(--ui-danger); border-color: var(--ui-danger); }
+.archive-room-error,
+.archive-manager-error,
+.archive-governance-dialog-error,
+.human-decision-center__error { background: var(--ui-danger-soft); }
+
+@media (max-width: 760px) {
+    .meetings-modal-content,
+    .archive-room-modal-content,
+    .human-decision-center { width: calc(100dvw - 16px); height: calc(100dvh - 16px); }
+    .meeting-center-list,
+    .human-decision-center__rail { max-height: 38dvh; }
+}

@@ -208,6 +208,11 @@
     }
 
     var managementTokenPromptPromise = null;
+    var managementAccessHandler = null;
+
+    function setManagementAccessHandler(handler) {
+        managementAccessHandler = typeof handler === 'function' ? handler : null;
+    }
 
     function requestManagementToken() {
         if (managementTokenPromptPromise) return managementTokenPromptPromise;
@@ -334,7 +339,10 @@
         if (token) init.headers.set('X-VO-Management-Token', token);
         var response = await fetch(input, init);
         if (!(await isManagementTokenChallenge(response))) return response;
-        token = await requestManagementToken();
+        sessionStorage.removeItem('voManagementToken');
+        token = managementAccessHandler
+            ? await managementAccessHandler({ reason: 'challenge' })
+            : await requestManagementToken();
         if (!token) throw new Error(t('management_token_required'));
         sessionStorage.setItem('voManagementToken', token);
         init.headers.set('X-VO-Management-Token', token);
@@ -371,6 +379,7 @@
         initLanguage: initLanguage,
         applyTranslations: applyTranslations,
         requestManagementToken: requestManagementToken,
+        setManagementAccessHandler: setManagementAccessHandler,
         managementFetch: managementFetch
     };
 })();

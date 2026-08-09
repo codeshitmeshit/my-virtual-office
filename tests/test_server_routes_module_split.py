@@ -247,6 +247,38 @@ def test_config_route_uses_config_runtime_service_compatibility(monkeypatch):
     assert payload == {"ok": True, "status": "patched"}
 
 
+def test_setup_save_route_uses_config_runtime_as_the_single_persistence_entry(monkeypatch):
+    from server_services import config_runtime
+
+    calls = []
+    monkeypatch.setattr(
+        config_runtime,
+        "_persist_setup_payload",
+        lambda body: calls.append(body) or {"ok": True},
+    )
+
+    status, payload = dispatch("POST", "/setup/save", {"features": {"browserPanel": True}})
+
+    assert status == 200
+    assert payload == {"ok": True}
+    assert calls == [{"features": {"browserPanel": True}}]
+
+
+def test_setup_save_route_exposes_business_failure_status_and_reason(monkeypatch):
+    from server_services import config_runtime
+
+    monkeypatch.setattr(
+        config_runtime,
+        "_persist_setup_payload",
+        lambda body: {"ok": False, "error": "cannot persist", "_status": 400},
+    )
+
+    status, payload = dispatch("POST", "/setup/save", {"features": {}})
+
+    assert status == 400
+    assert payload == {"ok": False, "error": "cannot persist"}
+
+
 def test_browser_route_uses_browser_runtime_service_compatibility(monkeypatch):
     monkeypatch.setattr(server, "_handle_browser_status", lambda: {"enabled": True, "cdpAvailable": False})
     status, payload = dispatch("GET", "/browser-status")

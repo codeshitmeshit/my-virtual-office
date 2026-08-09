@@ -148,7 +148,7 @@ function _acpBuildEditor(agent) {
     agentSaveBtn.addEventListener('click', function() {
         _acpSave();
         _acpUnsaved = false;
-        _acpShowToast('💾 Agent saved!');
+        _acpShowToast('💾 Agent saved!', 'success');
     });
     var agentUndoBtn = document.createElement('button');
     agentUndoBtn.textContent = _tr('undo');
@@ -612,7 +612,7 @@ function _acpSave() {
     _acpRefreshList();
 
     // Show saved toast
-    _acpShowToast('✅ Saved!');
+    _acpShowToast('✅ Saved!', 'success');
 }
 
 function _acpAutoSave() {
@@ -656,7 +656,8 @@ function _acpAutoSave() {
     // Don't auto-save to localStorage — user must click Save
 }
 
-function _acpShowToast(msg) {
+function _acpShowToast(msg, type) {
+    if (window.VOFeedback) return window.VOFeedback.legacy(msg, type);
     var toast = document.createElement('div');
     toast.textContent = msg;
     toast.style.cssText = 'position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#1e3a1e;border:1px solid #4caf50;color:#4caf50;padding:8px 20px;border-radius:4px;font-size:12px;z-index:9999;pointer-events:none';
@@ -862,7 +863,7 @@ function _acpCreateNewAgent() {
         var agentEmoji = selection.emoji;
         var agentProfile = _acpSlugAgentName(agentName);
 
-        _acpShowToast(_tr('creating_agent_platform', { platform: selectedPlatform.label }));
+        _acpShowToast(_tr('creating_agent_platform', { platform: selectedPlatform.label }), 'info');
         return fetch('/api/agent/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -917,7 +918,7 @@ function _acpCreateNewAgent() {
         saveOfficeConfig();
         _acpRefreshList();
         _acpSelectAgent(newId);
-        _acpShowToast('✅ ' + _tr('agent_created_platform', { name: result.name, platform: result.platform.label }));
+        _acpShowToast('✅ ' + _tr('agent_created_platform', { name: result.name, platform: result.platform.label }), 'success');
     }).catch(function(e) {
         _acpShowMessageDialog(_tr('error_create_agent'), _acpLocalizeCreateAgentError(e.message), 'error');
     });

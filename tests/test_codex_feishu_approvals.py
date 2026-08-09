@@ -65,6 +65,25 @@ def test_register_delivery_and_replay_survive_reload(tmp_path):
     assert reloaded.get("route-1")["decision"] == "approve"
 
 
+def test_application_form_inputs_can_be_grouped_into_sections():
+    card = build_feishu_card({
+        "id": "grouped-form",
+        "type": "application_form",
+        "title": "个人资产建档",
+        "summary": "请按类型填写，可留空。",
+        "state": "pending",
+        "inputs": [
+            {"name": "preferred_name", "label": "称呼", "section": "基本信息"},
+            {"name": "current_role", "label": "当前职业", "section": "职业与 VO 方向"},
+        ],
+        "actions": [{"category": "confirm", "text": "提交", "value": {"action": "submit"}}],
+    })
+
+    form = next(item for item in card["card"]["body"]["elements"] if item["tag"] == "form")
+    headings = [item["content"] for item in form["elements"] if item["tag"] == "markdown"]
+    assert headings == ["**基本信息**", "**职业与 VO 方向**"]
+
+
 def test_concurrent_claim_has_one_winner_and_commit_token_is_fenced(tmp_path):
     path = tmp_path / "routes.json"
     store = CodexFeishuApprovalRouteStore(str(path))

@@ -18,22 +18,7 @@
     }
 
     function ensureStyles() {
-        if (!doc || doc.getElementById('vo-dialog-styles')) return;
-        var style = doc.createElement('style');
-        style.id = 'vo-dialog-styles';
-        style.textContent = [
-            '.vo-dialog-overlay{position:fixed;inset:0;z-index:15000;display:flex;align-items:center;justify-content:center;padding:18px;background:rgba(5,6,18,.72);backdrop-filter:blur(2px)}',
-            '.vo-dialog-box{width:min(460px,calc(100vw - 28px));max-height:min(86vh,560px);overflow:auto;border:2px solid var(--gold,var(--accent,#ffd700));border-radius:8px;background:var(--ui-surface,var(--surface,#141428));box-shadow:0 18px 60px rgba(0,0,0,.5);color:var(--ui-text,var(--text,#d8d8e8));font-family:inherit;padding:18px}',
-            '.vo-dialog-title{margin:0 0 12px;color:var(--gold,var(--accent,#ffd700));font-size:12px;line-height:1.55}',
-            '.vo-dialog-message{white-space:pre-wrap;word-break:break-word;font-size:11px;line-height:1.75;color:var(--ui-text,var(--text,#d8d8e8))}',
-            '.vo-dialog-input{display:block;width:100%;box-sizing:border-box;margin-top:14px;border:1px solid var(--ui-border,var(--border,#2a2a4a));border-radius:4px;background:rgba(0,0,0,.42);color:var(--ui-text,var(--text,#d8d8e8));font:inherit;font-size:11px;line-height:1.5;padding:10px;outline:none}',
-            '.vo-dialog-input:focus{border-color:var(--gold,var(--accent,#ffd700));box-shadow:0 0 0 2px rgba(255,215,0,.14)}',
-            '.vo-dialog-actions{display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-top:18px}',
-            '.vo-dialog-actions button{border:1px solid var(--ui-border,var(--border,#2a2a4a));border-radius:6px;background:var(--surface2,#202040);color:var(--ui-text,var(--text,#d8d8e8));font:inherit;font-size:9px;line-height:1.4;padding:8px 12px;cursor:pointer;min-width:84px}',
-            '.vo-dialog-actions .vo-dialog-primary{border-color:var(--gold,var(--accent,#ffd700));background:var(--gold,var(--accent,#ffd700));color:#111}',
-            '.vo-dialog-actions .vo-dialog-danger{border-color:#f44336;background:#f44336;color:#fff}'
-        ].join('');
-        doc.head.appendChild(style);
+        // 样式由 ui-dialogs.css 统一负责；这里保留函数边界，避免改变 show() 的调用时序。
     }
 
     function removeActive(result) {
@@ -64,8 +49,10 @@
 
             var title = doc.createElement('h2');
             title.className = 'vo-dialog-title';
+            title.id = 'vo-dialog-title';
             title.textContent = options.title || (kind === 'confirm' ? tr('confirm', 'Confirm') : kind === 'prompt' ? tr('input', 'Input') : tr('notice', 'Notice'));
             box.appendChild(title);
+            box.setAttribute('aria-labelledby', title.id);
 
             if (options.message) {
                 var message = doc.createElement('div');
@@ -110,6 +97,7 @@
             box.appendChild(actions);
             overlay.appendChild(box);
 
+            // 一个时刻只允许一个 Promise owner，removeActive() 负责 exactly-once resolve 与监听器清理。
             activeDialog = {
                 kind: kind,
                 overlay: overlay,

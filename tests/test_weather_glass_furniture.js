@@ -102,11 +102,15 @@ assert.ok(
   game.includes('function _getFloorWindowWeatherTooltipLines()') &&
   game.includes('function _getWeatherTemperatureC()') &&
   game.includes('function _formatWeatherUpdatedAt()') &&
+  game.includes('function _formatWeatherDescription()') &&
+  game.includes('function _formatWeatherHumidity()') &&
   game.includes("i18n.t('weather_location')") &&
   game.includes("i18n.t('weather_label')") &&
   game.includes("i18n.t('temperature')") &&
+  game.includes("i18n.t('humidity')") &&
   game.includes("i18n.t('weather_updated_at')") &&
   game.includes("_getWeatherTemperatureC() + '°C'") &&
+  game.includes("_formatWeatherHumidity()") &&
   game.includes('_formatWeatherUpdatedAt()') &&
   !game.includes("weatherData.temp + '°F'") &&
   game.includes("item.type !== 'floorWindow'") &&
@@ -127,6 +131,8 @@ assert.strictEqual(en.weather_label, 'Weather');
 assert.strictEqual(zh.weather_label, '天气');
 assert.strictEqual(en.weather_updated_at, 'Updated at');
 assert.strictEqual(zh.weather_updated_at, '更新时间');
+assert.strictEqual(zh.humidity, '湿度');
+assert.strictEqual(zh.weather_stale, '缓存数据');
 assert.strictEqual(zh.weather_updated_never, '未更新');
 assert.strictEqual(zh.weather_condition_heavy_rain, '大雨');
 assert.strictEqual(zh.weather_location_unconfigured, '未配置');

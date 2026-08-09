@@ -16,7 +16,8 @@ DEFAULT_POLICY = (
     ROOT
     / "openspec"
     / "changes"
-    / "unify-conversation-timeline-projections"
+    / "archive"
+    / "2026-08-02-unify-conversation-timeline-projections"
     / "evidence"
     / "baseline"
     / "conversation-timeline-allowed-differences.json"

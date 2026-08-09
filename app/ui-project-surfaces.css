@@ -1,0 +1,189 @@
+/* Project management chrome; pipeline positions and connectors remain domain-owned. */
+.projects-modal-content,
+#projectsModal .proj-detail-panel,
+#projectsModal .proj-form-modal,
+#projectsModal .proj-confirm-dialog,
+#projectsModal .proj-acceptance-dialog {
+    color: var(--ui-text-primary);
+    background: var(--ui-surface);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+    font-family: var(--ui-font-family);
+}
+
+#projectsModal .modal-header,
+.proj-toolbar,
+.proj-breadcrumb,
+.proj-detail-header,
+.proj-form-actions,
+.proj-board-header {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+    font-family: var(--ui-font-family);
+}
+
+.proj-toolbar-title,
+.proj-card-title,
+.proj-section-title,
+.proj-form-title,
+.proj-detail-title-input {
+    color: var(--ui-text-primary);
+}
+
+.proj-card,
+.proj-stat-card,
+.proj-section,
+.proj-task-card,
+.proj-col,
+.proj-scheduled-cron-panel,
+.proj-completion-report-card,
+.proj-artifact-row,
+.proj-meeting-action-panel {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: none;
+}
+
+.proj-card:hover,
+.proj-task-card:hover {
+    border-color: var(--ui-info);
+    box-shadow: none;
+}
+
+.proj-btn,
+.proj-col-add-btn,
+.proj-link-btn,
+.proj-order-move {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    font-family: var(--ui-font-family);
+}
+
+.proj-btn:hover,
+.proj-col-add-btn:hover,
+.proj-link-btn:hover,
+.proj-order-move:hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.proj-btn-primary,
+.proj-btn-start {
+    color: var(--ui-canvas);
+    background: var(--ui-accent);
+    border-color: var(--ui-accent);
+}
+
+.proj-btn-gold {
+    color: var(--ui-accent);
+    background: var(--ui-accent-soft);
+    border-color: var(--ui-accent);
+}
+
+.proj-btn-danger,
+.proj-btn-stop,
+.proj-artifact-delete,
+.proj-artifact-dir-delete {
+    color: var(--ui-danger);
+    background: var(--ui-danger-soft);
+    border-color: var(--ui-danger);
+}
+
+.proj-search,
+.proj-select,
+.proj-form-input,
+.proj-form-select,
+.proj-form-textarea,
+.proj-detail-input,
+.proj-detail-select,
+.proj-detail-textarea,
+.proj-col-title-input,
+.proj-quick-add-input,
+.proj-acceptance-textarea {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    font-family: var(--ui-font-family);
+}
+
+#projectsModal :is(button, input, select, textarea, a):focus-visible,
+.project-orchestration-modal :is(button, input, select, textarea):focus-visible,
+.proj-orchestration-modal :is(button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+}
+
+.proj-empty,
+.proj-card-desc,
+.proj-card-meta,
+.proj-form-help,
+.proj-breadcrumb { color: var(--ui-text-muted); }
+
+.proj-badge,
+.proj-tag,
+.proj-exec-state { border-radius: var(--ui-radius-pill); }
+
+.project-orchestration-overlay,
+.proj-orchestration-overlay {
+    background: var(--ui-overlay);
+}
+
+.project-orchestration-modal,
+.proj-orchestration-modal {
+    border: 1px solid var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+}
+
+.project-orchestration-header,
+.proj-orchestration-header,
+.project-orchestration-footer,
+.proj-orchestration-footer {
+    border-color: var(--ui-border);
+}
+
+.project-orchestration-close,
+.proj-orchestration-close {
+    color: var(--ui-text-muted);
+}
+
+.project-orchestration-close:hover,
+.proj-orchestration-close:hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+}
+
+.project-orchestration-button,
+.proj-orchestration-button,
+.project-orchestration-cancel,
+.proj-orchestration-cancel {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+}
+
+/* 流水线列坐标、任务分组、并行连线和方向属于已批准的编排领域几何，此层不重定义。 */
+.project-orchestration-canvas,
+.proj-orchestration-canvas {
+    border-color: var(--ui-border);
+}
+
+/* 自动保存是唯一提交方式，禁止重新出现手动“保存编排”动作。 */
+.project-orchestration-save,
+.proj-orchestration-save { display: none !important; }
+
+@media (max-width: 820px) {
+    .projects-modal-content { width: calc(100dvw - 16px); height: calc(100dvh - 16px); }
+    .proj-toolbar { overflow-x: auto; flex-wrap: nowrap; }
+}

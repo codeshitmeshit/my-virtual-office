@@ -20,9 +20,10 @@ def test_figma_modal_shell_dimensions_and_surface_tokens_are_scoped():
     assert "height: min(560px, calc(100vh - 48px));" in CSS
     assert "border: 2px solid var(--project-orchestration-gold);" in CSS
     assert "border-radius: 9px;" in CSS
-    assert "--project-orchestration-bg: #111124;" in CSS
-    assert "--project-orchestration-gold: #ffd700;" in CSS
-    assert "--project-orchestration-blue: #3c82f6;" in CSS
+    assert ":root" not in CSS
+    assert "--project-orchestration-bg: var(--ui-surface);" in CSS
+    assert "--project-orchestration-gold: var(--ui-accent);" in CSS
+    assert "--project-orchestration-blue: var(--ui-info);" in CSS
 
 
 def test_figma_workspace_canvas_and_card_geometry_are_explicit():

@@ -1,0 +1,7 @@
+interface:
+  display_name: "个人资产按需使用"
+  short_description: "在当前任务中按需最小化读取并安全应用相关个人资产信息"
+  default_prompt: "Use $vo-personal-context to retrieve and apply only the personal context relevant to this task."
+
+policy:
+  allow_implicit_invocation: true

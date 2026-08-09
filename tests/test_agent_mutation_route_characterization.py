@@ -8,6 +8,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 SERVER = (ROOT / "app" / "server.py").read_text(encoding="utf-8")
+CONFIG_ROUTE = (ROOT / "app" / "server_routes" / "config.py").read_text(encoding="utf-8")
+CONFIG_RUNTIME = (
+    ROOT / "app" / "server_services" / "config_runtime.py"
+).read_text(encoding="utf-8")
 GAME = (ROOT / "app" / "game.js").read_text(encoding="utf-8")
 AGENT_MANAGEMENT_ADAPTERS = (
     ROOT / "app" / "agent-management-adapters.js"
@@ -19,7 +23,8 @@ INVENTORY = (
     ROOT
     / "openspec"
     / "changes"
-    / "add-vo-human-resources-management"
+    / "archive"
+    / "2026-08-02-add-vo-human-resources-management"
     / "evidence"
     / "agent-mutation-route-inventory.md"
 ).read_text(encoding="utf-8")
@@ -183,7 +188,9 @@ def test_setup_route_has_its_own_management_check():
     post = SERVER[post_start:]
     block = _route_block(post, 'self.path == "/setup/save"')
     assert "if self._reject_untrusted_management_request():" in block
-    assert "_persist_setup_payload(body)" in block
+    assert "server_routes.config.handle_post(self, parsed_url)" in block
+    assert 'path == "/setup/save"' in CONFIG_ROUTE
+    assert "service._persist_setup_payload(body)" in CONFIG_ROUTE
 
 
 def test_agent_workspace_multiplexer_actions_and_persistence_are_locked():
@@ -256,7 +263,8 @@ def test_current_browser_callers_distinguish_raw_and_managed_fetches():
 def test_current_persistence_owners_and_assignment_policy_are_visible():
     assert 'os.path.join(STATUS_DIR, "office-config.json")' in SERVER
     assert 'AGENT_WORKSPACES_FILE = os.path.join(STATUS_DIR, "agent-workspaces.json")' in SERVER
-    assert "def _persist_setup_payload(body):" in SERVER
+    assert "def _persist_setup_payload(body):" not in SERVER
+    assert "def _persist_setup_payload(body):" in CONFIG_RUNTIME
     assert "def _set_hermes_profile_model(" in SERVER
     assert "def _set_agent_model(" in SERVER
     assert "def _handle_agent_create(body):" in SERVER

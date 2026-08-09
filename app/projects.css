@@ -14,7 +14,7 @@
     padding: 0;
     overflow: hidden;
     background: #1a1a2e;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 13px;
     line-height: 1.5;
 }
@@ -24,25 +24,25 @@
 #projectsModal .proj-detail-panel *,
 #projectsModal .proj-form-modal,
 #projectsModal .proj-form-modal * {
-    font-family: inherit;
+    font-family: var(--ui-font-family);
 }
 .projects-modal-content h2 {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-weight: 700;
 }
 .projects-modal-content input,
 .projects-modal-content select,
 .projects-modal-content textarea,
 .projects-modal-content button {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
 }
 
 /* ── MODAL HEADER OVERRIDE ───────────────────────────────────── */
 #projectsModal .modal-header {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
 }
 #projectsModal .modal-header h2 {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-weight: 700;
     font-size: 16px;
 }
@@ -59,7 +59,7 @@
     flex-wrap: wrap;
 }
 .proj-toolbar-title {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 700;
+    font-family: var(--ui-font-family); font-weight: 700;
     font-size: 14px;
     color: #ffd700;
     margin-right: 8px;
@@ -228,7 +228,7 @@
     color: #555;
 }
 .proj-empty-icon { font-size: 48px; margin-bottom: 16px; }
-.proj-empty-title { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 700; font-size: 14px; color: #666; margin-bottom: 12px; }
+.proj-empty-title { font-family: var(--ui-font-family); font-weight: 700; font-size: 14px; color: #666; margin-bottom: 12px; }
 .proj-empty-text { font-size: 12px; color: #555; }
 
 /* ── STATUS / PRIORITY BADGES ───────────────────────────────── */
@@ -279,7 +279,7 @@
     flex-shrink: 0;
 }
 .proj-board-project-title {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 700;
+    font-family: var(--ui-font-family); font-weight: 700;
     font-size: 16px;
     color: #ffd700;
     margin-bottom: 4px;
@@ -576,7 +576,7 @@
     flex-direction: column;
     transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     box-shadow: -8px 0 30px rgba(0,0,0,0.5);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-family: var(--ui-font-family) !important;
     font-size: 13px;
 }
 .proj-detail-panel.open { right: 0; }
@@ -667,7 +667,7 @@
     font-size: 12px;
     resize: vertical;
     min-height: 80px;
-    font-family: inherit;
+    font-family: var(--ui-font-family);
     box-sizing: border-box;
 }
 .proj-detail-textarea:focus { border-color: #ffd700; outline: none; }
@@ -1127,7 +1127,7 @@
     padding: 2px 8px;
     font-size: 10px;
     line-height: 1.25;
-    font-family: inherit;
+    font-family: var(--ui-font-family);
     font-weight: 600;
     width: auto;
     max-width: 100%;
@@ -1363,7 +1363,7 @@
     gap: 12px;
 }
 .proj-report-title {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 700;
+    font-family: var(--ui-font-family); font-weight: 700;
     font-size: 12px;
     color: #ffd700;
     margin-bottom: 6px;
@@ -1386,7 +1386,7 @@
     text-align: center;
 }
 .proj-stat-value {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-weight: 700;
+    font-family: var(--ui-font-family); font-weight: 700;
     font-size: 18px;
     color: #ffd700;
     margin-bottom: 6px;
@@ -1789,7 +1789,7 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     color: #e8e8f0;
-    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-family: var(--ui-font-family);
     font-size: 11px;
 }
 .proj-artifact-empty,
@@ -1854,13 +1854,13 @@
     max-height: 90vh;
     overflow-y: auto;
     box-shadow: 0 20px 60px rgba(0,0,0,0.8);
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-family: var(--ui-font-family) !important;
 }
 .proj-form-box * {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-family: var(--ui-font-family) !important;
 }
 .proj-form-title {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important; font-weight: 700;
+    font-family: var(--ui-font-family) !important; font-weight: 700;
     font-size: 14px;
     color: #ffd700;
     margin-bottom: 20px;
@@ -1960,7 +1960,7 @@
     border-radius: 4px;
     color: #e8e8f0;
     font-size: 14px;
-    font-family: inherit;
+    font-family: var(--ui-font-family);
     box-sizing: border-box;
 }
 .proj-form-input:focus,
@@ -2300,7 +2300,7 @@
 .proj-score-popup {
     position: fixed;
     z-index: 9999;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 18px;
     font-weight: 800;
     color: #ffd700;
@@ -2351,7 +2351,7 @@
     gap: 8px;
     padding: 6px 10px;
     border-bottom: 1px solid #1a1a2e;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 12px;
 }
 .proj-lb-row:last-child { border-bottom: none; }
@@ -2389,7 +2389,7 @@
     font-size: 11px;
     font-style: italic;
     text-align: center;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
 }
 
 /* ── SCOREBOARD (in-project board header) ────────────────────── */
@@ -2416,7 +2416,7 @@
     border: 1px solid rgba(255,215,0,0.15);
     border-radius: 16px;
     padding: 4px 10px 4px 8px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-family: var(--ui-font-family);
     font-size: 11px;
     color: #ccc;
     white-space: nowrap;

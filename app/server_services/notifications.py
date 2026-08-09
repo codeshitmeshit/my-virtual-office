@@ -7,6 +7,7 @@ configuration while removing domain business bodies from server.py.
 
 import sys
 
+from server_services import config_runtime
 from services.feishu_notification_delivery import send_notification_card
 from services.feishu_notification_recipients import normalize_recipient_policy
 
@@ -182,7 +183,7 @@ def _save_feishu_notification_config(body):
     payload = {"notifications": notifications}
     if (body or {}).get("clearWebhook"):
         payload.setdefault("_clearSecrets", []).append("notifications.feishuWebhook")
-    result = _persist_setup_payload(payload)
+    result = config_runtime._persist_setup_payload(payload)
     if not result.get("ok"):
         return result
     _reset_feishu_notification_topic_runtime()
@@ -339,7 +340,17 @@ def _handle_feishu_card_action(body):
     action = str(value.get("action") or "").strip()
     meeting_outcome = _dispatch_feishu_meeting_request_action(action, str(value.get("request_id") or "").strip(), event)
     project_outcome = {"handled": False} if meeting_outcome.get("handled") else _dispatch_feishu_project_execution_action(action, value, event)
-    outcome = meeting_outcome if meeting_outcome.get("handled") else (project_outcome if project_outcome.get("handled") else None)
+    personal_asset_outcome = (
+        {"handled": False}
+        if meeting_outcome.get("handled") or project_outcome.get("handled")
+        else _get_personal_asset_feishu_onboarding().handle_action(event, value)
+    )
+    outcome = (
+        meeting_outcome if meeting_outcome.get("handled")
+        else project_outcome if project_outcome.get("handled")
+        else personal_asset_outcome if personal_asset_outcome.get("handled")
+        else None
+    )
     record = _record_feishu_card_action(body, event, value, outcome=outcome)
     if meeting_outcome.get("handled"):
         return {
@@ -354,6 +365,13 @@ def _handle_feishu_card_action(body):
             "toast": project_outcome.get("toast") or _feishu_card_action_success("操作已收到"),
             "recordId": record["id"],
             "outcome": {k: v for k, v in project_outcome.items() if k not in {"toast"}},
+        }
+    if personal_asset_outcome.get("handled"):
+        return {
+            "ok": bool(personal_asset_outcome.get("ok")),
+            "toast": personal_asset_outcome.get("toast") or _feishu_card_action_success("表单已收到"),
+            "recordId": record["id"],
+            "outcome": {k: v for k, v in personal_asset_outcome.items() if k not in {"toast"}},
         }
     return {
         "ok": True,

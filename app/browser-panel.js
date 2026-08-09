@@ -142,7 +142,7 @@
         setTimeout(() => { browserFrame.src = viewerSrc; }, 0);
       }
     } else if (!browserFrame.src || browserFrame.src === 'about:blank') {
-      browserFrame.srcdoc = `<html><body style="background:#0a0a0f;color:#888;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
+      browserFrame.srcdoc = `<html><head><link rel="stylesheet" href="/fonts.css?v=20260809-unified-font"><link rel="stylesheet" href="/ui-system.css?v=20260809-unified-font"></head><body style="background:#0a0a0f;color:#888;font-family: var(--ui-font-family);display:flex;align-items:center;justify-content:center;height:100vh;margin:0;text-align:center"><div><h2 style="color:#ffd700">${_t('browser_not_configured_title')}</h2><p>${_t('browser_not_configured_msg')}</p></div></body></html>`;
     }
     pollCurrentUrl();
   }

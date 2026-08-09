@@ -22,6 +22,15 @@ def test_hr_is_registered_inside_the_merged_agent_management_entry():
     assert "hr-overview-hero" in (APP / "human-resources.js").read_text(encoding="utf-8")
 
 
+def test_hr_toolbar_entry_keeps_its_semantic_emoji_after_i18n():
+    html = (APP / "index.html").read_text(encoding="utf-8")
+    entry = html.split('id="btn-agent-settings"', 1)[1].split("</button>", 1)[0]
+    assert "data-i18n=\"agent_management\"" not in entry.split(">", 1)[0]
+    assert '<span aria-hidden="true">🧑‍💼</span>' in entry
+    assert '<span data-i18n="agent_management">Human Resources</span>' in entry
+    assert "openAgentManagement('humanResources')" in entry
+
+
 def test_hr_panel_has_embedded_responsive_detail_boundary():
     html = (APP / "index.html").read_text(encoding="utf-8")
     css = (APP / "human-resources.css").read_text(encoding="utf-8")

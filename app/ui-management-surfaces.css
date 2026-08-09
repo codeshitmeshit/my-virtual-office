@@ -1,0 +1,206 @@
+/* Agent Management / Human Resources / Agent Configuration share one semantic shell. */
+.agent-management-modal,
+.hr-selection-backdrop,
+.hr-confirm-backdrop,
+.ac-confirm-backdrop {
+    background: var(--ui-overlay);
+}
+
+.agent-management-dialog,
+.hr-modal-content,
+.hr-selection-dialog,
+.hr-record-dialog,
+.agent-management-panel .ac-confirm-dialog {
+    color: var(--ui-text-primary);
+    background: var(--ui-surface);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-xl);
+    box-shadow: var(--ui-shadow-panel);
+}
+
+.agent-management-header,
+.hr-header,
+.hr-roster-header {
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+}
+
+.agent-management-title,
+.hr-header h2,
+.hr-header h3,
+.agent-management-panel h2,
+.agent-management-panel h3 {
+    color: var(--ui-text-primary);
+}
+
+.agent-management-title small,
+.am-roster-item small,
+.am-empty,
+.hr-muted,
+.hr-eyebrow,
+.agent-management-panel .ac-eyebrow,
+.agent-management-panel .ac-revision {
+    color: var(--ui-text-muted);
+}
+
+.agent-management-tab,
+.agent-management-close,
+.am-roster-item,
+.hr-close,
+.hr-icon-button,
+.hr-back-button,
+.hr-load-more,
+.hr-command-button,
+.hr-ops-action,
+.hr-schedule-save,
+.agent-management-panel button {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    box-shadow: none;
+    font-family: var(--ui-font-family);
+}
+
+.agent-management-tab:hover,
+.am-roster-item:hover,
+.hr-agent-row:hover,
+.hr-icon-button:hover,
+.agent-management-panel button:hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-toolbar);
+    border-color: var(--ui-info);
+}
+
+.agent-management-tab.active {
+    color: var(--ui-accent);
+    background: var(--ui-accent-soft);
+    border-color: var(--ui-accent);
+}
+
+.agent-management-close,
+.hr-close {
+    color: var(--ui-text-muted);
+    background: transparent;
+}
+
+.agent-management-close:hover,
+.hr-close:hover {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+}
+
+.agent-management-tab:focus-visible,
+.agent-management-close:focus-visible,
+.am-roster-item:focus-visible,
+.hr-shell :is(button, input, select, textarea, a):focus-visible,
+.agent-management-panel :is(button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--ui-info);
+    outline-offset: 2px;
+}
+
+.agent-management-roster,
+.hr-agent-list {
+    background: var(--ui-toolbar);
+    border-color: var(--ui-border);
+}
+
+.am-roster-item.selected,
+.hr-agent-row[aria-current="true"],
+.hr-agent-row.is-selected {
+    color: var(--ui-text-primary);
+    background: var(--ui-info-soft);
+    border-color: var(--ui-info);
+}
+
+.agent-management-panel,
+.hr-content,
+.hr-shell,
+.agent-management-panel .agent-configuration {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+}
+
+.hr-summary-card,
+.hr-metric,
+.hr-assessment-card,
+.hr-detail-section,
+.hr-command-panel,
+.hr-schedule-panel,
+.hr-record-card,
+.hr-ops-console,
+.agent-management-panel .ac-card,
+.agent-management-panel .ac-appearance-card,
+.agent-management-panel .ac-restricted-card,
+.agent-management-panel .ac-selector,
+.agent-management-panel .ac-readonly,
+.agent-management-panel .ac-static-field {
+    color: var(--ui-text-primary);
+    background: var(--ui-panel);
+    border-color: var(--ui-border);
+    border-radius: var(--ui-radius-lg);
+    box-shadow: none;
+}
+
+.hr-state-chip,
+.agent-management-panel .ac-field-status {
+    border-radius: var(--ui-radius-pill);
+}
+
+.hr-tone-success,
+.agent-management-panel .ac-active { color: var(--ui-success); border-color: var(--ui-success); }
+.hr-tone-warning { color: var(--ui-warning); border-color: var(--ui-warning); }
+.hr-tone-danger,
+.hr-degraded-banner,
+.agent-management-panel .ac-error,
+.agent-management-panel .ac-confirm-error { color: var(--ui-danger); border-color: var(--ui-danger); }
+
+.hr-degraded-banner,
+.agent-management-panel .ac-error,
+.agent-management-panel .ac-confirm-error { background: var(--ui-danger-soft); }
+
+.hr-command-message,
+.agent-management-feedback,
+.agent-management-panel .ac-field-feedback {
+    font-family: var(--ui-font-family);
+}
+
+.hr-shell input,
+.hr-shell select,
+.hr-shell textarea,
+.agent-management-panel input,
+.agent-management-panel select,
+.agent-management-panel textarea {
+    color: var(--ui-text-primary);
+    background: var(--ui-canvas);
+    border-color: var(--ui-border-strong);
+    border-radius: var(--ui-radius-md);
+    font-family: var(--ui-font-family);
+}
+
+.hr-shell :is(input, select, textarea):disabled,
+.agent-management-panel :is(input, select, textarea):disabled {
+    opacity: .58;
+    cursor: not-allowed;
+}
+
+.hr-shell [aria-invalid="true"],
+.agent-management-panel [aria-invalid="true"] {
+    border-color: var(--ui-danger);
+    box-shadow: 0 0 0 1px var(--ui-danger);
+}
+
+/* 头像预览与外观色板是领域数据展示，保留各自颜色；仅统一容器和交互状态。 */
+.agent-management-panel .ac-avatar,
+.agent-management-panel .ac-option-icon,
+.agent-management-panel .ac-color-grid {
+    border-color: var(--ui-border-strong);
+}
+
+@media (max-width: 820px) {
+    .agent-management-dialog,
+    .hr-modal-content { width: 100%; height: calc(100dvh - 16px); }
+    .agent-management-tabs { overflow-x: auto; }
+    .agent-management-tab { min-width: max-content; }
+}

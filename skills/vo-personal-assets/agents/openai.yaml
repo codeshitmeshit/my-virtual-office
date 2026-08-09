@@ -1,0 +1,4 @@
+interface:
+  display_name: "个人资产建档"
+  short_description: "通过手动对话安全建立、继续、修正和追加个人资产权威档案"
+  default_prompt: "请使用 $vo-personal-assets 引导我建立、继续或追加个人资产档案。"
