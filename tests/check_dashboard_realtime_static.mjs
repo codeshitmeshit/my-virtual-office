@@ -10,6 +10,7 @@ const style = fs.readFileSync('app/style.css', 'utf8');
 const zh = fs.readFileSync('app/locales/zh.json', 'utf8');
 
 assert.ok(index.includes('dashboard-realtime.js'), 'index should load the focused dashboard realtime JS module');
+assert.ok(js.includes('VOManagementSessionReadiness.whenAuthenticated'), 'dashboard SSE must wait for management authentication');
 assert.ok(js.includes("new EventSource('/api/dashboard/events')"), 'dashboard realtime JS should own the SSE connection');
 assert.ok(js.includes('Polling fallback') || js.includes('polling fallback'), 'dashboard realtime JS should expose polling fallback mode');
 assert.ok(js.includes('dashboardApplyStatusSnapshot'), 'dashboard realtime JS should use the thin game.js status hook');

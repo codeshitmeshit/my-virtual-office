@@ -370,6 +370,47 @@ class MarkdownProjectStore:
             self._rewrite_from_dict(data)
             self._mark_written()
 
+    def save_project(self, project: Dict[str, Any]) -> None:
+        """Replace one project directory without rewriting unrelated projects."""
+        project_id = str(project.get("id") or "").strip()
+        if not project_id:
+            raise ValueError("project id is required")
+        with self.lock:
+            self._migrate_legacy_if_needed()
+            existing_dir = None
+            for entry in os.scandir(self.projects_dir):
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+                project_md = os.path.join(entry.path, "project.md")
+                if not os.path.isfile(project_md):
+                    continue
+                try:
+                    with open(project_md, "r", encoding="utf-8") as stream:
+                        metadata, _ = _parse_frontmatter(stream.read())
+                    if str(metadata.get("id") or "") == project_id:
+                        existing_dir = entry.path
+                        break
+                except (OSError, ValueError):
+                    continue
+
+            target_dir = self._project_dir(project)
+            backup_dir = None
+            if existing_dir:
+                backup_dir = existing_dir + f".replace-{os.getpid()}-{threading.get_ident()}"
+                os.replace(existing_dir, backup_dir)
+            try:
+                if os.path.isdir(target_dir):
+                    shutil.rmtree(target_dir)
+                self._write_project(project)
+                if backup_dir:
+                    shutil.rmtree(backup_dir, ignore_errors=True)
+            except Exception:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                if backup_dir and os.path.isdir(backup_dir):
+                    os.replace(backup_dir, existing_dir)
+                raise
+            self._mark_written()
+
     def get_project(self, project_id: str) -> Optional[Dict[str, Any]]:
         target_id = str(project_id or "")
         with self.lock:

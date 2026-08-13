@@ -315,13 +315,13 @@ def test_phase6_project_success_meeting_commit_failure_retries_without_duplicate
             project = create_project(); source_task = create_project_task(project)
             meeting = create_completed_task_meeting(project["id"], source_task["id"])
             draft = meeting["actionItemDrafts"][0]
-            repository = server._meeting_domain_repository(); original_update = repository.update; calls = {"count": 0}
-            def fail_second(mutator):
+            repository = server._meeting_domain_repository(); original_mutate = repository.mutate_meeting; calls = {"count": 0}
+            def fail_second(meeting_id, mutator):
                 calls["count"] += 1
                 if calls["count"] == 2:
                     raise OSError("simulated Meeting Store failure")
-                return original_update(mutator)
-            with mock.patch.object(repository, "update", side_effect=fail_second):
+                return original_mutate(meeting_id, mutator)
+            with mock.patch.object(repository, "mutate_meeting", side_effect=fail_second):
                 failed = server._handle_executable_meeting_action_item(
                     meeting["id"], draft["id"], {"action": "confirm", "idempotencyKey": "partial-retry"},
                 )

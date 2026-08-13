@@ -118,7 +118,10 @@ def test_meeting_request_list_sorts_unprocessed_before_processed_then_time():
                 "idempotency": {},
                 "updatedAt": "2026-06-23T10:05:00+00:00",
             }
-            server._save_meeting_request_store(store)
+            for request in store["requests"].values():
+                server._meeting_domain_repository().create_request(
+                    lambda scoped, request=request: scoped["requests"].update({request["id"]: request})
+                )
 
             listed = server._meeting_request_list_filtered()["requests"]
             assert [r["id"] for r in listed] == ["pending-new", "pending-old", "rejected-newer", "confirmed-new"]

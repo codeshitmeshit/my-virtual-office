@@ -39,11 +39,16 @@ import time
 import difflib
 from pathlib import Path
 from collections import OrderedDict, deque
+from functools import partial
 from dataclasses import dataclass
 import feishu_chat_channel
 import gateway_presence
 import server_routes
 from dashboard_realtime import DashboardRealtimeStream
+from services.dashboard_snapshot_feed import DashboardSnapshotFeed
+from services.project_summary_cache import ProjectSummaryCache
+from services.agent_event_repository import AgentEventRepository
+from services import agent_activity_service
 from services import project_execution as project_execution_service
 from services import project_workflow_chat as project_workflow_chat_service
 from services import project_workflow_chat_stream as project_workflow_chat_stream_service
@@ -56,6 +61,9 @@ from services import project_stage_dispatch as project_stage_dispatch_service
 from services import browser_project_creation as browser_project_creation_service
 from services import execution_lifecycle as execution_lifecycle_service
 from services import meeting_prompt_documents
+from services import meeting_request_workflow
+from services import executable_meeting_commands
+from services import meeting_request_reconciliation
 from services import review_acceptance as review_acceptance_service
 from services import artifacts as artifact_service
 from services import project_schedule as project_schedule_service
@@ -1512,7 +1520,7 @@ def _dispatch_human_decision_chat_continuation(request):
 
 def _human_decision_meeting_load(meeting_id):
     with _EXEC_MEETING_LOCK:
-        return copy.deepcopy((_load_exec_meeting_store().get("meetings") or {}).get(meeting_id))
+        return _meeting_domain_repository().get_meeting(meeting_id)
 
 
 def _human_decision_meeting_wake(meeting_id, prompt):
@@ -1550,25 +1558,23 @@ def _human_decision_bind_native(decision, agent_id):
     if source_type == "meeting":
         meeting_id = str(source.get("id") or "")
         with _EXEC_MEETING_LOCK:
-            store = _load_exec_meeting_store()
-            meeting = (store.get("meetings") or {}).get(meeting_id)
-            if not isinstance(meeting, dict) or agent_id not in set(meeting.get("participants") or []):
+            def bind(store):
+                meeting = (store.get("meetings") or {}).get(meeting_id)
+                if not isinstance(meeting, dict) or agent_id not in set(meeting.get("participants") or []):
+                    return None
+                current = str(meeting.get("stage") or "")
+                if current not in {"awaiting_user_decision", "completed", "cancelled", "failed"}:
+                    _meeting_open_decision_window(
+                        store, meeting, current, int(meeting.get("round") or 0),
+                        current, int(meeting.get("round") or 0), "human_decision",
+                    )
+                if meeting.get("stage") != "awaiting_user_decision":
+                    return None
+                meeting["humanDecisionId"] = decision_id
+                return meeting
+            _, meeting = _meeting_domain_repository().mutate_meeting(meeting_id, bind)
+            if meeting is None:
                 return None
-            current = str(meeting.get("stage") or "")
-            if current not in {"awaiting_user_decision", "completed", "cancelled", "failed"}:
-                _meeting_open_decision_window(
-                    store,
-                    meeting,
-                    current,
-                    int(meeting.get("round") or 0),
-                    current,
-                    int(meeting.get("round") or 0),
-                    "human_decision",
-                )
-            if meeting.get("stage") != "awaiting_user_decision":
-                return None
-            meeting["humanDecisionId"] = decision_id
-            _save_exec_meeting_store(store)
             return {
                 "kind": "meeting",
                 "binding": {
@@ -1690,7 +1696,7 @@ os.makedirs(STATUS_DIR, exist_ok=True)
 _MEETING_STORE_ACTIVE_LOCK_FD = meeting_repository_service.acquire_active_lock(STATUS_DIR)
 _MEETING_STORE_BOOT_REPOSITORY = meeting_repository_service.MeetingDomainRepository(STATUS_DIR)
 if _MEETING_STORE_BOOT_REPOSITORY.authority_state() == "empty":
-    _MEETING_STORE_BOOT_REPOSITORY.update(lambda data: None)
+    _MEETING_STORE_BOOT_REPOSITORY.initialize_empty()
 STATUS_FILE = os.path.join(STATUS_DIR, "virtual-office-status.json")
 PROJECT_CRON_BINDINGS_FILE = os.path.join(STATUS_DIR, "project-cron-bindings.json")
 
@@ -6747,177 +6753,73 @@ _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
 _CODEX_ACTIVE_OPERATIONS = {}
-
-_CODEX_SECRET_KEYS = {"authorization", "cookie", "token", "api_key", "apikey", "password", "secret", "access_token", "refresh_token"}
-_CODEX_MAX_EVENT_TEXT = 12000
-
+_CODEX_ACTIVITY_REPOSITORIES = {}
+_CODEX_ACTIVITY_REPOSITORIES_LOCK = threading.Lock()
 
 def _codex_activity_path():
-    return os.path.join(STATUS_DIR, "codex-activity.json")
+    return str(_codex_activity_repository().path)
+
+
+def _codex_activity_repository():
+    key = os.path.realpath(STATUS_DIR)
+    with _CODEX_ACTIVITY_REPOSITORIES_LOCK:
+        repository = _CODEX_ACTIVITY_REPOSITORIES.get(key)
+        if repository is None:
+            repository = AgentEventRepository(key, max_events=5000)
+            _CODEX_ACTIVITY_REPOSITORIES[key] = repository
+        return repository
 
 
 def _sanitize_codex_value(value, key=""):
-    key_lower = str(key or "").lower().replace("-", "_")
-    if any(secret in key_lower for secret in _CODEX_SECRET_KEYS):
-        return "[REDACTED]"
-    if isinstance(value, dict):
-        return {str(k): _sanitize_codex_value(v, k) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_sanitize_codex_value(item) for item in value[:200]]
-    if isinstance(value, str):
-        text = re.sub(r"(?i)(bearer\s+)[a-z0-9._~+/=-]+", r"\1[REDACTED]", value)
-        text = re.sub(r"(?i)(https?://[^\s/:]+:)[^@\s]+@", r"\1[REDACTED]@", text)
-        if len(text) > _CODEX_MAX_EVENT_TEXT:
-            return text[:_CODEX_MAX_EVENT_TEXT] + "\n[TRUNCATED]"
-        return text
-    return value
+    return agent_activity_service.sanitize(value, key)
 
 
 def _load_codex_activity():
-    try:
-        with open(_codex_activity_path(), "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
+    return _codex_activity_repository().load_all()
 
 
 def _save_codex_activity(events):
-    path = _codex_activity_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(events[-5000:], f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    _codex_activity_repository().save_compat(events)
 
 
 def _update_codex_active_from_record(agent_id, conversation_id, record):
-    with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) or _CODEX_ACTIVE_OPERATIONS.get(agent_id)
-        if active and active.get("conversationId") == conversation_id:
-            active["threadId"] = record.get("threadId") or active.get("threadId", "")
-            active["turnId"] = record.get("turnId") or active.get("turnId", "")
-            active["updatedAt"] = record.get("ts") or int(time.time() * 1000)
-            record_type = str(record.get("type") or "").lower()
-            record_status = str(record.get("status") or "").lower()
-            pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
-            interaction_id = str(record.get("interactionId") or record.get("approvalId") or "")
-            pending_id = str((pending or {}).get("interactionId") or (pending or {}).get("approvalId") or "")
-            terminal_turn = record_type == "turn" and record_status in {
-                "completed", "done", "success", "failed", "error", "cancelled", "canceled",
-            }
-            approval_terminal = (
-                record_type in {"interaction", "approval"}
-                and record_status in {"resolved", "failed", "cancelled", "canceled", "declined"}
-                and (not pending_id or not interaction_id or pending_id == interaction_id)
-            )
-            if record_type in {"interaction", "approval"} and record_status == "pending":
-                if record_type == "interaction":
-                    active["pending"] = normalize_approval_record("codex", agent_id, conversation_id, record)
-                    active["pending"]["raw"] = record
-                else:
-                    active["pending"] = dict(record)
-                active["status"] = "pending"
-            elif terminal_turn or approval_terminal:
-                active["pending"] = None
-                active["status"] = record_status or active.get("status", "running")
-            elif pending:
-                # Approval wait is a projection priority: unrelated activity
-                # cannot make an actually blocked turn appear idle/completed.
-                active["status"] = "resolving" if str(pending.get("status") or "").lower() == "resolving" else "pending"
-            else:
-                active["status"] = record_status or active.get("status", "running")
+    return agent_activity_service.update_active_from_record(
+        _CODEX_ACTIVE_OPERATIONS, _CODEX_ACTIVE_LOCK, agent_id, conversation_id, record,
+        normalize_approval=normalize_approval_record,
+    )
 
 
 def _mark_codex_active_approval_resolving(agent_id, conversation_id, approval_id):
-    with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) or _CODEX_ACTIVE_OPERATIONS.get(agent_id)
-        if not active or active.get("conversationId") != conversation_id:
-            return False
-        pending = active.get("pending") if isinstance(active.get("pending"), dict) else None
-        if not pending:
-            return False
-        pending_id = str(pending.get("approvalId") or pending.get("interactionId") or "")
-        if approval_id and pending_id and approval_id != pending_id:
-            # App-server approval ids and interaction ids are distinct; the
-            # trusted route/turn linkage remains authoritative for that case.
-            raw = pending.get("raw") if isinstance(pending.get("raw"), dict) else {}
-            if str(raw.get("threadId") or "") != str(active.get("threadId") or ""):
-                return False
-        pending["status"] = "resolving"
-        active["status"] = "resolving"
-        active["updatedAt"] = int(time.time() * 1000)
-        return True
+    return agent_activity_service.mark_approval_resolving(
+        _CODEX_ACTIVE_OPERATIONS, _CODEX_ACTIVE_LOCK, agent_id, conversation_id, approval_id,
+    )
 
 
 def _append_codex_activity(agent_id, conversation_id, event, *, preserve_sequence=False):
-    with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-        last_sequence = max(
-            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
-            default=0,
-        )
-        provider_sequence = int(event.get("providerSequence") or event.get("sequence") or 0)
-        record = _sanitize_codex_value({
-            **event,
-            "providerSequence": provider_sequence,
-            "sequence": int(event.get("sequence") or 0) if preserve_sequence else last_sequence + 1,
-            "agentId": agent_id,
-            "conversationId": conversation_id,
-        })
-        events.append(record)
-        _save_codex_activity(events)
+    record = agent_activity_service.append(
+        _codex_activity_repository(), _CODEX_ACTIVITY_LOCK, agent_id, conversation_id, event,
+        preserve_sequence=preserve_sequence, load=_load_codex_activity, save=_save_codex_activity,
+    )
     _update_codex_active_from_record(agent_id, conversation_id, record)
     return record
 
 
 def _get_codex_activity(agent_id, conversation_id, after=0):
-    with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-    matching = [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
-    if _CODEX_EVENT_FAST_PATH.settings.enabled:
-        live = _CODEX_EVENT_FAST_PATH.live_events(agent_id, conversation_id, after=after)
-        by_identity = {
-            (event.get("id") or "", int(event.get("sequence") or 0)): event
-            for event in matching
-        }
-        for event in live:
-            by_identity[(event.get("id") or "", int(event.get("sequence") or 0))] = event
-        matching = list(by_identity.values())
-    return sorted(matching, key=lambda event: int(event.get("sequence") or 0))
+    return agent_activity_service.list_activity(
+        _codex_activity_repository(), _CODEX_ACTIVITY_LOCK, _CODEX_EVENT_FAST_PATH,
+        agent_id, conversation_id, after=after,
+    )
 
 
 def _last_persisted_codex_activity_sequence(agent_id, conversation_id):
     with _CODEX_ACTIVITY_LOCK:
-        return max(
-            (
-                int(event.get("sequence") or 0)
-                for event in _load_codex_activity()
-                if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id
-            ),
-            default=0,
-        )
+        return _codex_activity_repository().max_sequence(agent_id, conversation_id)
 
 
 def _get_codex_active(agent_id, conversation_id="", thread_id=""):
-    with _CODEX_ACTIVE_LOCK:
-        active = _CODEX_ACTIVE_OPERATIONS.get((agent_id, conversation_id)) if conversation_id else None
-        if active:
-            return dict(active)
-        candidates = [
-            value
-            for key, value in _CODEX_ACTIVE_OPERATIONS.items()
-            if isinstance(key, tuple) and key[0] == agent_id and isinstance(value, dict)
-        ]
-        legacy = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
-        if isinstance(legacy, dict):
-            candidates.append(legacy)
-        if conversation_id:
-            candidates = [item for item in candidates if item.get("conversationId") == conversation_id]
-        if thread_id:
-            candidates = [item for item in candidates if item.get("threadId") == thread_id]
-        active = max(candidates, key=lambda item: int(item.get("updatedAt") or 0), default=None)
-        return dict(active) if active else None
+    return agent_activity_service.get_active(
+        _CODEX_ACTIVE_OPERATIONS, _CODEX_ACTIVE_LOCK, agent_id, conversation_id, thread_id,
+    )
 
 
 def _codex_thread_state_path():
@@ -13010,10 +12912,6 @@ def _meeting_preparing_timeout_sec():
     return min(seconds, 86400)
 
 
-def _exec_meetings_file():
-    return os.path.join(STATUS_DIR, "executable-meetings.json")
-
-
 def _exec_meeting_empty_store():
     return {"meetings": {}, "events": {}, "occupancy": {}, "idempotency": {}, "updatedAt": ""}
 
@@ -13037,7 +12935,8 @@ def _meeting_domain_file():
 
 
 def _meeting_domain_authority_status():
-    state = _meeting_domain_repository().authority_state()
+    repository = _meeting_domain_repository()
+    state = "unified" if repository.ready() else repository.authority_state()
     if state == "migration_required":
         return {"ok": False, "code": "meeting_store_migration_required", "_status": 409}
     if state == "invalid":
@@ -13054,34 +12953,12 @@ def _is_meeting_domain_path(path):
     )
 
 
-def _load_exec_meeting_store():
-    return _meeting_domain_repository().executable_view()
-
-
-def _save_exec_meeting_store(data):
-    data["updatedAt"] = _exec_meeting_now()
-    _meeting_domain_repository().replace_executable(data)
-
-
 _MEETING_REQUEST_LOCK = threading.RLock()
 _MEETING_REQUEST_STATUSES = {"pending", "rejected", "confirmed"}
 
 
-def _meeting_requests_file():
-    return os.path.join(STATUS_DIR, "meeting-requests.json")
-
-
 def _meeting_request_empty_store():
     return {"requests": {}, "idempotency": {}, "updatedAt": ""}
-
-
-def _load_meeting_request_store():
-    return _meeting_domain_repository().request_view()
-
-
-def _save_meeting_request_store(data):
-    data["updatedAt"] = _exec_meeting_now()
-    _meeting_domain_repository().replace_requests(data)
 
 
 def _meeting_request_service_hooks():
@@ -13100,70 +12977,23 @@ def _meeting_request_service_hooks():
 
 
 def _meeting_request_record_reconciliation(request_id, operation, failure, context=None):
-    def mutate(data):
-        request = data.get("requests", {}).get(request_id)
-        if not isinstance(request, dict):
-            return False
-        entries = request.setdefault("reconciliation", [])
-        key = f"{request_id}:{operation}"
-        entry = {
-            "key": key, "operation": operation, "status": "pending",
-            "error": _meeting_request_summary((failure or {}).get("error") or "Project update failed", 500),
-            "context": {key: value for key, value in (context or {}).items() if value not in (None, "")},
-            "updatedAt": _exec_meeting_now(),
-        }
-        existing = next((item for item in entries if item.get("key") == key), None)
-        if existing:
-            existing.update(entry)
-        else:
-            entries.append(entry)
-        request["reconciliation"] = entries[-20:]
-        request["updatedAt"] = entry["updatedAt"]
-        return True
-    return _meeting_domain_repository().update(mutate)[1]
+    return _meeting_request_reconciliation().record(request_id, operation, failure, context)
 
 
 def _meeting_request_reconcile_project(request_id):
-    request = _meeting_domain_repository().snapshot().get("requests", {}).get(request_id)
-    if not isinstance(request, dict):
-        return {"ok": False, "error": "Meeting request not found", "_status": 404}
-    pending = [item for item in request.get("reconciliation", []) if item.get("status") == "pending"]
-    results = []
-    for entry in pending:
-        context = entry.get("context") if isinstance(entry.get("context"), dict) else {}
-        operation = entry.get("operation")
-        if operation == "project_block_create":
-            outcome = _project_execution_block_for_meeting_request(
-                context.get("projectId"), context.get("taskId"), request,
-                "AI meeting requested; waiting for meeting resolution.",
-            )
-        elif operation == "project_confirm":
-            outcome = _project_execution_update_meeting_blocker(
-                context.get("projectId"), context.get("taskId"), request_id,
-                status="confirmed", meetingId=context.get("meetingId"), awaitingUserDecision=False,
-            )
-        elif operation == "project_reject":
-            outcome = _project_execution_update_meeting_blocker(
-                context.get("projectId"), context.get("taskId"), request_id,
-                status="rejected", rejectionReason=context.get("reason"), awaitingUserDecision=True,
-            )
-        elif operation == "project_meeting_result":
-            meeting = _meeting_domain_repository().snapshot().get("meetings", {}).get(context.get("meetingId"))
-            outcome = _project_execution_apply_meeting_result(meeting, _record_reconciliation=False) if meeting else {
-                "ok": False, "error": "Meeting not found", "_status": 404,
-            }
-        else:
-            outcome = {"ok": False, "error": "Unsupported reconciliation operation", "_status": 400}
-        results.append({"key": entry.get("key"), "operation": operation, "ok": bool(outcome.get("ok"))})
-        if outcome.get("ok"):
-            def resolve(data, key=entry.get("key")):
-                current = data.get("requests", {}).get(request_id)
-                for item in current.get("reconciliation", []) if isinstance(current, dict) else []:
-                    if item.get("key") == key:
-                        item["status"] = "resolved"; item["resolvedAt"] = _exec_meeting_now(); item["updatedAt"] = item["resolvedAt"]
-                return True
-            _meeting_domain_repository().update(resolve)
-    return {"ok": all(item["ok"] for item in results), "attempted": len(results), "results": results}
+    return _meeting_request_reconciliation().reconcile(request_id)
+
+
+def _meeting_request_reconciliation():
+    return meeting_request_reconciliation.MeetingRequestReconciliation(
+        meeting_request_reconciliation.ReconciliationPorts(
+            repository=_meeting_domain_repository(), now=_exec_meeting_now,
+            summarize=_meeting_request_summary,
+            block_project=_project_execution_block_for_meeting_request,
+            update_blocker=_project_execution_update_meeting_blocker,
+            apply_meeting_result=_project_execution_apply_meeting_result,
+        )
+    )
 
 
 def _meeting_request_clean_type(raw):
@@ -13338,7 +13168,9 @@ def _meeting_request_notification_details(req):
 
 
 def _deliver_meeting_notification(entity_kind, entity_id, intent):
-    _, staged = _meeting_domain_repository().update(
+    mutate = _meeting_domain_repository().mutate_request if entity_kind == "request" else _meeting_domain_repository().mutate_meeting
+    _, staged = mutate(
+        entity_id,
         lambda data: meeting_notifications_service.stage(
             data, entity_kind, entity_id, intent, _exec_meeting_now(),
         )
@@ -13364,7 +13196,8 @@ def _deliver_meeting_notification(entity_kind, entity_id, intent):
     except Exception as exc:
         result = {"ok": False, "status": "delivery_failed", "error": _project_execution_redact(str(exc))}
     try:
-        _meeting_domain_repository().update(
+        mutate(
+            entity_id,
             lambda data: meeting_notifications_service.mark(
                 data, entity_kind, entity_id, staged["dedupeKey"], result, _exec_meeting_now(),
             )
@@ -14386,7 +14219,8 @@ def _handle_feishu_card_action(body):
             chat_id=str(event.get("open_chat_id") or event.get("chat_id") or ""),
             actor_id=user.get("userId") or user.get("openId") or user.get("unionId") or "feishu",
         )
-        _, callback_claim = _meeting_domain_repository().update(
+        _, callback_claim = _meeting_domain_repository().mutate_request(
+            request_id,
             lambda data: meeting_callbacks_service.begin(
                 data, action, request_id, context, _exec_meeting_now(), uuid.uuid4().hex, value,
             )
@@ -14458,7 +14292,8 @@ def _handle_feishu_card_action(body):
             "outcome": {k: v for k, v in meeting_outcome.items() if k not in {"toast"}},
         }
         if callback_claim and callback_claim.get("claimed"):
-            _meeting_domain_repository().update(
+            _meeting_domain_repository().mutate_request(
+                request_id,
                 lambda data: meeting_callbacks_service.complete(
                     data, callback_claim["key"], callback_claim["claimToken"], response, _exec_meeting_now(),
                 )
@@ -15790,59 +15625,40 @@ def _meeting_project_ref(project_id):
     return {"ok": True, "projectId": project_id, "projectTitle": project.get("title", "")}
 
 
+def _meeting_request_workflow():
+    return meeting_request_workflow.MeetingRequestWorkflow(meeting_request_workflow.MeetingRequestPorts(
+        repository=_meeting_domain_repository(),
+        find_project_task=_meeting_request_find_project_task,
+        context_candidates=_meeting_request_context_candidates,
+        request_hooks=_meeting_request_service_hooks,
+        participant_error=_exec_meeting_archive_manager_error,
+        block_project=_project_execution_block_for_meeting_request,
+        update_blocker=_project_execution_update_meeting_blocker,
+        record_reconciliation=_meeting_request_record_reconciliation,
+        reconcile_project=_meeting_request_reconcile_project,
+        auto_confirm_reason=_meeting_request_auto_confirm_reason,
+        send_notification=_send_meeting_request_notification,
+        project_ref=_meeting_project_ref,
+        preparing_timeout=_meeting_preparing_timeout_sec,
+        decision_window=lambda: _meeting_clamped_decision_window_sec(_meeting_decision_window_sec()),
+        context_budget=_meeting_context_budget,
+        new_id=lambda: str(uuid.uuid4()),
+        log_auto_confirm=_meeting_request_log_auto_confirm_activity,
+        approved_details=_meeting_request_approved_notification_details,
+        meeting_open_url=_meeting_open_url,
+        run_meeting=_handle_executable_meeting_run,
+        now=_exec_meeting_now,
+        task_comment=_handle_task_comment,
+        notification_details=_meeting_request_notification_details,
+    ))
+
+
 
 
 
 
 def _handle_meeting_request_create(project_id, task_id, body):
-    project, task = _meeting_request_find_project_task(project_id, task_id)
-    if not project:
-        return meeting_requests_service.error("Project not found", 404, "project_not_found")
-    if not task:
-        return meeting_requests_service.error("Task not found", 404, "task_not_found")
-    hooks = _meeting_request_service_hooks()
-    candidates = _meeting_request_context_candidates(project, task)
-    _, result = _meeting_domain_repository().update(
-        lambda data: meeting_requests_service.create_command(data, project, task, body, candidates, hooks)
-    )
-    if not result.get("ok"):
-        if result.get("code") == "archive_manager_not_meeting_participant":
-            return _exec_meeting_archive_manager_error(result.get("participants") or [])
-        return result
-    request = result["request"]
-    created = bool(result.pop("created", False))
-    if result.get("idempotent") or not created:
-        reconciliation = _meeting_request_reconcile_project(request.get("id"))
-        if reconciliation.get("attempted"):
-            result["projectReconciliation"] = reconciliation
-        return result
-    blocked = _project_execution_block_for_meeting_request(
-        project_id, task_id, request, "AI meeting requested; waiting for meeting resolution.",
-    )
-    if not blocked.get("ok"):
-        _meeting_request_record_reconciliation(
-            request["id"], "project_block_create", blocked,
-            {"projectId": project_id, "taskId": task_id},
-        )
-        return blocked
-    auto_reason = _meeting_request_auto_confirm_reason(project, request.get("urgency"))
-    if auto_reason:
-        requested_context = request.get("requestedContext") if isinstance(request.get("requestedContext"), dict) else {}
-        auto = _handle_meeting_request_confirm(request["id"], {
-            "confirmedBy": f"agent:{request.get('requestingAgentId') or ''}",
-            "autoConfirmed": True, "autoConfirmReason": auto_reason,
-            "selectedContextIds": requested_context.get("selectedContextIds") or body.get("selectedContextIds") or body.get("contextIds") or [],
-            "supplementalContext": requested_context.get("supplementalContext") if "supplementalContext" in requested_context else body.get("supplementalContext") or "",
-            "idempotencyKey": f"meeting-request-auto:{request['id']}",
-        })
-        if auto.get("ok"):
-            auto["autoConfirmed"] = True
-            return auto
-        return {
-            "ok": True, "request": request, "autoConfirmError": auto,
-            "notification": _send_meeting_request_notification(request, "pending"),
-        }
-    return {"ok": True, "request": request, "notification": _send_meeting_request_notification(request, "pending")}
+    return _meeting_request_workflow().create(project_id, task_id, body)
 
 
 def _meeting_request_list_filtered(query_string=""):
@@ -15850,126 +15666,19 @@ def _meeting_request_list_filtered(query_string=""):
     status_filter = (parsed.get("status") or [""])[0]
     project_id = (parsed.get("projectId") or [""])[0]
     task_id = (parsed.get("taskId") or [""])[0]
-    return meeting_requests_service.list_command(
-        _meeting_domain_repository().snapshot(), status=status_filter, project_id=project_id, task_id=task_id,
-    )
+    return _meeting_request_workflow().list(status=status_filter, project_id=project_id, task_id=task_id)
 
 
 def _handle_meeting_request_detail(request_id):
-    return meeting_requests_service.detail_command(_meeting_domain_repository().snapshot(), request_id)
+    return _meeting_request_workflow().detail(request_id)
 
 
 def _handle_meeting_request_confirm(request_id, body):
-    snapshot = _meeting_domain_repository().snapshot()
-    request = snapshot.get("requests", {}).get(request_id)
-    if not request:
-        return meeting_requests_service.error("Meeting request not found", 404, "request_not_found")
-    source = request.get("source") if isinstance(request.get("source"), dict) else {}
-    project_ref = _meeting_project_ref(str(body.get("projectId") or source.get("projectId") or ""))
-    if not project_ref.get("ok"):
-        return meeting_requests_service.error(
-            project_ref.get("error") or "Project not found", project_ref.get("_status", 404),
-            project_ref.get("code", "project_not_found"),
-        )
-    hooks = _meeting_request_service_hooks()
-    defaults = {
-        "meetingId": str(uuid.uuid4()),
-        "preparingTimeoutSec": _meeting_preparing_timeout_sec(),
-        "decisionWindowSec": _meeting_clamped_decision_window_sec(_meeting_decision_window_sec()),
-        "contextBudget": _meeting_context_budget(None),
-        "allowConflicts": False,
-    }
-    _, result = _meeting_domain_repository().update(
-        lambda data: meeting_requests_service.confirm_command(
-            data, request_id, body, project_title=project_ref.get("projectTitle") or "",
-            lifecycle_defaults=defaults, hooks=hooks,
-        )
-    )
-    if not result.get("ok"):
-        if result.get("code") == "archive_manager_not_meeting_participant":
-            return _exec_meeting_archive_manager_error(result.get("participants") or [])
-        return result
-    request = result.get("request") or {}
-    meeting = result.get("meeting")
-    if result.get("idempotent"):
-        reconciliation = _meeting_request_reconcile_project(request_id)
-        if reconciliation.get("attempted"):
-            result["projectReconciliation"] = reconciliation
-        return result
-    project_update = _project_execution_update_meeting_blocker(
-        source.get("projectId"), source.get("taskId"), request_id,
-        status="confirmed", meetingId=result.get("meetingId"), awaitingUserDecision=False,
-    )
-    if not project_update.get("ok"):
-        _meeting_request_record_reconciliation(
-            request_id, "project_confirm", project_update,
-            {"projectId": source.get("projectId"), "taskId": source.get("taskId"), "meetingId": result.get("meetingId")},
-        )
-    if body.get("autoConfirmed") and meeting:
-        _meeting_request_log_auto_confirm_activity(request, meeting, body.get("autoConfirmReason"))
-    notification = _send_meeting_request_notification(
-        request, "approved", summary=f"会议申请已同意，会议 ID：{result.get('meetingId')}",
-        details=_meeting_request_approved_notification_details(request),
-        actions=[{"category": "jump", "text": "查看会议", "url": _meeting_open_url(result.get("meetingId"))}],
-    )
-    if body.get("autoConfirmed") and meeting:
-        auto_run = _handle_executable_meeting_run(meeting["id"], {
-            "action": "auto_start", "actorId": request.get("requestingAgentId") or "agent", "actorType": "agent",
-        })
-        summary = {
-            "attempted": True, "startedAt": _exec_meeting_now(),
-            "ok": bool(auto_run.get("ok")) if isinstance(auto_run, dict) else False,
-            "stage": ((auto_run or {}).get("meeting") or {}).get("stage") if isinstance(auto_run, dict) else "",
-            "error": (auto_run or {}).get("error") if isinstance(auto_run, dict) else "Auto run failed",
-        }
-        def record_auto_run(data):
-            current = data.get("requests", {}).get(request_id)
-            if current:
-                current.setdefault("conversion", {})["autoRun"] = summary
-                current["updatedAt"] = _exec_meeting_now()
-            return meeting_requests_service.public_request(current)
-        _, current_request = _meeting_domain_repository().update(record_auto_run)
-        result["request"] = current_request
-        result["autoRun"] = summary
-        if isinstance(auto_run, dict) and auto_run.get("meeting"):
-            result["meeting"] = auto_run["meeting"]
-    result["notification"] = notification
-    if not project_update.get("ok"):
-        result["projectReconciliationPending"] = True
-    return result
+    return _meeting_request_workflow().confirm(request_id, body)
 
 
 def _handle_meeting_request_reject(request_id, body):
-    hooks = _meeting_request_service_hooks()
-    _, result = _meeting_domain_repository().update(
-        lambda data: meeting_requests_service.reject_command(data, request_id, body, hooks)
-    )
-    if not result.get("ok"):
-        return result
-    if result.get("idempotent"):
-        reconciliation = _meeting_request_reconcile_project(request_id)
-        if reconciliation.get("attempted"):
-            result["projectReconciliation"] = reconciliation
-        return result
-    request = result["request"]; source = request.get("source") or {}; reason = str(body.get("reason") or "").strip()
-    project_update = _project_execution_update_meeting_blocker(
-        source.get("projectId"), source.get("taskId"), request_id,
-        status="rejected", rejectionReason=reason, awaitingUserDecision=True,
-    )
-    if not project_update.get("ok"):
-        _meeting_request_record_reconciliation(
-            request_id, "project_reject", project_update,
-            {"projectId": source.get("projectId"), "taskId": source.get("taskId"), "reason": reason},
-        )
-        result["projectReconciliationPending"] = True
-    _handle_task_comment(source.get("projectId", ""), source.get("taskId", ""), {
-        "author": "meeting-request", "text": f"AI meeting request rejected: {reason}",
-    })
-    result["notification"] = _send_meeting_request_notification(
-        request, "rejected", summary=f"会议申请已拒绝：{reason}", actions=[],
-        details=_meeting_request_notification_details(request) + [("拒绝原因", reason)],
-    )
-    return result
+    return _meeting_request_workflow().reject(request_id, body)
 
 
 def _exec_meeting_clean_participants(raw):
@@ -16362,26 +16071,23 @@ def _meeting_normalize_advisory_reply(conflict, result):
 def _meeting_complete_live_advisories(meeting_id):
     if os.environ.get("VO_MEETING_DISABLE_LIVE_ADVISORY"):
         return None
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return None
-        pending = [
-            dict(conflict)
-            for conflict in (meeting.get("conflicts") or [])
-            if conflict.get("riskLevel") in {"medium", "high"} and conflict.get("status") in {"open", "waiting", "reserved"}
-        ]
+    meeting = _meeting_domain_repository().get_meeting(meeting_id)
+    if not meeting:
+        return None
+    pending = [
+        dict(conflict)
+        for conflict in (meeting.get("conflicts") or [])
+        if conflict.get("riskLevel") in {"medium", "high"} and conflict.get("status") in {"open", "waiting", "reserved"}
+    ]
     if not pending:
         return None
     for snapshot in pending:
         result = _meeting_call_advisory_provider(meeting, snapshot)
         advisory = _meeting_normalize_advisory_reply(snapshot, result)
-        with _EXEC_MEETING_LOCK:
-            store = _load_exec_meeting_store()
+        def commit(store):
             meeting = store.get("meetings", {}).get(meeting_id)
             if not meeting or meeting.get("stage") in _EXEC_MEETING_TERMINAL:
-                continue
+                return None
             for conflict in meeting.get("conflicts") or []:
                 if conflict.get("id") == snapshot.get("id"):
                     conflict["advisory"] = advisory
@@ -16392,10 +16098,9 @@ def _meeting_complete_live_advisories(meeting_id):
                     conflict["updatedAt"] = _exec_meeting_now()
                     _append_exec_meeting_event(store, meeting, "meeting_conflict_advisory", actor={"type": "agent", "id": conflict.get("agentId") or ""}, payload={"conflictId": conflict.get("id"), "agentId": conflict.get("agentId"), "advisory": advisory})
                     break
-            _save_exec_meeting_store(store)
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        return store.get("meetings", {}).get(meeting_id)
+            return meeting
+        _meeting_domain_repository().mutate_meeting(meeting_id, commit)
+    return _meeting_domain_repository().get_meeting(meeting_id)
 
 
 def _meeting_build_conflicts(store, participants, exclude_meeting_id=""):
@@ -16919,16 +16624,11 @@ def _meeting_active_projection():
     active = data.get("_meetings", [])
     if not isinstance(active, list):
         active = []
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        released = _release_timed_out_preparing_meetings(store)
-        if released:
-            _save_exec_meeting_store(store)
-        exec_active = [
-            _exec_meeting_project_active(m, store.get("events", {}).get(m.get("id"), []))
-            for m in store.get("meetings", {}).values()
-            if m.get("stage") not in _EXEC_MEETING_TERMINAL
-        ]
+    _meeting_domain_repository().mutate_preparing_meetings(_release_timed_out_preparing_meetings)
+    exec_active = [
+        _exec_meeting_project_active(meeting, events)
+        for meeting, events in _meeting_domain_repository().list_meetings_with_events(terminal=False)
+    ]
     return active + exec_active
 
 
@@ -16940,21 +16640,17 @@ def _meeting_history_projection(summary=False):
     if summary:
         history = [_meeting_history_summary_record(item) for item in history]
     with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        released = _release_timed_out_preparing_meetings(store)
-        if released:
-            _save_exec_meeting_store(store)
         exec_history = [
-            _exec_meeting_project_history(m, store.get("events", {}).get(m.get("id"), []), summary=summary)
-            for m in store.get("meetings", {}).values()
-            if m.get("stage") in _EXEC_MEETING_TERMINAL
+            _exec_meeting_project_history(meeting, events, summary=summary)
+            for meeting, events in _meeting_domain_repository().list_meetings_with_events(terminal=True)
         ]
     return history + exec_history
 
 
 def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
     hooks = meeting_action_items_service.ActionHooks(now=_exec_meeting_now, append_event=_append_exec_meeting_event)
-    _, prepared = _meeting_domain_repository().update(
+    _, prepared = _meeting_domain_repository().mutate_meeting(
+        meeting_id,
         lambda data: meeting_action_items_service.mutate_command(data, meeting_id, action_item_id, body, hooks)
     )
     if not prepared.get("ok") or not prepared.get("prepared"):
@@ -16982,7 +16678,8 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
     if not project_result.get("ok"):
         return project_result
     try:
-        _, committed = _meeting_domain_repository().update(
+        _, committed = _meeting_domain_repository().mutate_meeting(
+            meeting_id,
             lambda data: meeting_action_items_service.commit_confirmation(
                 data, meeting_id, action_item_id, prepared, project_result, hooks,
             )
@@ -17006,164 +16703,25 @@ def _handle_executable_meeting_action_item(meeting_id, action_item_id, body):
 
 
 def _handle_executable_meeting_create(body):
-    topic = str(body.get("topic") or "").strip()
-    participants = _exec_meeting_clean_participants(body.get("participants") or body.get("agents") or [])
-    if not topic:
-        return {"error": "Meeting topic is required", "_status": 400}
-    if len(participants) < 2:
-        return {"error": "Executable meeting requires at least 2 participants", "_status": 400}
-    moderator = str(body.get("moderator") or body.get("moderatorId") or participants[0]).strip()
-    try:
-        meeting_lifecycle_service.validate_participant_eligibility(
-            participants, moderator, participant_error=_system_agent_meeting_error,
-        )
-    except meeting_lifecycle_service.MeetingLifecycleError as error:
-        if error.code == "archive_manager_not_meeting_participant":
-            return _exec_meeting_archive_manager_error(error.details.get("participants") or [])
-        return {"error": str(error), "_status": error.status}
-    meeting_type = str(body.get("meetingType") or body.get("kind") or "discussion").strip() or "discussion"
-    if meeting_type not in {"information", "discussion", "task"}:
-        meeting_type = "discussion"
-    try:
-        max_rounds = max(1, min(20, int(body.get("maxRounds") or 2)))
-    except (TypeError, ValueError):
-        max_rounds = 2
-    now = _exec_meeting_now()
-    meeting_id = str(body.get("id") or uuid.uuid4())
-    actor = {"type": "user", "id": str(body.get("createdBy") or body.get("organizer") or "user")}
-    idempotency_key = str(body.get("idempotencyKey") or "").strip()
-    raw_project_id = body.get("projectId") or ((body.get("source") or {}) if isinstance(body.get("source"), dict) else {}).get("projectId")
-    project_ref = _meeting_project_ref(raw_project_id)
-    if not project_ref.get("ok"):
-        return {"error": project_ref.get("error") or "Project not found", "code": project_ref.get("code", "project_not_found"), "_status": project_ref.get("_status", 404)}
-    project_id, project_title = project_ref["projectId"], project_ref["projectTitle"]
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        decision_window = _meeting_clamped_decision_window_sec(
-            body.get("decisionWindowSec") or body.get("decisionWindowSeconds") or _meeting_decision_window_sec(),
-        )
-        result = meeting_lifecycle_service.create_command(
-            store,
-            {
-                "meetingId": meeting_id, "topic": topic, "participants": participants, "moderator": moderator,
-                "agenda": str(body.get("agenda") or topic).strip(), "purpose": str(body.get("purpose") or "").strip(),
-                "meetingType": meeting_type, "organizer": str(body.get("organizer") or participants[0]).strip(),
-                "createdBy": str(body.get("createdBy") or body.get("organizer") or "user").strip(),
-                "createdByType": str(body.get("createdByType") or ("agent" if body.get("createdByAgentId") else "user")).strip(),
-                "createdByAgentId": str(body.get("createdByAgentId") or "").strip(),
-                "projectId": project_id, "projectTitle": project_title, "maxRounds": max_rounds,
-                "decisionWindowSec": decision_window,
-                "resolutionPolicy": _meeting_resolution_policy(body.get("resolutionPolicy") or body.get("arbitrationPolicy")),
-                "context": str(body.get("context") or body.get("initialContext") or "").strip(),
-                "contextMode": _meeting_context_mode(body.get("contextMode")),
-                "contextBudget": _meeting_context_budget(body.get("contextBudget")),
-                "source": body.get("source") if isinstance(body.get("source"), dict) else {},
-                "preparingTimeoutSec": _meeting_preparing_timeout_sec(), "now": now, "actor": actor,
-                "idempotencyKey": idempotency_key,
-                "allowConflicts": bool(body.get("allowConflicts") or body.get("conflictAware")),
-            },
-            meeting_lifecycle_service.CreateHooks(
-                rebuild_occupancy=_rebuild_exec_meeting_occupancy,
-                build_conflicts=_meeting_build_conflicts,
-                append_event=_append_exec_meeting_event,
-            ),
-        )
-        if not result.get("ok") or result.get("idempotent"):
-            return result
-        meeting = result["meeting"]
-        _save_exec_meeting_store(store)
-    if result.pop("conflicts", False):
-        live_meeting = _meeting_complete_live_advisories(meeting_id)
-        if live_meeting:
-            meeting = live_meeting
-    return {**result, "meeting": meeting}
+    return _executable_meeting_commands().create(body)
 
 
 def _handle_executable_meeting_detail(meeting_id):
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id)
-        if not meeting:
-            return {"error": "Executable meeting not found", "_status": 404}
-        events = store.get("events", {}).get(meeting_id, [])
-        if meeting.get("stage") == "completed":
-            _meeting_ensure_action_item_drafts(store, meeting)
-            _save_exec_meeting_store(store)
-            projected = _exec_meeting_project_history(meeting, events)
-        else:
-            released = _release_timed_out_preparing_meetings(store)
-            if released:
-                _save_exec_meeting_store(store)
-            projected = _exec_meeting_project_active(meeting, events)
-        return {"ok": True, "meeting": {**meeting, **projected}, "events": events}
+    return _executable_meeting_commands().detail(meeting_id)
 
 
 def _handle_executable_meeting_events(meeting_id, query_string=""):
-    qs = urllib.parse.parse_qs(query_string or "")
-    try:
-        after = int((qs.get("after") or ["0"])[0] or 0)
-    except (TypeError, ValueError):
-        after = 0
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        if meeting_id not in store.get("meetings", {}):
-            return {"error": "Executable meeting not found", "_status": 404}
-        events = [e for e in store.get("events", {}).get(meeting_id, []) if int(e.get("sequence") or 0) > after]
-        return {"ok": True, "meetingId": meeting_id, "after": after, "events": events}
+    return _executable_meeting_commands().events(meeting_id, query_string)
 
 
 
 
 def _handle_executable_meeting_conflict_action(meeting_id, body):
-    hooks = meeting_lifecycle_service.ConflictHooks(
-        append_event=_append_exec_meeting_event,
-        build_conflicts=_meeting_build_conflicts,
-        busy_context=_meeting_busy_context_for_agent,
-        advisory=_meeting_conflict_advisory,
-        original_work_snapshot=_meeting_original_work_snapshot,
-        has_open_conflicts=_meeting_has_open_conflicts,
-        mark_preparing=_meeting_mark_preparing_started,
-        rebuild_occupancy=_rebuild_exec_meeting_occupancy,
-        participant_error=_system_agent_meeting_error,
-        now=_exec_meeting_now,
-        new_id=lambda: str(uuid.uuid4()),
-    )
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        result = meeting_lifecycle_service.conflict_action_command(store, meeting_id, body, hooks)
-        if result.get("ok") and not result.get("idempotent"):
-            _save_exec_meeting_store(store)
-    if result.pop("needsLiveAdvisory", False):
-        live_meeting = _meeting_complete_live_advisories(meeting_id)
-        if live_meeting:
-            result["meeting"] = live_meeting
-    return result
+    return _executable_meeting_commands().conflict_action(meeting_id, body)
 
 
 def _handle_executable_meeting_transition(meeting_id, body):
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        result = meeting_lifecycle_service.transition_command(
-            store, meeting_id, body,
-            meeting_lifecycle_service.TransitionHooks(
-                append_event=_append_exec_meeting_event,
-                continue_decision=_meeting_continue_from_decision_window,
-                mark_preparing=_meeting_mark_preparing_started,
-                resume_original_work=_meeting_resume_original_work,
-                ensure_action_items=_meeting_ensure_action_item_drafts,
-                award_points=_award_meeting_participation_points,
-            ),
-        )
-        if not result.get("ok") or result.get("idempotent"):
-            return result
-        _save_exec_meeting_store(store)
-    meeting = result["meeting"]
-    if result.pop("terminal", False):
-        _project_execution_apply_meeting_result(meeting)
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        meeting = store.get("meetings", {}).get(meeting_id, meeting)
-        return {**result, "meeting": meeting}
+    return _executable_meeting_commands().transition(meeting_id, body)
 
 
 def _meeting_terminal_hooks():
@@ -17175,28 +16733,49 @@ def _meeting_terminal_hooks():
     )
 
 
-def _handle_executable_meeting_intervention(meeting_id, body):
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        result = meeting_lifecycle_service.intervention_command(
-            store, meeting_id, body,
-            meeting_lifecycle_service.MutationHooks(append_event=_append_exec_meeting_event),
+def _executable_meeting_commands():
+    return executable_meeting_commands.ExecutableMeetingCommands(
+        executable_meeting_commands.ExecutableMeetingPorts(
+            lock=_EXEC_MEETING_LOCK,
+            repository=_meeting_domain_repository(),
+            clean_participants=_exec_meeting_clean_participants,
+            participant_error=_system_agent_meeting_error,
+            participant_error_response=_exec_meeting_archive_manager_error,
+            project_ref=_meeting_project_ref,
+            now=_exec_meeting_now,
+            new_id=lambda: str(uuid.uuid4()),
+            decision_window=lambda raw: _meeting_clamped_decision_window_sec(raw or _meeting_decision_window_sec()),
+            resolution_policy=_meeting_resolution_policy,
+            context_mode=_meeting_context_mode,
+            context_budget=_meeting_context_budget,
+            preparing_timeout=_meeting_preparing_timeout_sec,
+            rebuild_occupancy=_rebuild_exec_meeting_occupancy,
+            build_conflicts=_meeting_build_conflicts,
+            append_event=_append_exec_meeting_event,
+            complete_live_advisories=_meeting_complete_live_advisories,
+            ensure_action_items=_meeting_ensure_action_item_drafts,
+            release_timed_out=_release_timed_out_preparing_meetings,
+            project_history=_exec_meeting_project_history,
+            project_active=_exec_meeting_project_active,
+            busy_context=_meeting_busy_context_for_agent,
+            advisory=_meeting_conflict_advisory,
+            original_work_snapshot=_meeting_original_work_snapshot,
+            has_open_conflicts=_meeting_has_open_conflicts,
+            mark_preparing=_meeting_mark_preparing_started,
+            continue_decision=_meeting_continue_from_decision_window,
+            resume_original_work=_meeting_resume_original_work,
+            award_points=_award_meeting_participation_points,
+            apply_project_result=_project_execution_apply_meeting_result,
         )
-        if result.get("ok") and not result.get("idempotent"):
-            _save_exec_meeting_store(store)
-        return result
+    )
+
+
+def _handle_executable_meeting_intervention(meeting_id, body):
+    return _executable_meeting_commands().intervention(meeting_id, body)
 
 
 def _handle_executable_meeting_agenda_change(meeting_id, body):
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        result = meeting_lifecycle_service.agenda_change_command(
-            store, meeting_id, body,
-            meeting_lifecycle_service.MutationHooks(append_event=_append_exec_meeting_event),
-        )
-        if result.get("ok") and not result.get("idempotent"):
-            _save_exec_meeting_store(store)
-        return result
+    return _executable_meeting_commands().agenda_change(meeting_id, body)
 
 
 
@@ -17209,11 +16788,10 @@ def _handle_executable_meeting_arbitration(meeting_id, body):
         truncate=_meeting_truncate_text,
         terminal=_meeting_terminal_hooks(),
     )
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        result = meeting_lifecycle_service.arbitration_command(store, meeting_id, body, hooks)
-        if result.get("ok") and not result.get("idempotent"):
-            _save_exec_meeting_store(store)
+    _, result = _meeting_domain_repository().mutate_meeting(
+        meeting_id,
+        lambda store: meeting_lifecycle_service.arbitration_command(store, meeting_id, body, hooks),
+    )
     meeting = result.get("meeting")
     if result.pop("invokeModerator", False):
         summarized = _handle_executable_meeting_end_with_moderator(
@@ -17237,12 +16815,12 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
         normalize_outcome=_meeting_result_outcome,
         terminal=_meeting_terminal_hooks(),
     )
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    def mutate(store):
         result = meeting_lifecycle_service.moderator_takeover_command(store, meeting_id, body, hooks)
         if result.get("ok"):
-            _save_exec_meeting_store(store)
             result["events"] = store.get("events", {}).get(meeting_id, [])
+        return result
+    _, result = _meeting_domain_repository().mutate_meeting(meeting_id, mutate)
     meeting = result.get("meeting")
     if result.pop("invokeModerator", False):
         summarized = _handle_executable_meeting_end_with_moderator(
@@ -17265,12 +16843,23 @@ def _handle_executable_meeting_moderator_takeover(meeting_id, body):
 
 
 def _meeting_build_targeted_prompt(meeting, speaker, question, events):
-    base = _meeting_build_prompt(meeting, speaker, meeting.get("decisionForStage") or meeting.get("stage"), events)
-    instruction = meeting_prompt_documents.targeted_question_prompt(
-        question=_meeting_truncate_text(question, 2000)
-    )
     budget = _meeting_context_budget(meeting.get("contextBudget"))
-    return _meeting_truncate_text(f"{base}\n{instruction}\n", budget["maxPromptChars"])
+    mode = _meeting_context_mode(meeting.get("contextMode"))
+    speaker_seen = int((meeting.get("participantLastSeen") or {}).get(speaker) or 0)
+    recent = _meeting_events_text(events[-budget["maxRecentEvents"]:])
+    unseen = _meeting_events_text([event for event in events if int(event.get("sequence") or 0) > speaker_seen])
+    context_values = {
+        "confirmed_context": _meeting_truncate_text(meeting.get("context") or "", budget["maxInitialContextChars"]),
+        "relevant_events": recent if mode != "incremental" or speaker_seen <= 0 else (unseen or "(none)"),
+    }
+    prompt = meeting_prompt_documents.turn_prompt(
+        meeting=meeting,
+        speaker=speaker,
+        stage=meeting.get("decisionForStage") or meeting.get("stage"),
+        context_values=context_values,
+        targeted_question=_meeting_truncate_text(question, 2000),
+    )
+    return _meeting_truncate_text(prompt, budget["maxPromptChars"])
 
 
 def _handle_executable_meeting_targeted_question(meeting_id, body):
@@ -17282,20 +16871,20 @@ def _handle_executable_meeting_targeted_question(meeting_id, body):
         append_ignored=_append_ignored_provider_completion,
         update_summary=_meeting_update_rolling_summary,
     )
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        prepared = meeting_lifecycle_service.prepare_targeted_question(store, meeting_id, body, hooks)
-        if not prepared.get("ok") or prepared.get("idempotent"):
-            return prepared
-        _save_exec_meeting_store(store)
+    _, prepared = _meeting_domain_repository().mutate_meeting(
+        meeting_id,
+        lambda store: meeting_lifecycle_service.prepare_targeted_question(store, meeting_id, body, hooks),
+    )
+    if not prepared.get("ok") or prepared.get("idempotent"):
+        return prepared
     result = _meeting_call_provider(prepared["meeting"], prepared["target"], prepared["prompt"])
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
-        committed = meeting_lifecycle_service.commit_targeted_question(
+    _, committed = _meeting_domain_repository().mutate_meeting(
+        meeting_id,
+        lambda store: meeting_lifecycle_service.commit_targeted_question(
             store, meeting_id, prepared, result, hooks,
-        )
-        _save_exec_meeting_store(store)
-        return committed
+        ),
+    )
+    return committed
 
 
 def _meeting_events_text(events):
@@ -17612,21 +17201,16 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
         append_ignored=_append_ignored_provider_completion,
         terminal=_meeting_terminal_hooks(),
     )
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    with _meeting_domain_repository().edit_meeting(meeting_id) as store:
         prepared = meeting_lifecycle_service.prepare_moderator_summary(store, meeting_id, actor, hooks)
         if not prepared.get("ok") or prepared.get("alreadyTerminal") or prepared.get("providerCallPending"):
-            if prepared.get("ok") and not prepared.get("alreadyTerminal"):
-                _save_exec_meeting_store(store)
             return prepared
-        _save_exec_meeting_store(store)
     provider_result = _meeting_call_provider(prepared["meeting"], prepared["moderator"], prepared["prompt"])
     decision_window = _meeting_clamped_decision_window_sec(
         prepared["meeting"].get("decisionWindowSec") or _meeting_decision_window_sec()
     )
     failure_deadline = datetime.fromtimestamp(time.time() + decision_window, timezone.utc).isoformat()
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    with _meeting_domain_repository().edit_meeting(meeting_id) as store:
         committed = meeting_lifecycle_service.commit_moderator_summary(
             store, meeting_id, prepared, provider_result, actor,
             failure_deadline=failure_deadline, decision_window_seconds=decision_window, hooks=hooks,
@@ -17638,7 +17222,6 @@ def _handle_executable_meeting_end_with_moderator(meeting_id, body=None):
                 store["meetings"][meeting_id].pop("moderatorFailure", None)
                 meeting = store["meetings"][meeting_id]
                 committed["meeting"] = meeting
-        _save_exec_meeting_store(store)
         committed["events"] = store.get("events", {}).get(meeting_id, [])
     if committed.get("notifyFailure"):
         _send_meeting_failure_notification(meeting, committed.get("moderatorFailure") or {})
@@ -17763,16 +17346,12 @@ def _handle_executable_meeting_run(meeting_id, body=None):
     summarize_after_decision_window = False
     continue_after_provider_timeout_skip = False
     provider_timeout_skip_result = None
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    with _meeting_domain_repository().edit_meeting(meeting_id) as store:
         released = _release_timed_out_preparing_meetings(store)
         meeting = store.get("meetings", {}).get(meeting_id)
         if not meeting:
-            if released:
-                _save_exec_meeting_store(store)
             return {"error": "Executable meeting not found", "_status": 404}
         if released:
-            _save_exec_meeting_store(store)
             if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
                 return {"ok": True, "meeting": meeting, "alreadyTerminal": True, "preparingTimedOut": meeting.get("cancelReason") == "preparing_timeout"}
         if meeting.get("stage") in _EXEC_MEETING_TERMINAL:
@@ -17782,7 +17361,6 @@ def _handle_executable_meeting_run(meeting_id, body=None):
         if str(body.get("action") or "") == "provider_timeout_skip":
             skipped = _meeting_skip_timed_out_provider_call(store, meeting, body.get("pendingSequence"))
             if not skipped.get("error"):
-                _save_exec_meeting_store(store)
                 if skipped.get("skipped") and not bool(body.get("_noAutoContinue")):
                     continue_after_provider_timeout_skip = True
                     provider_timeout_skip_result = dict(skipped)
@@ -17801,26 +17379,21 @@ def _handle_executable_meeting_run(meeting_id, body=None):
             action = str(body.get("action") or "").strip()
             no_consensus_arbitration = (meeting.get("arbitration") or {}).get("reason") == "no_consensus"
             if no_consensus_arbitration and action == "timeout":
-                _save_exec_meeting_store(store)
                 return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
             should_auto_advance = action in {"continue", "timeout"} or (deadline_ts and time.time() >= deadline_ts)
             should_summarize_after_window = should_auto_advance and (meeting.get("decisionNextStage") == "summarizing")
             if action in {"continue", "timeout"} or (deadline_ts and time.time() >= deadline_ts):
                 if no_consensus_arbitration and deadline_ts and time.time() >= deadline_ts and action != "continue":
-                    _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
                 _meeting_continue_from_decision_window(store, meeting, reason="decision_timeout" if action == "timeout" or (deadline_ts and time.time() >= deadline_ts) else "user_continue")
-                _save_exec_meeting_store(store)
                 if should_summarize_after_window:
                     summarize_after_decision_window = True
             else:
-                _save_exec_meeting_store(store)
                 return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
         if not summarize_after_decision_window and meeting.get("stage") == "preparing":
             meeting["previousStage"] = "preparing"
             meeting["stage"] = "active_opening"
             _append_exec_meeting_event(store, meeting, "meeting_transitioned", payload={"from": "preparing", "to": "active_opening", "reason": "run"})
-            _save_exec_meeting_store(store)
     if continue_after_provider_timeout_skip:
         continued = _handle_executable_meeting_run(meeting_id, {"_afterProviderTimeoutSkip": True})
         if isinstance(continued, dict):
@@ -17847,14 +17420,11 @@ def _handle_executable_meeting_run(meeting_id, body=None):
     )
     for stage, rounds in (("active_opening", 1), ("active_discussion", max_rounds)):
         for round_index in range(1, rounds + 1):
-            with _EXEC_MEETING_LOCK:
-                store = _load_exec_meeting_store()
+            with _meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 if meeting.get("stage") in _EXEC_MEETING_TERMINAL or meeting.get("stage") == "paused":
-                    _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "pausedOrTerminal": True}
                 if meeting.get("stage") == "awaiting_user_decision":
-                    _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "awaitingUserDecision": True}
                 if stage == "active_opening" and meeting.get("stage") not in {"active_opening"}:
                     continue
@@ -17869,16 +17439,12 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     meeting["round"] = round_index
                 events = list(store.get("events", {}).get(meeting_id, []))
                 if _meeting_formal_round_complete(events, stage, meeting.get("round"), participants):
-                    _save_exec_meeting_store(store)
                     continue
                 pending_calls = _meeting_pending_formal_calls_for_round(events, stage, meeting.get("round"))
                 if pending_calls:
-                    _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "providerCallPending": True, "pendingCalls": pending_calls}
-                _save_exec_meeting_store(store)
             for speaker in participants:
-                with _EXEC_MEETING_LOCK:
-                    store = _load_exec_meeting_store()
+                with _meeting_domain_repository().edit_meeting(meeting_id) as store:
                     prepared = meeting_lifecycle_service.prepare_agent_turn(
                         store, meeting_id, stage, speaker, turn_hooks,
                     )
@@ -17887,21 +17453,16 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                     if not prepared.get("ok"):
                         return prepared
                     meeting = prepared["meeting"]
-                    _save_exec_meeting_store(store)
                 result = _meeting_call_provider(meeting, speaker, prepared["prompt"])
-                with _EXEC_MEETING_LOCK:
-                    store = _load_exec_meeting_store()
+                with _meeting_domain_repository().edit_meeting(meeting_id) as store:
                     committed = meeting_lifecycle_service.commit_agent_turn(
                         store, meeting_id, stage, speaker, result, prepared["pending"], prepared["token"], turn_hooks,
                     )
-                    _save_exec_meeting_store(store)
                     if not committed.get("ok") or committed.get("ignoredProviderCompletion"):
                         return committed
-            with _EXEC_MEETING_LOCK:
-                store = _load_exec_meeting_store()
+            with _meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 if meeting.get("stage") in _EXEC_MEETING_TERMINAL or meeting.get("stage") == "paused":
-                    _save_exec_meeting_store(store)
                     return {"ok": True, "meeting": meeting, "pausedOrTerminal": True}
                 next_stage = "active_discussion"
                 next_round = 1
@@ -17916,10 +17477,8 @@ def _handle_executable_meeting_run(meeting_id, body=None):
                 else:
                     window_reason = "round_complete"
                 _meeting_open_decision_window(store, meeting, stage, meeting.get("round"), next_stage, next_round, window_reason)
-                _save_exec_meeting_store(store)
                 return {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, []), "awaitingUserDecision": True}
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    with _meeting_domain_repository().edit_meeting(meeting_id) as store:
         meeting = store["meetings"][meeting_id]
         events = store.get("events", {}).get(meeting_id, [])
         meeting["currentSpeaker"] = ""
@@ -17944,7 +17503,6 @@ def _handle_executable_meeting_run(meeting_id, body=None):
             store, meeting, result, actor={"type": "system", "id": "system"},
             reason="run_complete", hooks=_meeting_terminal_hooks(),
         )
-        _save_exec_meeting_store(store)
         result_payload = {"ok": True, "meeting": meeting, "events": store.get("events", {}).get(meeting_id, [])}
     _project_execution_apply_meeting_result(meeting)
     _archive_trigger_meeting_conclusion(meeting)
@@ -17952,13 +17510,13 @@ def _handle_executable_meeting_run(meeting_id, body=None):
 
 
 def _handle_executable_meeting_reconcile():
-    with _EXEC_MEETING_LOCK:
-        store = _load_exec_meeting_store()
+    def reconcile(store):
         _release_timed_out_preparing_meetings(store)
         occupancy = _rebuild_exec_meeting_occupancy(store)
         non_terminal = [m for m in store.get("meetings", {}).values() if m.get("stage") not in _EXEC_MEETING_TERMINAL]
-        _save_exec_meeting_store(store)
         return {"ok": True, "activeMeetings": len(non_terminal), "occupancy": occupancy}
+    _, result = _meeting_domain_repository().mutate_all_meetings(reconcile)
+    return result
 
 
 def _handle_meeting_create(body):
@@ -18429,6 +17987,7 @@ def _save_projects(data):
 _PROJECT_REPOSITORY = ProjectRepository(
     load_projects=lambda: PROJECT_STORE.load_all(),
     save_projects=lambda data: PROJECT_STORE.save_all(data),
+    save_project=lambda project: PROJECT_STORE.save_project(project),
     repair_projects=_project_execution_repair_acceptance_state,
     delete_project=lambda project_id: PROJECT_STORE.delete_project(project_id),
     cache_namespace=lambda: (PROJECT_STORE, PROJECT_STORE.revision()),
@@ -19458,16 +19017,40 @@ _BUILTIN_TEMPLATES = [
 
 # ── GET handlers ──────────────────────────────────────────────────────────────
 
-def _handle_projects_list(query_string=""):
-    """GET /api/projects — return all projects (summaries)."""
-    data = _load_projects()
-    projects = data.get("projects", [])
-    # Optional ?status= filter
-    status_filter = None
+_PROJECT_SUMMARY_CACHE = ProjectSummaryCache()
+
+
+def _project_list_status_filter(query_string=""):
     if query_string:
         for part in query_string.split("&"):
             if part.startswith("status="):
-                status_filter = part.split("=", 1)[1]
+                return part.split("=", 1)[1]
+    return ""
+
+
+def _handle_projects_list(query_string=""):
+    status_filter = _project_list_status_filter(query_string)
+    revision = None
+    try:
+        revision = (
+            id(_PROJECT_REPOSITORY),
+            _load_projects,
+            get_roster,
+            _PROJECT_REPOSITORY.cache_revision(),
+        )
+    except (AttributeError, TypeError):
+        pass
+    return _PROJECT_SUMMARY_CACHE.get(
+        revision,
+        status_filter,
+        lambda: _build_projects_list(status_filter),
+    )
+
+
+def _build_projects_list(status_filter=""):
+    """GET /api/projects — return all projects (summaries)."""
+    data = _load_projects()
+    projects = data.get("projects", [])
     if status_filter:
         projects = [p for p in projects if p.get("status") == status_filter]
     # Return summary (no activity log, trim tasks to counts)
@@ -21048,7 +20631,8 @@ def _meeting_request_unresolved_for_task(req, project_id, task_id):
 
 
 def _meeting_request_resolve_task_blocker(request_id, status, extra=None):
-    _, result = _meeting_domain_repository().update(
+    _, result = _meeting_domain_repository().mutate_request(
+        request_id,
         lambda data: meeting_requests_service.resolve_blocker_command(
             data, request_id, status, extra, _meeting_request_service_hooks(),
         )
@@ -21057,7 +20641,7 @@ def _meeting_request_resolve_task_blocker(request_id, status, extra=None):
 
 
 def _meeting_request_reset_project_task_blockers(project_id, task_ids, actor, reason):
-    _, result = _meeting_domain_repository().update(
+    _, result = _meeting_domain_repository().create_request(
         lambda data: meeting_requests_service.reset_project_task_blockers_command(
             data,
             project_id,
@@ -28769,6 +28353,29 @@ _CONFIGURED_MANAGEMENT_TOKEN = str(os.environ.get("VO_MANAGEMENT_TOKEN") or "")
 _MANAGEMENT_TOKEN = _CONFIGURED_MANAGEMENT_TOKEN or secrets.token_urlsafe(32)
 
 
+_DASHBOARD_SNAPSHOT_FEED = None
+_DASHBOARD_SNAPSHOT_FEED_LOCK = threading.Lock()
+
+
+def _dashboard_snapshot_feed():
+    global _DASHBOARD_SNAPSHOT_FEED
+    with _DASHBOARD_SNAPSHOT_FEED_LOCK:
+        if _DASHBOARD_SNAPSHOT_FEED is None:
+            _DASHBOARD_SNAPSHOT_FEED = DashboardSnapshotFeed(
+                lambda: DashboardRealtimeStream(
+                    status_loader=_get_normalized_presence_state,
+                    meetings_loader=_meeting_active_projection,
+                    requests_loader=lambda: partial(
+                        _meeting_request_list_filtered,
+                        "status=pending",
+                    )().get("requests", []),
+                    projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
+                    decisions_loader=HUMAN_DECISION_WORKFLOW.snapshot,
+                ).snapshot()
+            )
+        return _DASHBOARD_SNAPSHOT_FEED
+
+
 class OfficeHandler(http.server.SimpleHTTPRequestHandler):
     _MANAGEMENT_BODY_LIMIT = 64 * 1024
     _JSON_BODY_LIMIT = 64 * 1024
@@ -29931,6 +29538,7 @@ class OfficeHandler(http.server.SimpleHTTPRequestHandler):
                 requests_loader=lambda: _meeting_request_list_filtered("status=pending").get("requests", []),
                 projects_loader=lambda: _handle_projects_list("status=active").get("projects", []),
                 decisions_loader=HUMAN_DECISION_WORKFLOW.snapshot,
+                snapshot_feed=_dashboard_snapshot_feed(),
             ).stream(self)
         elif request_path == "/api/chat-sessions":
             if self._reject_untrusted_management_request():

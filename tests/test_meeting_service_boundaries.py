@@ -6,12 +6,30 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_new_meeting_workflows_do_not_import_legacy_server():
+    for relative in (
+        "app/services/meeting_request_workflow.py",
+        "app/services/executable_meeting_commands.py",
+    ):
+        source = (ROOT / relative).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        imports = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        assert "server" not in imports
+        assert "sys.modules" not in source
 APP = ROOT / "app"
 CHANGE = ROOT / "openspec" / "changes" / "archive" / "2026-07-13-extract-meeting-and-collaboration-services"
 SERVICES = [
     APP / "services" / name for name in (
         "meeting_lifecycle.py", "meeting_requests.py", "meeting_action_items.py",
-        "meeting_notifications.py", "meeting_callbacks.py",
+        "meeting_notifications.py", "meeting_callbacks.py", "meeting_request_workflow.py",
+        "executable_meeting_commands.py", "meeting_request_reconciliation.py",
     )
 ]
 

@@ -386,7 +386,7 @@ def test_arbitration_completion_uses_shared_terminal_cleanup():
 
 def test_repository_serializes_competing_claims_but_allows_unrelated_meetings(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
-    repo.update(lambda data: None)
+    repo.initialize_empty()
     barrier = threading.Barrier(3)
     outcomes = []
     def create_and_claim(meeting_id, participant):
@@ -396,7 +396,7 @@ def test_repository_serializes_competing_claims_but_allows_unrelated_meetings(tm
                 current = meeting(meeting_id, "preparing", participants=[participant])
                 data["meetings"][meeting_id] = current
                 claim_occupancy(data, meeting_id, [participant])
-            repo.update(mutate)
+            repo.create_meeting(mutate)
             outcomes.append((meeting_id, "ok"))
         except MeetingLifecycleError as error:
             outcomes.append((meeting_id, error.code))
@@ -408,7 +408,6 @@ def test_repository_serializes_competing_claims_but_allows_unrelated_meetings(tm
     barrier.wait()
     for thread in threads: thread.join(timeout=3)
     assert sorted(status for _, status in outcomes) == ["meeting_participant_occupied", "ok"]
-    snapshot = repo.snapshot()
-    assert snapshot["occupancy"]["shared"] in {"m1", "m2"}
-    repo.update(lambda data: (data["meetings"].update({"m3": meeting("m3", "preparing", participants=["other"])}), claim_occupancy(data, "m3", ["other"])))
-    assert repo.snapshot()["occupancy"]["other"] == "m3"
+    assert repo.list_occupancy()["shared"] in {"m1", "m2"}
+    repo.create_meeting(lambda data: (data["meetings"].update({"m3": meeting("m3", "preparing", participants=["other"])}), claim_occupancy(data, "m3", ["other"])))
+    assert repo.list_occupancy()["other"] == "m3"

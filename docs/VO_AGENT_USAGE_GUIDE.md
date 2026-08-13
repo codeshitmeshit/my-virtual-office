@@ -5,6 +5,7 @@
 Status: agent-facing operating guide  
 Audience: agents running inside, beside, or through My Virtual Office  
 Scope: visible office tools, communication, meetings, projects, shared browser, and safety rules
+Verified baseline: 2026-08-10. New owner-context and decision workflows are summarized below; detailed contracts live in the focused skills and linked runbooks.
 
 ## Table of Contents
 
@@ -28,6 +29,14 @@ Scope: visible office tools, communication, meetings, projects, shared browser, 
 - [18. Safety and Human Confirmation](#18-safety-and-human-confirmation)
 - [19. Common Workflows](#19-common-workflows)
 - [20. Parameter Reference](#20-parameter-reference)
+- [Current Additions: Human Decisions and Personal Assets](#current-additions-human-decisions-and-personal-assets)
+
+## Current Additions: Human Decisions and Personal Assets
+
+- Use `skills/vo-human-decision/SKILL.md` whenever progress requires an explicit user choice. The decision service durably pauses and resumes chat, project, or meeting work; do not simulate a choice in chat text.
+- Use `skills/vo-personal-context/SKILL.md` to obtain the minimum owner context needed for the current task.
+- Use `skills/vo-personal-assets/SKILL.md` for profile outlines, confirmed onboarding writes, and sensitive-context requests. Sensitive values require a HUMAN DECISIONS authorization and must not be copied into logs or unrelated prompts.
+- See [HUMAN_DECISIONS.md](HUMAN_DECISIONS.md) and [PERSONAL_ASSETS_AND_OSS.md](PERSONAL_ASSETS_AND_OSS.md) for current HTTP, persistence, and failure behavior.
 
 ## 1. Purpose
 
@@ -242,7 +251,7 @@ Rules:
 
 ## 8. Cross-Agent Communication
 
-Use AgentPlatform communications when an exchange should be visible in the office. This is the preferred path for OpenClaw, Hermes, Codex, and future providers to talk to one another.
+Use AgentPlatform communications when an exchange should be visible in the office. This is the preferred path for OpenClaw, Hermes, Codex, Claude Code, and future providers to talk to one another.
 
 Send a message:
 

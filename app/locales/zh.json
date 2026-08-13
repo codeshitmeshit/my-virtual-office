@@ -1017,6 +1017,7 @@
   "management_gate_submit": "验证并进入",
   "management_gate_validating": "正在验证…",
   "management_gate_invalid": "管理令牌无效，请检查后重试。",
+  "management_gate_timeout": "验证超时，请检查服务连接后重试。",
   "management_gate_network_error": "暂时无法验证权限，请检查服务连接后重试。",
   "chat_no_sessions": "暂无会话",
   "chat_session": "会话",

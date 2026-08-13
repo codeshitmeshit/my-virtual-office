@@ -20,23 +20,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 4915
+        "line": 4921
       },
       {
         "file": "app/server.py",
-        "line": 5308
+        "line": 5314
       },
       {
         "file": "app/server.py",
-        "line": 5703
+        "line": 5709
       },
       {
         "file": "app/server.py",
-        "line": 6481
+        "line": 6487
       },
       {
         "file": "app/server.py",
-        "line": 7958
+        "line": 7860
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -62,7 +62,7 @@
     "approval.required": [
       {
         "file": "app/server.py",
-        "line": 6477
+        "line": 6483
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -76,11 +76,11 @@
     "approval.resolved": [
       {
         "file": "app/server.py",
-        "line": 6263
+        "line": 6269
       },
       {
         "file": "app/server.py",
-        "line": 9352
+        "line": 9254
       },
       {
         "file": "app/services/conversation_timeline_events.py",
@@ -98,27 +98,27 @@
       },
       {
         "file": "app/server.py",
-        "line": 6164
+        "line": 6170
       },
       {
         "file": "app/server.py",
-        "line": 6283
+        "line": 6289
       },
       {
         "file": "app/server.py",
-        "line": 9134
+        "line": 9036
       },
       {
         "file": "app/server.py",
-        "line": 9183
+        "line": 9085
       },
       {
         "file": "app/server.py",
-        "line": 9190
+        "line": 9092
       },
       {
         "file": "app/server.py",
-        "line": 9364
+        "line": 9266
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -198,15 +198,15 @@
       },
       {
         "file": "app/server.py",
-        "line": 4894
+        "line": 4900
       },
       {
         "file": "app/server.py",
-        "line": 5674
+        "line": 5680
       },
       {
         "file": "app/server.py",
-        "line": 6444
+        "line": 6450
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -240,31 +240,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4892
+        "line": 4898
       },
       {
         "file": "app/server.py",
-        "line": 5671
+        "line": 5677
       },
       {
         "file": "app/server.py",
-        "line": 6444
+        "line": 6450
       },
       {
         "file": "app/server.py",
-        "line": 6445
+        "line": 6451
       },
       {
         "file": "app/server.py",
-        "line": 7960
+        "line": 7862
       },
       {
         "file": "app/server.py",
-        "line": 10492
+        "line": 10394
       },
       {
         "file": "app/server.py",
-        "line": 38075
+        "line": 37633
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -294,15 +294,15 @@
     "message.delta.text": [
       {
         "file": "app/server.py",
-        "line": 4892
+        "line": 4898
       },
       {
         "file": "app/server.py",
-        "line": 5671
+        "line": 5677
       },
       {
         "file": "app/server.py",
-        "line": 6444
+        "line": 6450
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -338,11 +338,11 @@
     "provider.activity": [
       {
         "file": "app/server.py",
-        "line": 7963
+        "line": 7865
       },
       {
         "file": "app/server.py",
-        "line": 7976
+        "line": 7878
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -420,31 +420,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4899
+        "line": 4905
       },
       {
         "file": "app/server.py",
-        "line": 5678
+        "line": 5684
       },
       {
         "file": "app/server.py",
-        "line": 6446
+        "line": 6452
       },
       {
         "file": "app/server.py",
-        "line": 6447
+        "line": 6453
       },
       {
         "file": "app/server.py",
-        "line": 7963
+        "line": 7865
       },
       {
         "file": "app/server.py",
-        "line": 10497
+        "line": 10399
       },
       {
         "file": "app/server.py",
-        "line": 38078
+        "line": 37636
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -500,19 +500,19 @@
       },
       {
         "file": "app/server.py",
-        "line": 4927
+        "line": 4933
       },
       {
         "file": "app/server.py",
-        "line": 5712
+        "line": 5718
       },
       {
         "file": "app/server.py",
-        "line": 5731
+        "line": 5737
       },
       {
         "file": "app/server.py",
-        "line": 8049
+        "line": 7951
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -578,43 +578,43 @@
       },
       {
         "file": "app/server.py",
-        "line": 4927
+        "line": 4933
       },
       {
         "file": "app/server.py",
-        "line": 5712
+        "line": 5718
       },
       {
         "file": "app/server.py",
-        "line": 5731
+        "line": 5737
       },
       {
         "file": "app/server.py",
-        "line": 6280
+        "line": 6286
       },
       {
         "file": "app/server.py",
-        "line": 6486
+        "line": 6492
       },
       {
         "file": "app/server.py",
-        "line": 6578
+        "line": 6584
       },
       {
         "file": "app/server.py",
-        "line": 7973
+        "line": 7875
       },
       {
         "file": "app/server.py",
-        "line": 8049
+        "line": 7951
       },
       {
         "file": "app/server.py",
-        "line": 8090
+        "line": 7992
       },
       {
         "file": "app/server.py",
-        "line": 8175
+        "line": 8077
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -720,19 +720,15 @@
       },
       {
         "file": "app/server.py",
-        "line": 4894
+        "line": 4900
       },
       {
         "file": "app/server.py",
-        "line": 4895
+        "line": 4901
       },
       {
         "file": "app/server.py",
-        "line": 4922
-      },
-      {
-        "file": "app/server.py",
-        "line": 5712
+        "line": 4928
       },
       {
         "file": "app/server.py",
@@ -740,39 +736,43 @@
       },
       {
         "file": "app/server.py",
-        "line": 5727
+        "line": 5724
       },
       {
         "file": "app/server.py",
-        "line": 6484
+        "line": 5733
       },
       {
         "file": "app/server.py",
-        "line": 7971
+        "line": 6490
       },
       {
         "file": "app/server.py",
-        "line": 8049
+        "line": 7873
       },
       {
         "file": "app/server.py",
-        "line": 8088
+        "line": 7951
       },
       {
         "file": "app/server.py",
-        "line": 9035
+        "line": 7990
       },
       {
         "file": "app/server.py",
-        "line": 10543
+        "line": 8937
       },
       {
         "file": "app/server.py",
-        "line": 10545
+        "line": 10445
       },
       {
         "file": "app/server.py",
-        "line": 38115
+        "line": 10447
+      },
+      {
+        "file": "app/server.py",
+        "line": 37673
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -866,63 +866,63 @@
       },
       {
         "file": "app/server.py",
-        "line": 4927
+        "line": 4933
       },
       {
         "file": "app/server.py",
-        "line": 5712
+        "line": 5718
       },
       {
         "file": "app/server.py",
-        "line": 5723
+        "line": 5729
       },
       {
         "file": "app/server.py",
-        "line": 5731
+        "line": 5737
       },
       {
         "file": "app/server.py",
-        "line": 6489
+        "line": 6495
       },
       {
         "file": "app/server.py",
-        "line": 6578
+        "line": 6584
       },
       {
         "file": "app/server.py",
-        "line": 7975
+        "line": 7877
       },
       {
         "file": "app/server.py",
-        "line": 8049
+        "line": 7951
       },
       {
         "file": "app/server.py",
-        "line": 8093
+        "line": 7995
       },
       {
         "file": "app/server.py",
-        "line": 8175
+        "line": 8077
       },
       {
         "file": "app/server.py",
-        "line": 9035
+        "line": 8937
       },
       {
         "file": "app/server.py",
-        "line": 9073
+        "line": 8975
       },
       {
         "file": "app/server.py",
-        "line": 10548
+        "line": 10450
       },
       {
         "file": "app/server.py",
-        "line": 10550
+        "line": 10452
       },
       {
         "file": "app/server.py",
-        "line": 38115
+        "line": 37673
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1004,15 +1004,15 @@
     "run.native.started": [
       {
         "file": "app/server.py",
-        "line": 4879
+        "line": 4885
       },
       {
         "file": "app/server.py",
-        "line": 6442
+        "line": 6448
       },
       {
         "file": "app/server.py",
-        "line": 6443
+        "line": 6449
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1050,31 +1050,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 5640
+        "line": 5646
       },
       {
         "file": "app/server.py",
-        "line": 5642
+        "line": 5648
       },
       {
         "file": "app/server.py",
-        "line": 6414
+        "line": 6420
       },
       {
         "file": "app/server.py",
-        "line": 6442
+        "line": 6448
       },
       {
         "file": "app/server.py",
-        "line": 8033
+        "line": 7935
       },
       {
         "file": "app/server.py",
-        "line": 10459
+        "line": 10361
       },
       {
         "file": "app/server.py",
-        "line": 38054
+        "line": 37612
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1100,7 +1100,7 @@
     "run.stop_requested": [
       {
         "file": "app/server.py",
-        "line": 5778
+        "line": 5784
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1152,7 +1152,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 26553
+        "line": 26137
       },
       {
         "file": "app/server_services/workflow.py",
@@ -1166,7 +1166,7 @@
     "session.metrics": [
       {
         "file": "app/server.py",
-        "line": 10486
+        "line": 10388
       },
       {
         "file": "app/services/provider_events.py",
@@ -1210,23 +1210,23 @@
     "tool.call": [
       {
         "file": "app/server.py",
-        "line": 4451
+        "line": 4457
       },
       {
         "file": "app/server.py",
-        "line": 4475
+        "line": 4481
       },
       {
         "file": "app/server.py",
-        "line": 4903
+        "line": 4909
       },
       {
         "file": "app/server.py",
-        "line": 5682
+        "line": 5688
       },
       {
         "file": "app/server.py",
-        "line": 6448
+        "line": 6454
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1284,31 +1284,31 @@
       },
       {
         "file": "app/server.py",
-        "line": 4907
+        "line": 4913
       },
       {
         "file": "app/server.py",
-        "line": 5691
+        "line": 5697
       },
       {
         "file": "app/server.py",
-        "line": 6452
+        "line": 6458
       },
       {
         "file": "app/server.py",
-        "line": 6455
+        "line": 6461
       },
       {
         "file": "app/server.py",
-        "line": 7966
+        "line": 7868
       },
       {
         "file": "app/server.py",
-        "line": 10511
+        "line": 10413
       },
       {
         "file": "app/server.py",
-        "line": 38081
+        "line": 37639
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1392,15 +1392,11 @@
       },
       {
         "file": "app/server.py",
-        "line": 4907
+        "line": 4913
       },
       {
         "file": "app/server.py",
-        "line": 4908
-      },
-      {
-        "file": "app/server.py",
-        "line": 5691
+        "line": 4914
       },
       {
         "file": "app/server.py",
@@ -1408,23 +1404,27 @@
       },
       {
         "file": "app/server.py",
-        "line": 6456
+        "line": 5703
       },
       {
         "file": "app/server.py",
-        "line": 6459
+        "line": 6462
       },
       {
         "file": "app/server.py",
-        "line": 7968
+        "line": 6465
       },
       {
         "file": "app/server.py",
-        "line": 10511
+        "line": 7870
       },
       {
         "file": "app/server.py",
-        "line": 38081
+        "line": 10413
+      },
+      {
+        "file": "app/server.py",
+        "line": 37639
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1478,23 +1478,23 @@
       },
       {
         "file": "app/server.py",
-        "line": 4451
+        "line": 4457
       },
       {
         "file": "app/server.py",
-        "line": 4479
+        "line": 4485
       },
       {
         "file": "app/server.py",
-        "line": 4907
+        "line": 4913
       },
       {
         "file": "app/server.py",
-        "line": 5691
+        "line": 5697
       },
       {
         "file": "app/server.py",
-        "line": 6452
+        "line": 6458
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1538,35 +1538,35 @@
       },
       {
         "file": "app/server.py",
-        "line": 4903
+        "line": 4909
       },
       {
         "file": "app/server.py",
-        "line": 5682
+        "line": 5688
       },
       {
         "file": "app/server.py",
-        "line": 6448
+        "line": 6454
       },
       {
         "file": "app/server.py",
-        "line": 6451
+        "line": 6457
       },
       {
         "file": "app/server.py",
-        "line": 7969
+        "line": 7871
       },
       {
         "file": "app/server.py",
-        "line": 10507
+        "line": 10409
       },
       {
         "file": "app/server.py",
-        "line": 10509
+        "line": 10411
       },
       {
         "file": "app/server.py",
-        "line": 38081
+        "line": 37639
       },
       {
         "file": "app/server_services/agent_bridges.py",
@@ -1616,7 +1616,7 @@
       },
       {
         "file": "app/server.py",
-        "line": 10475
+        "line": 10377
       },
       {
         "file": "app/services/provider_events.py",

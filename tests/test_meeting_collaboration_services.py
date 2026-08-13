@@ -41,11 +41,17 @@ def test_repository_serializes_concurrent_callback_claims(tmp_path):
     def seed(data):
         data["meetings"]["m1"] = {"id": "m1", "stage": "completed", "participants": []}
         data["requests"]["r1"] = {"id": "r1", "status": "confirmed", "source": {"projectId": "p1", "taskId": "t1"}, "conversion": {"meetingId": "m1"}}
-    repository.update(seed)
+    repository.import_store({
+        "schemaVersion": 1, "meetings": {}, "events": {}, "occupancy": {}, "requests": {},
+        "idempotency": {"meetings": {}, "requests": {}, "callbacks": {}},
+        "updatedAt": "", "migration": {},
+    })
+    repository.create_meeting(lambda data: data["meetings"].update({"m1": {"id": "m1", "stage": "completed", "participants": []}}))
+    repository.create_request(lambda data: data["requests"].update({"r1": {"id": "r1", "status": "confirmed", "source": {"projectId": "p1", "taskId": "t1"}, "conversion": {"meetingId": "m1"}}}))
     barrier = threading.Barrier(3); results = []
     def worker():
         barrier.wait()
-        results.append(repository.update(lambda data: begin(data, "confirm_meeting_request", "r1", context(), "now", threading.current_thread().name))[1])
+        results.append(repository.mutate_request("r1", lambda data: begin(data, "confirm_meeting_request", "r1", context(), "now", threading.current_thread().name))[1])
     threads = [threading.Thread(target=worker) for _ in range(2)]
     for thread in threads: thread.start()
     barrier.wait()

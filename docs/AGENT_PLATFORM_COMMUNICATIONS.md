@@ -8,7 +8,7 @@ Status: first working implementation
 
 Give My Virtual Office a built-in communication layer that agent platforms can use to talk to each other through the office instead of through offscreen private CLI calls.
 
-This is the foundation for visible cross-platform conversations between OpenClaw, Hermes, Codex, and future provider adapters.
+This is the foundation for visible cross-platform conversations between OpenClaw, Hermes, Codex, Claude Code, and future provider adapters.
 
 ## Built-in skill
 

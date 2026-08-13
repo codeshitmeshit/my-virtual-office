@@ -6,6 +6,7 @@ import stat
 import sys
 import tempfile
 import threading
+import sqlite3
 from pathlib import Path
 
 
@@ -14,7 +15,7 @@ APP = ROOT / "app"
 if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
-from services.meeting_repository import MeetingDomainRepository, MeetingStoreError, acquire_active_lock, empty_store
+from services.meeting_repository import DATABASE_FILENAME, MeetingDomainRepository, MeetingStoreError, acquire_active_lock, empty_store
 
 
 def meeting(meeting_id="m1", stage="active_discussion"):
@@ -24,12 +25,12 @@ def meeting(meeting_id="m1", stage="active_discussion"):
 def test_repository_initializes_one_store_and_returns_deep_copies(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
     assert repo.authority_state() == "empty"
-    saved, _ = repo.update(lambda data: data["meetings"].update({"m1": meeting()}))
-    assert (tmp_path / "meeting-domain.json").exists()
+    saved, _ = repo.create_meeting(lambda data: data["meetings"].update({"m1": meeting()}))
+    assert (tmp_path / DATABASE_FILENAME).exists()
     assert not (tmp_path / "executable-meetings.json").exists()
     assert not (tmp_path / "meeting-requests.json").exists()
     saved["meetings"]["m1"]["stage"] = "failed"
-    assert repo.snapshot()["meetings"]["m1"]["stage"] == "active_discussion"
+    assert repo.get_meeting("m1")["stage"] == "active_discussion"
 
 
 def test_repository_requires_migration_when_legacy_data_exists(tmp_path):
@@ -37,21 +38,21 @@ def test_repository_requires_migration_when_legacy_data_exists(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
     assert repo.authority_state() == "migration_required"
     try:
-        repo.snapshot()
+        repo.export_for_migration()
         assert False, "expected migration requirement"
     except MeetingStoreError as error:
         assert error.code == "meeting_store_migration_required"
     assert not (tmp_path / "meeting-domain.json").exists()
 
 
-def test_repository_rejects_unknown_or_invalid_unified_schema(tmp_path):
+def test_repository_requires_migration_for_valid_legacy_unified_schema(tmp_path):
     path = tmp_path / "meeting-domain.json"
     data = empty_store(); data["schemaVersion"] = 99
     path.write_text(json.dumps(data))
     repo = MeetingDomainRepository(tmp_path)
     assert repo.authority_state() == "invalid"
     try:
-        repo.snapshot(); assert False
+        repo.export_for_migration(); assert False
     except MeetingStoreError as error:
         assert error.code == "meeting_store_version_unsupported"
 
@@ -63,7 +64,7 @@ def test_repository_rejects_dangling_relationships_as_invalid_authority(tmp_path
     repo = MeetingDomainRepository(tmp_path)
     assert repo.authority_state() == "invalid"
     try:
-        repo.snapshot(); assert False
+        repo.export_for_migration(); assert False
     except MeetingStoreError as error:
         assert error.code == "meeting_store_conflict"
 
@@ -80,13 +81,14 @@ def test_repository_rejects_malformed_nested_relationship_types(tmp_path):
 
 def test_repository_serializes_concurrent_updates_without_lost_entries(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
-    repo.update(lambda data: None)
+    repo.initialize_empty()
+    repo.create_request(lambda data: data["requests"].update({"r1": {"id": "r1", "status": "pending"}}))
     barrier = threading.Barrier(9)
     errors = []
     def worker(index):
         try:
             barrier.wait()
-            repo.update(lambda data: data["idempotency"]["callbacks"].update({f"e{index}": index}))
+            repo.mutate_request("r1", lambda data: data["idempotency"]["callbacks"].update({f"e{index}": index}))
         except Exception as exc:
             errors.append(exc)
     threads = [threading.Thread(target=worker, args=(index,)) for index in range(8)]
@@ -94,71 +96,62 @@ def test_repository_serializes_concurrent_updates_without_lost_entries(tmp_path)
     barrier.wait()
     for thread in threads: thread.join(timeout=3)
     assert errors == []
-    assert repo.snapshot()["idempotency"]["callbacks"] == {f"e{index}": index for index in range(8)}
+    assert repo.export_for_migration()["idempotency"]["callbacks"] == {f"e{index}": index for index in range(8)}
 
 
-def test_compatibility_views_share_one_atomic_store(tmp_path):
+def test_typed_apis_share_one_atomic_store(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
-    repo.replace_executable({"meetings": {"m1": meeting()}, "events": {"m1": []}, "occupancy": {}, "idempotency": {"create": "m1"}})
-    repo.replace_requests({"requests": {"r1": {"id": "r1", "status": "confirmed", "conversion": {"meetingId": "m1"}}}, "idempotency": {"confirm": "r1"}})
-    unified = json.loads((tmp_path / "meeting-domain.json").read_text())
+    repo.create_meeting(lambda data: (data["meetings"].update({"m1": meeting()}), data["events"].update({"m1": []})))
+    repo.create_request(lambda data: data["requests"].update({"r1": {"id": "r1", "status": "confirmed", "conversion": {"meetingId": "m1"}}}))
+    unified = repo.export_for_migration()
     assert set(unified) >= {"meetings", "events", "occupancy", "requests", "idempotency", "schemaVersion"}
-    assert unified["idempotency"]["meetings"] == {"create": "m1"}
-    assert unified["idempotency"]["requests"] == {"confirm": "r1"}
-    assert repo.executable_view()["meetings"]["m1"]["id"] == "m1"
-    assert repo.request_view()["requests"]["r1"]["conversion"]["meetingId"] == "m1"
+    assert repo.get_meeting("m1")["id"] == "m1"
+    assert repo.get_request("r1")["conversion"]["meetingId"] == "m1"
 
 
-def test_cache_invalidates_after_external_atomic_replacement(tmp_path):
+def test_cache_invalidates_after_external_sqlite_update(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
-    repo.update(lambda data: data["meetings"].update({"m1": meeting()}))
-    assert repo.snapshot()["meetings"]["m1"]["stage"] == "active_discussion"
-    changed = repo.snapshot(); changed["meetings"]["m1"]["stage"] = "paused"
-    replacement = tmp_path / "replacement.json"
-    replacement.write_text(json.dumps(changed))
-    os.replace(replacement, tmp_path / "meeting-domain.json")
-    assert repo.snapshot()["meetings"]["m1"]["stage"] == "paused"
+    repo.create_meeting(lambda data: data["meetings"].update({"m1": meeting()}))
+    assert repo.get_meeting("m1")["stage"] == "active_discussion"
+    path = tmp_path / DATABASE_FILENAME
+    connection = sqlite3.connect(path)
+    payload = json.dumps({**meeting(), "stage": "paused"}, sort_keys=True, separators=(",", ":"))
+    connection.execute("UPDATE meetings SET payload_json=? WHERE id='m1'", (payload,))
+    connection.commit(); connection.close()
+    assert repo.get_meeting("m1")["stage"] == "paused"
 
 
-def test_atomic_writer_rejects_precreated_symlink_and_preserves_target(tmp_path, monkeypatch):
+def test_sqlite_authority_rejects_symlink_and_preserves_target(tmp_path, monkeypatch):
     repo = MeetingDomainRepository(tmp_path)
     target = tmp_path / "outside-secret"
     target.write_text("preserve")
-    temporary = tmp_path / f".meeting-domain.json.tmp-{os.getpid()}-{threading.get_ident()}"
-    temporary.symlink_to(target)
+    (tmp_path / DATABASE_FILENAME).symlink_to(target)
     try:
-        repo.update(lambda data: None); assert False
-    except FileExistsError:
+        repo.initialize_empty(); assert False
+    except (sqlite3.OperationalError, MeetingStoreError):
         pass
     assert target.read_text() == "preserve"
 
 
-def test_atomic_replace_failure_keeps_previous_store(tmp_path, monkeypatch):
+def test_transaction_failure_keeps_previous_store(tmp_path, monkeypatch):
     repo = MeetingDomainRepository(tmp_path)
-    repo.update(lambda data: None)
-    before = (tmp_path / "meeting-domain.json").read_bytes()
-    original_replace = os.replace
-    monkeypatch.setattr(os, "replace", lambda source, target: (_ for _ in ()).throw(OSError("replace failed")))
+    repo.initialize_empty()
+    repo.create_request(lambda data: data["requests"].update({"r1": {"id": "r1", "status": "pending"}}))
+    before = repo.export_for_migration()
+    original = repo._sync_idempotency
+    monkeypatch.setattr(repo, "_sync_idempotency", lambda *args: (_ for _ in ()).throw(OSError("write failed")))
     try:
-        repo.update(lambda data: data["idempotency"]["callbacks"].update({"e": 1})); assert False
+        repo.mutate_request("r1", lambda data: data["idempotency"]["callbacks"].update({"e": 1})); assert False
     except OSError:
         pass
-    monkeypatch.setattr(os, "replace", original_replace)
-    assert (tmp_path / "meeting-domain.json").read_bytes() == before
+    monkeypatch.setattr(repo, "_sync_idempotency", original)
+    assert repo.export_for_migration() == before
 
 
-def test_directory_fsync_io_failure_is_not_reported_as_success(tmp_path, monkeypatch):
+def test_database_file_is_private(tmp_path):
     repo = MeetingDomainRepository(tmp_path)
-    original_fsync = os.fsync
-    def fail_directory(descriptor):
-        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
-            raise OSError(errno.EIO, "directory fsync failed")
-        return original_fsync(descriptor)
-    monkeypatch.setattr(os, "fsync", fail_directory)
-    try:
-        repo.update(lambda data: None); assert False
-    except OSError as error:
-        assert error.errno == errno.EIO
+    repo.initialize_empty()
+    assert (tmp_path / DATABASE_FILENAME).stat().st_mode & 0o777 == 0o600
 
 
 def test_active_lock_rejects_symlink_without_touching_target(tmp_path):

@@ -8,7 +8,7 @@
 
 为“我的虚拟办公室”提供内建的通信层，使 Agent 平台能够通过办公室相互对话，而不是通过屏幕外的私有 CLI 调用。
 
-这是 OpenClaw、Hermes、Codex 及未来提供者适配器之间实现可见跨平台对话的基础。
+这是 OpenClaw、Hermes、Codex、Claude Code 及未来提供者适配器之间实现可见跨平台对话的基础。
 
 ## 内建技能
 

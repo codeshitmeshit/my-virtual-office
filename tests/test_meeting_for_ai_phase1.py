@@ -631,8 +631,7 @@ def test_phase3_late_formal_provider_response_is_ignored_after_cancel():
         old_call = server._meeting_call_provider
 
         def fake_call(meeting, speaker, prompt):
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 live = store["meetings"][meeting["id"]]
                 previous = live.get("stage")
                 live["previousStage"] = previous
@@ -641,7 +640,6 @@ def test_phase3_late_formal_provider_response_is_ignored_after_cancel():
                 for participant in live.get("participants", []):
                     store.get("occupancy", {}).pop(participant, None)
                 server._append_exec_meeting_event(store, live, "meeting_transitioned", payload={"from": previous, "to": "cancelled", "reason": "cancel_during_provider_call"})
-                server._save_exec_meeting_store(store)
             return {
                 "ok": True,
                 "reply": json.dumps({"position": "late response", "rationale": "should be ignored"}),
@@ -1282,8 +1280,7 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
             meeting_id = created["meeting"]["id"]
             server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 pending = server._append_exec_meeting_event(
                     store,
@@ -1293,7 +1290,6 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
                     payload={"speaker": "main", "stage": "active_opening", "round": 0, "contextMode": "incremental", "promptChars": 123},
                 )
                 pending["createdAt"] = "2026-06-20T00:00:00+00:00"
-                server._save_exec_meeting_store(store)
 
             active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
             assert active["lastEventSequence"] == pending["sequence"]
@@ -1305,8 +1301,7 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
             assert active["transcript"] == []
             assert server._meeting_pending_formal_turn_exists(active["pendingCalls"], "active_opening", 0, "main") is False
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 events = store.get("events", {}).get(meeting_id, [])
             assert server._meeting_pending_formal_turn_exists(events, "active_opening", 0, "main") is True
 
@@ -1328,8 +1323,7 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
             assert active["transcript"][0]["ok"] is False
             assert active["transcript"][0]["parseError"] == "provider_timeout_skipped"
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 server._append_ignored_provider_completion(
                     store,
@@ -1342,7 +1336,6 @@ def test_phase3_active_projection_includes_live_transcript_and_pending_calls():
                     "active_opening",
                     0,
                 )
-                server._save_exec_meeting_store(store)
 
             active = [m for m in server._meeting_active_projection() if m.get("id") == meeting_id][0]
             assert active["pendingCalls"] == []
@@ -1388,8 +1381,7 @@ def test_phase3_provider_timeout_skip_continues_meeting():
             meeting_id = created["meeting"]["id"]
             server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 pending = server._append_exec_meeting_event(
                     store,
@@ -1400,7 +1392,6 @@ def test_phase3_provider_timeout_skip_continues_meeting():
                 )
                 pending["createdAt"] = "2026-06-20T00:00:00+00:00"
                 meeting["currentSpeaker"] = "main"
-                server._save_exec_meeting_store(store)
 
             skipped = server._handle_executable_meeting_run(meeting_id, {
                 "action": "provider_timeout_skip",
@@ -1477,14 +1468,12 @@ def test_late_provider_completion_after_timeout_skip_is_ignored():
             thread.start()
             assert provider_started.wait(2)
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 pending = [
                     e for e in store["events"][meeting_id]
                     if e["type"] == "provider_call_started" and (e.get("payload") or {}).get("speaker") == "main"
                 ][0]
                 pending["createdAt"] = "2026-06-20T00:00:00+00:00"
-                server._save_exec_meeting_store(store)
 
             skipped = server._handle_executable_meeting_run(meeting_id, {
                 "action": "provider_timeout_skip",
@@ -1557,8 +1546,7 @@ def test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt(
             assert user_rows[0]["text"] == "用户插话：请先确认风险。"
             assert user_rows[0]["context"] == "补充上下文：预算上限是 2 天。"
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 meeting["contextMode"] = "incremental"
                 meeting.setdefault("participantLastSeen", {})["hermes-default"] = 1
@@ -1615,8 +1603,7 @@ def test_phase3_agenda_change_updates_future_prompt_and_projection():
             assert agenda_rows[0]["text"] == "改为先评估上线风险和回滚方案"
             assert agenda_rows[0]["reason"] == "用户临时调整优先级"
 
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 meeting["contextMode"] = "incremental"
                 meeting.setdefault("participantLastSeen", {})["hermes-default"] = changed["event"]["sequence"] - 1
@@ -1912,11 +1899,9 @@ def test_decision_continue_honors_expected_version_and_rejects_invalid_value():
             assert invalid["error"] == "Invalid expectedVersion"
 
             server._handle_executable_meeting_transition(meeting_id, {"action": "start", "expectedVersion": 1})
-            with server._EXEC_MEETING_LOCK:
-                store = server._load_exec_meeting_store()
+            with server._meeting_domain_repository().edit_meeting(meeting_id) as store:
                 meeting = store["meetings"][meeting_id]
                 server._meeting_open_decision_window(store, meeting, "active_opening", 0, "active_discussion", 1, "round_complete")
-                server._save_exec_meeting_store(store)
 
             live = server._handle_executable_meeting_detail(meeting_id)["meeting"]
             stale = server._handle_executable_meeting_transition(meeting_id, {

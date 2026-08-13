@@ -48,13 +48,13 @@ def create_preparing_meeting(idempotency_key="timeout-create"):
 
 
 def age_meeting(meeting_id, seconds):
-    store = server._load_exec_meeting_store()
-    meeting = store["meetings"][meeting_id]
-    old = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
-    meeting["preparingStartedAt"] = old
-    meeting["createdAt"] = old
-    meeting["updatedAt"] = old
-    server._save_exec_meeting_store(store)
+    def age(store):
+        meeting = store["meetings"][meeting_id]
+        old = (datetime.now(timezone.utc) - timedelta(seconds=seconds)).isoformat()
+        meeting["preparingStartedAt"] = old
+        meeting["createdAt"] = old
+        meeting["updatedAt"] = old
+    server._meeting_domain_repository().mutate_meeting(meeting_id, age)
 
 
 def test_preparing_timeout_defaults_to_300_and_releases_occupancy():
@@ -66,15 +66,14 @@ def test_preparing_timeout_defaults_to_300_and_releases_occupancy():
             age_meeting(meeting["id"], 301)
 
             active = server._meeting_active_projection()
-            store = server._load_exec_meeting_store()
-            released = store["meetings"][meeting["id"]]
+            released = server._meeting_domain_repository().get_meeting(meeting["id"])
 
             assert all(item["id"] != meeting["id"] for item in active)
             assert released["stage"] == "cancelled"
             assert released["cancelReason"] == "preparing_timeout"
             assert released["preparingTimeoutSec"] == 300
-            assert store["occupancy"] == {}
-            events = store["events"][meeting["id"]]
+            assert server._meeting_domain_repository().list_occupancy() == {}
+            events = server._meeting_domain_repository().list_events(meeting["id"])
             assert len([e for e in events if e["type"] == "meeting_preparing_timed_out"]) == 1
         finally:
             restore_store(old)
@@ -89,12 +88,12 @@ def test_preparing_timeout_uses_config_and_keeps_unexpired_meeting():
             age_meeting(meeting["id"], 60)
 
             active = server._meeting_active_projection()
-            store = server._load_exec_meeting_store()
+            current = server._meeting_domain_repository().get_meeting(meeting["id"])
 
             assert any(item["id"] == meeting["id"] for item in active)
-            assert store["meetings"][meeting["id"]]["stage"] == "preparing"
-            assert store["occupancy"]["agent-a"] == meeting["id"]
-            assert store["occupancy"]["agent-b"] == meeting["id"]
+            assert current["stage"] == "preparing"
+            assert server._meeting_domain_repository().list_occupancy()["agent-a"] == meeting["id"]
+            assert server._meeting_domain_repository().list_occupancy()["agent-b"] == meeting["id"]
         finally:
             restore_store(old)
 
@@ -119,19 +118,17 @@ def test_preparing_timeout_does_not_release_other_stages_or_other_occupancy():
             })
             assert transitioned["ok"] is True
             age_meeting(meeting["id"], 60)
-            store = server._load_exec_meeting_store()
-            store["meetings"]["other-meeting"] = {
-                "id": "other-meeting", "stage": "active_discussion", "participants": ["other-agent"],
-            }
-            store["events"]["other-meeting"] = []
-            store["occupancy"]["other-agent"] = "other-meeting"
-            server._save_exec_meeting_store(store)
+            server._meeting_domain_repository().create_meeting(lambda store: (
+                store["meetings"].update({"other-meeting": {
+                    "id": "other-meeting", "stage": "active_discussion", "participants": ["other-agent"],
+                }}),
+                store["events"].update({"other-meeting": []}),
+                store["occupancy"].update({"other-agent": "other-meeting"}),
+            ))
 
             server._meeting_active_projection()
-            store = server._load_exec_meeting_store()
-
-            assert store["meetings"][meeting["id"]]["stage"] == "active_opening"
-            assert store["occupancy"]["other-agent"] == "other-meeting"
+            assert server._meeting_domain_repository().get_meeting(meeting["id"])["stage"] == "active_opening"
+            assert server._meeting_domain_repository().list_occupancy()["other-agent"] == "other-meeting"
         finally:
             restore_store(old)
 
@@ -144,12 +141,10 @@ def test_preparing_timeout_blocks_run_after_expiry():
             age_meeting(meeting["id"], 60)
 
             result = server._handle_executable_meeting_run(meeting["id"], {})
-            store = server._load_exec_meeting_store()
-
             assert result["alreadyTerminal"] is True
             assert result["preparingTimedOut"] is True
-            assert store["meetings"][meeting["id"]]["stage"] == "cancelled"
-            assert store["occupancy"] == {}
+            assert server._meeting_domain_repository().get_meeting(meeting["id"])["stage"] == "cancelled"
+            assert server._meeting_domain_repository().list_occupancy() == {}
         finally:
             restore_store(old)
 

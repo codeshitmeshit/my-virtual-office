@@ -25,7 +25,6 @@ assert.ok(index.indexOf('game.js') < index.indexOf('office-branding.js'), 'offic
 const localeKeys = [
   'settings_modal_connections_agents',
   'settings_modal_office',
-  'settings_modal_weather',
   'settings_modal_display',
   'settings_modal_tools_browser',
   'settings_modal_notifications',
@@ -86,8 +85,8 @@ assert.ok(
 );
 assert.ok(css.includes('break-inside: avoid'), 'a settings card must not split across internal columns');
 assert.ok(
-  css.includes('.settings-modal-category-panel[data-settings-category="weather"]'),
-  'the Weather category should define its own single-column layout without affecting other categories',
+  !css.includes('.settings-modal-category-panel[data-settings-category="weather"]'),
+  'the removed Weather category must not retain dead layout rules',
 );
 assert.ok(!css.includes('repeat(3, minmax(0, 1fr))'), 'the content region must not create a fourth overall column');
 assert.ok(index.includes('data-settings-card="feishu-notifications"'), 'Feishu notifications must own a dedicated settings card');
@@ -95,12 +94,8 @@ assert.ok(index.includes('data-settings-card="feishu-chat-app"'), 'Feishu chat m
 assert.ok(index.includes('data-settings-card="weather-location"'), 'Weather location must own a dedicated settings card');
 assert.ok(index.includes('data-settings-card="weather-provider"'), 'Weather provider must own a dedicated settings card');
 assert.ok(
-  source.includes("{ id: 'office', labelKey: 'settings_modal_office', selectors: ['#mm-office-name', '#mm-weather-provider'] }"),
-  'weather provider must be classified under Office with the office identity card',
-);
-assert.ok(
-  source.includes("{ id: 'weather', labelKey: 'settings_modal_weather', selectors: ['#mm-show-weather'] }"),
-  'weather location and display controls must remain in the Weather category',
+  source.includes("selectors: ['#mm-office-name', '#mm-show-weather', '#mm-weather-provider']"),
+  'weather location and provider must be classified under Office with the office identity card',
 );
 assert.ok(
   source.includes("selectors: ['#mm-feishu-enable', '#mm-feishu-chat-enable']"),

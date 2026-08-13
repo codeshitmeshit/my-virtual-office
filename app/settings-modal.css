@@ -165,10 +165,6 @@
     display: none !important;
 }
 
-.main-menu-panel.settings-modal-mounted .settings-modal-category-panel[data-settings-category="weather"] {
-    column-count: 1;
-}
-
 .main-menu-panel.settings-modal-mounted .mm-section {
     display: inline-block;
     width: 100%;

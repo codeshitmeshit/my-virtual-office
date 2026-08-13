@@ -1,22 +1,27 @@
-"""Single authoritative JSON repository for Meeting-domain state."""
+"""SQLite authority for Meeting-domain state and offline legacy import."""
 
 from __future__ import annotations
 
 import copy
-import errno
 import fcntl
 import hashlib
 import json
 import os
 import stat
+import sqlite3
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from .sqlite_runtime import connect_sqlite
+
 
 SCHEMA_VERSION = 1
-UNIFIED_FILENAME = "meeting-domain.json"
+DATABASE_FILENAME = "meeting-domain.sqlite3"
+UNIFIED_FILENAME = DATABASE_FILENAME
+LEGACY_UNIFIED_FILENAME = "meeting-domain.json"
 LEGACY_EXECUTABLE_FILENAME = "executable-meetings.json"
 LEGACY_REQUEST_FILENAME = "meeting-requests.json"
 TERMINAL_PHASES = frozenset({"completed", "cancelled", "failed"})
@@ -147,136 +152,540 @@ class MeetingDomainRepository:
     def __init__(self, status_dir: str | os.PathLike[str]):
         self.status_dir = Path(status_dir).expanduser().resolve()
         self.path = self.status_dir / UNIFIED_FILENAME
+        self.legacy_unified_path = self.status_dir / LEGACY_UNIFIED_FILENAME
         self._lock = threading.RLock()
-        self._cache: dict[str, Any] | None = None
-        self._cache_key: tuple[int, int, int, int] | None = None
-
-    def _metadata(self) -> tuple[int, int, int, int] | None:
-        try:
-            value = self.path.stat()
-            return value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
-        except FileNotFoundError:
-            return None
+        self._initialized = False
+    def _legacy_data_exists(self) -> bool:
+        if self.legacy_unified_path.exists():
+            return True
+        executable = self.status_dir / LEGACY_EXECUTABLE_FILENAME
+        requests = self.status_dir / LEGACY_REQUEST_FILENAME
+        return _legacy_has_data(executable, ("meetings", "events", "occupancy", "idempotency")) or _legacy_has_data(
+            requests, ("requests", "idempotency"),
+        )
 
     def authority_state(self) -> str:
         if self.path.exists():
             try:
-                self.snapshot()
+                connection = connect_sqlite(self.path, readonly=True)
+                try:
+                    version = connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
+                    if not version or int(version[0]) != SCHEMA_VERSION:
+                        return "invalid"
+                    quick_check = connection.execute("PRAGMA quick_check(1)").fetchone()
+                    if not quick_check or quick_check[0] != "ok":
+                        return "invalid"
+                finally:
+                    connection.close()
                 return "unified"
-            except MeetingStoreError:
+            except (MeetingStoreError, OSError, sqlite3.DatabaseError, TypeError, ValueError):
                 return "invalid"
-        executable = self.status_dir / LEGACY_EXECUTABLE_FILENAME
-        requests = self.status_dir / LEGACY_REQUEST_FILENAME
-        if _legacy_has_data(executable, ("meetings", "events", "occupancy", "idempotency")) or _legacy_has_data(
-            requests, ("requests", "idempotency"),
-        ):
+        if self.legacy_unified_path.exists():
+            try:
+                normalize_store(json.loads(read_regular_no_follow(self.legacy_unified_path).decode("utf-8")), strict=True)
+            except (MeetingStoreError, OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+                return "invalid"
+            return "migration_required"
+        if self._legacy_data_exists():
             return "migration_required"
         return "empty"
 
-    def _read_disk(self) -> dict[str, Any]:
+    def initialize_empty(self) -> None:
+        if self._legacy_data_exists():
+            raise MeetingStoreError("Meeting store migration is required", code="meeting_store_migration_required")
+        self._initialize()
+
+    def validate_database(self) -> None:
+        """Validate the SQLite authority without exposing a full runtime store view."""
+        data = self.export_for_migration()
+        normalize_store(data, strict=True)
+
+    def ready(self) -> bool:
+        """Cheap hot-path readiness check; startup owns full authority validation."""
+        return self._initialized and self.path.exists()
+
+    def export_for_migration(self) -> dict[str, Any]:
+        """Read all domain rows for migration verification and offline tooling only."""
+        return self._read_disk()
+
+    def _initialize(self) -> None:
+        if self._initialized and self.path.exists():
+            return
+        connection = connect_sqlite(self.path)
         try:
-            raw = json.loads(read_regular_no_follow(self.path).decode("utf-8"))
-        except FileNotFoundError:
-            if _legacy_has_data(self.status_dir / LEGACY_EXECUTABLE_FILENAME, ("meetings", "events", "occupancy", "idempotency")) or _legacy_has_data(
-                self.status_dir / LEGACY_REQUEST_FILENAME, ("requests", "idempotency"),
-            ):
+            connection.executescript(
+                """
+                CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS meetings (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS meeting_events (
+                    meeting_id TEXT NOT NULL, position INTEGER NOT NULL, payload_json TEXT NOT NULL,
+                    PRIMARY KEY(meeting_id, position),
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS meeting_event_streams (
+                    meeting_id TEXT PRIMARY KEY,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS meeting_requests (id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS occupancy (
+                    agent_id TEXT PRIMARY KEY, meeting_id TEXT NOT NULL,
+                    FOREIGN KEY(meeting_id) REFERENCES meetings(id) ON DELETE CASCADE
+                );
+                CREATE TABLE IF NOT EXISTS idempotency (
+                    namespace TEXT NOT NULL, item_key TEXT NOT NULL, payload_json TEXT NOT NULL,
+                    PRIMARY KEY(namespace, item_key)
+                );
+                CREATE INDEX IF NOT EXISTS meeting_events_owner_idx ON meeting_events(meeting_id, position);
+                CREATE INDEX IF NOT EXISTS meeting_requests_status_idx
+                    ON meeting_requests(json_extract(payload_json, '$.status'));
+                """
+            )
+            connection.execute(
+                "INSERT OR IGNORE INTO metadata(key,value) VALUES('schema_version', ?)",
+                (str(SCHEMA_VERSION),),
+            )
+            self._initialized = True
+        finally:
+            connection.close()
+
+    @staticmethod
+    def _json(value: Any) -> str:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+    @staticmethod
+    def _decoded(value: str) -> Any:
+        return json.loads(value)
+
+    def _read_disk(self) -> dict[str, Any]:
+        if not self.path.exists():
+            if self.legacy_unified_path.exists():
+                try:
+                    normalize_store(json.loads(read_regular_no_follow(self.legacy_unified_path).decode("utf-8")), strict=True)
+                except MeetingStoreError:
+                    raise
+                except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
+                    raise MeetingStoreError("Meeting store is invalid", code="meeting_store_invalid", status=500) from exc
+                raise MeetingStoreError("Meeting store migration is required", code="meeting_store_migration_required")
+            if self._legacy_data_exists():
                 raise MeetingStoreError("Meeting store migration is required", code="meeting_store_migration_required")
             return empty_store()
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
-            raise MeetingStoreError("Meeting store is invalid", code="meeting_store_invalid", status=500) from exc
-        return normalize_store(raw, strict=True)
-
-    def snapshot(self) -> dict[str, Any]:
-        with self._lock:
-            metadata = self._metadata()
-            if self._cache is None or metadata != self._cache_key:
-                self._cache = self._read_disk()
-                self._cache_key = metadata
-            return copy.deepcopy(self._cache)
-
-    def update(self, mutator: Callable[[dict[str, Any]], Any]) -> tuple[dict[str, Any], Any]:
-        with self._lock:
-            data = self._read_disk()
-            result = mutator(data)
-            data["updatedAt"] = now_iso()
-            validated = normalize_store(data, strict=True)
-            self._write_atomic(validated)
-            self._cache = copy.deepcopy(validated)
-            self._cache_key = self._metadata()
-            return copy.deepcopy(validated), copy.deepcopy(result)
-
-    def _write_atomic(self, data: Mapping[str, Any]) -> None:
-        self.status_dir.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp-{os.getpid()}-{threading.get_ident()}")
-        descriptor = None
         try:
-            descriptor = os.open(
-                temporary,
-                os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
-                0o600,
-            )
-            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-                descriptor = None
-                json.dump(data, stream, indent=2, sort_keys=True)
-                stream.flush()
-                os.fsync(stream.fileno())
-            os.chmod(temporary, 0o600, follow_symlinks=False)
-            candidate = json.loads(read_regular_no_follow(temporary).decode("utf-8"))
-            normalize_store(candidate, strict=True)
-            os.replace(temporary, self.path)
-            os.chmod(self.path, 0o600, follow_symlinks=False)
+            connection = connect_sqlite(self.path, readonly=True)
             try:
-                directory_fd = os.open(self.status_dir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            except OSError as exc:
-                unsupported = {errno.EINVAL, errno.EBADF}
-                for name in ("ENOTSUP", "EOPNOTSUPP"):
-                    value = getattr(errno, name, None)
-                    if value is not None:
-                        unsupported.add(value)
-                if exc.errno not in unsupported:
-                    raise
+                version = connection.execute("SELECT value FROM metadata WHERE key='schema_version'").fetchone()
+                if not version or int(version[0]) != SCHEMA_VERSION:
+                    raise MeetingStoreError("Unsupported Meeting store schema version", code="meeting_store_version_unsupported")
+                data = empty_store()
+                for row in connection.execute("SELECT id,payload_json FROM meetings"):
+                    data["meetings"][str(row["id"])] = self._decoded(row["payload_json"])
+                for row in connection.execute("SELECT meeting_id FROM meeting_event_streams"):
+                    data["events"][str(row["meeting_id"])] = []
+                for row in connection.execute("SELECT meeting_id,payload_json FROM meeting_events ORDER BY meeting_id,position"):
+                    data["events"].setdefault(str(row["meeting_id"]), []).append(self._decoded(row["payload_json"]))
+                for row in connection.execute("SELECT id,payload_json FROM meeting_requests"):
+                    data["requests"][str(row["id"])] = self._decoded(row["payload_json"])
+                for row in connection.execute("SELECT agent_id,meeting_id FROM occupancy"):
+                    data["occupancy"][str(row["agent_id"])] = str(row["meeting_id"])
+                for row in connection.execute("SELECT namespace,item_key,payload_json FROM idempotency"):
+                    data["idempotency"].setdefault(str(row["namespace"]), {})[str(row["item_key"])] = self._decoded(row["payload_json"])
+                metadata = {str(row["key"]): str(row["value"]) for row in connection.execute("SELECT key,value FROM metadata")}
+                data["updatedAt"] = metadata.get("updated_at", "")
+                data["migration"] = self._decoded(metadata.get("migration_json", "{}"))
+            finally:
+                connection.close()
+        except MeetingStoreError:
+            raise
+        except (OSError, sqlite3.DatabaseError, json.JSONDecodeError, TypeError, ValueError, RecursionError) as exc:
+            raise MeetingStoreError("Meeting store is invalid", code="meeting_store_invalid", status=500) from exc
+        return normalize_store(data, strict=True)
+
+    def _read_rows(self, connection: sqlite3.Connection, *, meeting_id: str | None = None, request_id: str | None = None) -> dict[str, Any]:
+        """Build a scoped domain view for one typed transaction, never the full compatibility snapshot."""
+        data = empty_store()
+        if meeting_id is not None:
+            row = connection.execute("SELECT payload_json FROM meetings WHERE id=?", (str(meeting_id),)).fetchone()
+            if row:
+                data["meetings"][str(meeting_id)] = self._decoded(row[0])
+                data["events"][str(meeting_id)] = [
+                    self._decoded(event[0]) for event in connection.execute(
+                        "SELECT payload_json FROM meeting_events WHERE meeting_id=? ORDER BY position", (str(meeting_id),),
+                    )
+                ]
+                for occupancy in connection.execute("SELECT agent_id FROM occupancy WHERE meeting_id=?", (str(meeting_id),)):
+                    data["occupancy"][str(occupancy[0])] = str(meeting_id)
+        if request_id is not None:
+            row = connection.execute("SELECT payload_json FROM meeting_requests WHERE id=?", (str(request_id),)).fetchone()
+            if row:
+                data["requests"][str(request_id)] = self._decoded(row[0])
+        for row in connection.execute("SELECT namespace,item_key,payload_json FROM idempotency"):
+            data["idempotency"].setdefault(str(row[0]), {})[str(row[1])] = self._decoded(row[2])
+        return data
+
+    def _read_collection_scope(self, connection, *, meetings=False, requests=False) -> dict[str, Any]:
+        data = empty_store()
+        if meetings:
+            for row in connection.execute("SELECT id,payload_json FROM meetings"):
+                data["meetings"][str(row[0])] = self._decoded(row[1])
+            for row in connection.execute("SELECT agent_id,meeting_id FROM occupancy"):
+                data["occupancy"][str(row[0])] = str(row[1])
+        if requests:
+            for row in connection.execute("SELECT id,payload_json FROM meeting_requests"):
+                data["requests"][str(row[0])] = self._decoded(row[1])
+        for row in connection.execute("SELECT namespace,item_key,payload_json FROM idempotency"):
+            data["idempotency"].setdefault(str(row[0]), {})[str(row[1])] = self._decoded(row[2])
+        return data
+
+    def get_meeting(self, meeting_id: str) -> dict[str, Any] | None:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            row = connection.execute("SELECT payload_json FROM meetings WHERE id=?", (str(meeting_id),)).fetchone()
+            return copy.deepcopy(self._decoded(row[0])) if row else None
         finally:
-            if descriptor is not None:
-                os.close(descriptor)
+            connection.close()
+
+    def get_request(self, request_id: str) -> dict[str, Any] | None:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            row = connection.execute("SELECT payload_json FROM meeting_requests WHERE id=?", (str(request_id),)).fetchone()
+            return copy.deepcopy(self._decoded(row[0])) if row else None
+        finally:
+            connection.close()
+
+    def list_meetings(self, *, terminal: bool | None = None) -> list[dict[str, Any]]:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            if terminal is None:
+                rows = connection.execute("SELECT payload_json FROM meetings")
+            else:
+                placeholders = ",".join("?" for _ in TERMINAL_PHASES)
+                operator = "IN" if terminal else "NOT IN"
+                rows = connection.execute(
+                    f"SELECT payload_json FROM meetings WHERE COALESCE(json_extract(payload_json, '$.stage'), json_extract(payload_json, '$.phase'), 'draft') {operator} ({placeholders})",
+                    tuple(TERMINAL_PHASES),
+                )
+            values = [self._decoded(row[0]) for row in rows]
+        finally:
+            connection.close()
+        return copy.deepcopy(values)
+
+    def list_meetings_with_events(self, *, terminal: bool | None = None) -> list[tuple[dict[str, Any], list[dict[str, Any]]]]:
+        """Load a projection collection and its event streams with one connection."""
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            meetings = [self._decoded(row[0]) for row in connection.execute("SELECT payload_json FROM meetings")]
+            if terminal is not None:
+                meetings = [
+                    meeting for meeting in meetings
+                    if (str(meeting.get("stage") or meeting.get("phase") or "") in TERMINAL_PHASES) is terminal
+                ]
+            events_by_meeting = {str(meeting.get("id") or ""): [] for meeting in meetings}
+            ids = list(events_by_meeting)
+            if ids:
+                placeholders = ",".join("?" for _ in ids)
+                rows = connection.execute(
+                    f"SELECT meeting_id,payload_json FROM meeting_events WHERE meeting_id IN ({placeholders}) ORDER BY meeting_id,position",
+                    ids,
+                )
+                for row in rows:
+                    events_by_meeting[str(row[0])].append(self._decoded(row[1]))
+            return copy.deepcopy([
+                (meeting, events_by_meeting.get(str(meeting.get("id") or ""), [])) for meeting in meetings
+            ])
+        finally:
+            connection.close()
+
+    def list_requests(self) -> list[dict[str, Any]]:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            return [copy.deepcopy(self._decoded(row[0])) for row in connection.execute("SELECT payload_json FROM meeting_requests")]
+        finally:
+            connection.close()
+
+    def list_occupancy(self) -> dict[str, str]:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            return {str(row[0]): str(row[1]) for row in connection.execute("SELECT agent_id,meeting_id FROM occupancy")}
+        finally:
+            connection.close()
+
+    def list_events(self, meeting_id: str, *, after: int = 0) -> list[dict[str, Any]]:
+        self._initialize()
+        connection = connect_sqlite(self.path, readonly=True)
+        try:
+            rows = connection.execute(
+                "SELECT payload_json FROM meeting_events WHERE meeting_id=? "
+                "AND COALESCE(json_extract(payload_json, '$.sequence'), 0)>? ORDER BY position",
+                (str(meeting_id), int(after or 0)),
+            )
+            values = [self._decoded(row[0]) for row in rows]
+            return copy.deepcopy(values)
+        finally:
+            connection.close()
+
+    def mutate_meeting(self, meeting_id: str, mutator: Callable[[dict[str, Any]], Any]) -> tuple[dict[str, Any], Any]:
+        return self._mutate_scoped(meeting_id=str(meeting_id), request_id=None, mutator=mutator)
+
+    @contextmanager
+    def edit_meeting(self, meeting_id: str):
+        """Edit one Meeting and its event stream in a single SQLite transaction."""
+        self._initialize()
+        with self._lock:
+            connection = connect_sqlite(self.path)
             try:
-                temporary.unlink()
-            except FileNotFoundError:
-                pass
+                connection.execute("BEGIN IMMEDIATE")
+                before = self._read_rows(connection, meeting_id=str(meeting_id), request_id=None)
+                data = copy.deepcopy(before)
+                yield data
+                data["updatedAt"] = now_iso()
+                self._validate_scoped(connection, data)
+                self._write_changes_on(connection, before, data)
+                connection.commit()
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
 
-    def executable_view(self) -> dict[str, Any]:
-        data = self.snapshot()
-        return {
-            "meetings": data["meetings"], "events": data["events"], "occupancy": data["occupancy"],
-            "idempotency": data["idempotency"]["meetings"], "updatedAt": data["updatedAt"],
-        }
+    def mutate_request(self, request_id: str, mutator: Callable[[dict[str, Any]], Any]) -> tuple[dict[str, Any], Any]:
+        return self._mutate_scoped(meeting_id=None, request_id=str(request_id), mutator=mutator)
 
-    def replace_executable(self, legacy: Mapping[str, Any]) -> None:
-        def mutate(data):
-            for key in ("meetings", "events", "occupancy"):
-                data[key] = copy.deepcopy(legacy.get(key) if isinstance(legacy.get(key), dict) else {})
-            data["idempotency"]["meetings"] = copy.deepcopy(
-                legacy.get("idempotency") if isinstance(legacy.get("idempotency"), dict) else {},
+    def create_meeting(self, mutator: Callable[[dict[str, Any]], Any]) -> tuple[dict[str, Any], Any]:
+        return self._mutate_collection(meetings=True, requests=False, mutator=mutator)
+
+    def create_request(self, mutator: Callable[[dict[str, Any]], Any]) -> tuple[dict[str, Any], Any]:
+        return self._mutate_collection(meetings=False, requests=True, mutator=mutator)
+
+    def mutate_request_with_meetings(self, request_id: str, mutator) -> tuple[dict[str, Any], Any]:
+        return self._mutate_collection(meetings=True, requests=True, mutator=mutator, request_id=str(request_id))
+
+    def mutate_all_meetings(self, mutator) -> tuple[dict[str, Any], Any]:
+        return self._mutate_collection(meetings=True, requests=False, mutator=mutator, include_events=True)
+
+    def mutate_preparing_meetings(self, mutator) -> tuple[dict[str, Any], Any]:
+        """Mutate only preparing Meetings, their occupancy, events and idempotency state."""
+        self._initialize()
+        with self._lock:
+            connection = connect_sqlite(self.path)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                before = empty_store()
+                rows = connection.execute(
+                    "SELECT id,payload_json FROM meetings WHERE json_extract(payload_json, '$.stage')='preparing'"
+                )
+                for row in rows:
+                    meeting_id = str(row[0])
+                    before["meetings"][meeting_id] = self._decoded(row[1])
+                    before["events"][meeting_id] = [
+                        self._decoded(event[0]) for event in connection.execute(
+                            "SELECT payload_json FROM meeting_events WHERE meeting_id=? ORDER BY position", (meeting_id,),
+                        )
+                    ]
+                for row in connection.execute(
+                    "SELECT agent_id,meeting_id FROM occupancy WHERE meeting_id IN "
+                    "(SELECT id FROM meetings WHERE json_extract(payload_json, '$.stage')='preparing')"
+                ):
+                    before["occupancy"][str(row[0])] = str(row[1])
+                for row in connection.execute("SELECT namespace,item_key,payload_json FROM idempotency"):
+                    before["idempotency"].setdefault(str(row[0]), {})[str(row[1])] = self._decoded(row[2])
+                data = copy.deepcopy(before)
+                result = mutator(data)
+                data["updatedAt"] = now_iso()
+                self._validate_scoped(connection, data)
+                self._write_changes_on(connection, before, data)
+                connection.commit()
+                return copy.deepcopy(data), copy.deepcopy(result)
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def _mutate_collection(self, *, meetings, requests, mutator, request_id=None, include_events=False):
+        self._initialize()
+        with self._lock:
+            connection = connect_sqlite(self.path)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                before = self._read_collection_scope(connection, meetings=meetings, requests=requests)
+                if request_id is not None:
+                    before["requests"] = {
+                        key: value for key, value in before["requests"].items() if key == request_id
+                    }
+                if include_events:
+                    for meeting_id in before["meetings"]:
+                        before["events"][meeting_id] = [
+                            self._decoded(row[0]) for row in connection.execute(
+                                "SELECT payload_json FROM meeting_events WHERE meeting_id=? ORDER BY position", (meeting_id,),
+                            )
+                        ]
+                data = copy.deepcopy(before)
+                result = mutator(data)
+                data["updatedAt"] = now_iso()
+                self._validate_scoped(connection, data)
+                self._write_changes_on(connection, before, data)
+                connection.commit()
+                return copy.deepcopy(data), copy.deepcopy(result)
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def _mutate_scoped(self, *, meeting_id: str | None, request_id: str | None, mutator) -> tuple[dict[str, Any], Any]:
+        self._initialize()
+        with self._lock:
+            connection = connect_sqlite(self.path)
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                before = self._read_rows(connection, meeting_id=meeting_id, request_id=request_id)
+                data = copy.deepcopy(before)
+                result = mutator(data)
+                data["updatedAt"] = now_iso()
+                self._validate_scoped(connection, data)
+                self._write_changes_on(connection, before, data)
+                connection.commit()
+                return copy.deepcopy(data), copy.deepcopy(result)
+            except Exception:
+                connection.rollback()
+                raise
+            finally:
+                connection.close()
+
+    def _write_changes_on(self, connection: sqlite3.Connection, previous: Mapping[str, Any], data: Mapping[str, Any]) -> None:
+        self._sync_map(connection, "meetings", "id", previous["meetings"], data["meetings"])
+        self._sync_events(connection, previous["events"], data["events"])
+        self._sync_map(connection, "meeting_requests", "id", previous["requests"], data["requests"])
+        self._sync_occupancy(connection, previous["occupancy"], data["occupancy"])
+        self._sync_idempotency(connection, previous["idempotency"], data["idempotency"])
+        connection.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('updated_at',?)", (str(data["updatedAt"]),))
+
+    def _validate_scoped(self, connection: sqlite3.Connection, data: Mapping[str, Any]) -> None:
+        for meeting_id, meeting in data["meetings"].items():
+            if not isinstance(meeting, dict) or str(meeting.get("id") or meeting_id) != str(meeting_id):
+                raise MeetingStoreError("Meeting identity conflict", code="meeting_store_conflict")
+            if str(meeting.get("stage") or meeting.get("phase") or "draft") not in MEETING_PHASES:
+                raise MeetingStoreError("Unsupported Meeting phase", code="meeting_store_conflict")
+            if not isinstance(meeting.get("participants", []), list):
+                raise MeetingStoreError("Meeting participants must be a list", code="meeting_store_conflict")
+        for request_id, request in data["requests"].items():
+            if not isinstance(request, dict) or str(request.get("id") or request_id) != str(request_id):
+                raise MeetingStoreError("Meeting request identity conflict", code="meeting_store_conflict")
+            if str(request.get("status") or "pending") not in REQUEST_STATUSES:
+                raise MeetingStoreError("Unsupported Meeting request status", code="meeting_store_conflict")
+            conversion = request.get("conversion") or {}
+            if not isinstance(conversion, dict):
+                raise MeetingStoreError("Meeting request conversion must be an object", code="meeting_store_conflict")
+            linked = str(conversion.get("meetingId") or "")
+            exists = linked in data["meetings"] or (
+                linked and connection.execute("SELECT 1 FROM meetings WHERE id=?", (linked,)).fetchone() is not None
             )
-        self.update(mutate)
+            if linked and not exists:
+                raise MeetingStoreError("Meeting request references a missing Meeting", code="meeting_store_conflict")
+        for agent_id, meeting_id in data["occupancy"].items():
+            meeting = data["meetings"].get(meeting_id)
+            if meeting is None:
+                row = connection.execute("SELECT payload_json FROM meetings WHERE id=?", (str(meeting_id),)).fetchone()
+                meeting = self._decoded(row[0]) if row else None
+            if not isinstance(meeting, dict):
+                raise MeetingStoreError("Occupancy references a missing Meeting", code="meeting_store_conflict")
+            phase = str(meeting.get("stage") or meeting.get("phase") or "draft")
+            if phase in TERMINAL_PHASES or agent_id not in (meeting.get("participants") or []):
+                raise MeetingStoreError("Occupancy is incompatible with Meeting state", code="meeting_store_conflict")
+        for meeting_id, events in data["events"].items():
+            exists = meeting_id in data["meetings"] or connection.execute(
+                "SELECT 1 FROM meetings WHERE id=?", (str(meeting_id),),
+            ).fetchone() is not None
+            if not exists or not isinstance(events, list):
+                raise MeetingStoreError("Meeting events have invalid ownership", code="meeting_store_conflict")
 
-    def request_view(self) -> dict[str, Any]:
-        data = self.snapshot()
-        return {
-            "requests": data["requests"], "idempotency": data["idempotency"]["requests"],
-            "updatedAt": data["updatedAt"],
-        }
+    def _write_changes(self, previous: Mapping[str, Any], data: Mapping[str, Any]) -> None:
+        if not self.path.exists() and self._legacy_data_exists():
+            raise MeetingStoreError("Meeting store migration is required", code="meeting_store_migration_required")
+        self._initialize()
+        connection = connect_sqlite(self.path)
+        try:
+            connection.execute("BEGIN IMMEDIATE")
+            self._write_changes_on(connection, previous, data)
+            connection.execute("INSERT OR REPLACE INTO metadata(key,value) VALUES('migration_json',?)", (self._json(data["migration"]),))
+            connection.commit()
+        except Exception:
+            connection.rollback()
+            raise
+        finally:
+            connection.close()
 
-    def replace_requests(self, legacy: Mapping[str, Any]) -> None:
-        def mutate(data):
-            data["requests"] = copy.deepcopy(legacy.get("requests") if isinstance(legacy.get("requests"), dict) else {})
-            data["idempotency"]["requests"] = copy.deepcopy(
-                legacy.get("idempotency") if isinstance(legacy.get("idempotency"), dict) else {},
-            )
-        self.update(mutate)
+    def _sync_map(self, connection, table, key_column, old, new):
+        for key in old.keys() - new.keys():
+            connection.execute(f"DELETE FROM {table} WHERE {key_column}=?", (str(key),))
+        for key, value in new.items():
+            if key not in old or old[key] != value:
+                connection.execute(
+                    f"INSERT INTO {table}({key_column},payload_json) VALUES(?,?) "
+                    f"ON CONFLICT({key_column}) DO UPDATE SET payload_json=excluded.payload_json",
+                    (str(key), self._json(value)),
+                )
+
+    def _sync_events(self, connection, old, new):
+        for meeting_id in old.keys() - new.keys():
+            connection.execute("DELETE FROM meeting_event_streams WHERE meeting_id=?", (str(meeting_id),))
+            connection.execute("DELETE FROM meeting_events WHERE meeting_id=?", (str(meeting_id),))
+        for meeting_id, events in new.items():
+            prior = old.get(meeting_id, [])
+            if meeting_id not in old:
+                connection.execute("INSERT OR IGNORE INTO meeting_event_streams(meeting_id) VALUES(?)", (str(meeting_id),))
+            if prior == events:
+                continue
+            prefix = len(prior) if len(events) >= len(prior) and events[:len(prior)] == prior else 0
+            if not prefix:
+                connection.execute("DELETE FROM meeting_events WHERE meeting_id=?", (str(meeting_id),))
+            for position, event in enumerate(events[prefix:], start=prefix):
+                connection.execute(
+                    "INSERT OR REPLACE INTO meeting_events(meeting_id,position,payload_json) VALUES(?,?,?)",
+                    (str(meeting_id), position, self._json(event)),
+                )
+            if len(events) < len(prior):
+                connection.execute("DELETE FROM meeting_events WHERE meeting_id=? AND position>=?", (str(meeting_id), len(events)))
+
+    def _sync_occupancy(self, connection, old, new):
+        for agent_id in old.keys() - new.keys():
+            connection.execute("DELETE FROM occupancy WHERE agent_id=?", (str(agent_id),))
+        for agent_id, meeting_id in new.items():
+            if old.get(agent_id) != meeting_id:
+                connection.execute(
+                    "INSERT INTO occupancy(agent_id,meeting_id) VALUES(?,?) ON CONFLICT(agent_id) DO UPDATE SET meeting_id=excluded.meeting_id",
+                    (str(agent_id), str(meeting_id)),
+                )
+
+    def _sync_idempotency(self, connection, old, new):
+        namespaces = set(old) | set(new)
+        for namespace in namespaces:
+            old_values, new_values = old.get(namespace, {}), new.get(namespace, {})
+            for key in old_values.keys() - new_values.keys():
+                connection.execute("DELETE FROM idempotency WHERE namespace=? AND item_key=?", (namespace, str(key)))
+            for key, value in new_values.items():
+                if key not in old_values or old_values[key] != value:
+                    connection.execute(
+                        "INSERT INTO idempotency(namespace,item_key,payload_json) VALUES(?,?,?) "
+                        "ON CONFLICT(namespace,item_key) DO UPDATE SET payload_json=excluded.payload_json",
+                        (namespace, str(key), self._json(value)),
+                    )
+
+    def import_store(self, data: Mapping[str, Any]) -> None:
+        validated = normalize_store(data, strict=True)
+        with self._lock:
+            if self.path.exists():
+                existing = self._read_disk()
+                if existing == validated:
+                    return
+                raise MeetingStoreError("Meeting database already contains different data", code="meeting_store_conflict")
+            self._initialize()
+            self._write_changes(empty_store(), validated)
 
 
 def source_digest(executable_bytes: bytes, request_bytes: bytes) -> str:

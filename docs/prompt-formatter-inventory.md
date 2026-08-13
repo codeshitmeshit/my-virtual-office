@@ -45,6 +45,40 @@ top-level section.
 - Output requirements belong under the `output` key. Do not prepend a separate
   output-contract block.
 
+## Source index
+
+| Prompt family | Owning source | Main callers |
+|---|---|---|
+| Provider/Agent delivery and conversation recovery | `app/services/agent_platform_prompt_formatting.py` | `app/server.py`, `vo_agent_communication.py`, `provider_conversations.py` |
+| Generic business XML envelope | `app/services/business_prompt_bridge.py` and `bridge_input_output_formatting.py` | All business prompt modules below |
+| Meeting advisory, participant/targeted turn, moderator result | `app/services/meeting_prompt_documents.py` | Meeting lifecycle handlers in `app/server.py` |
+| Project execution, review, rework, checklist | `app/services/project_execution_prompt_formatting.py` | `execution_lifecycle.py`, review and project execution services |
+| Legacy workflow task/review/rework | `app/services/workflow_prompt_formatting.py` | `app/server_services/workflow.py` and workflow entrypoints |
+| Project completion report | `app/services/project_completion_report_prompt.py` | `project_completion_report_generation.py` |
+| Archive refinement/context | `app/services/archive_prompt_documents.py` | Archive services and `app/server.py` |
+| HR assessment/introduction/repair | `app/services/hr_prompt_documents.py`, `hr_assessments.py`, `hr_directory.py` | HR services |
+| MCP and skill-library organization | `app/services/mcp_usage_guide_organization.py`, `skill_library_organization.py` | Organization run workers |
+| Feishu topic context | `app/services/feishu_notification_topics.py` | Notification-topic dispatch |
+| Human-decision continuation | `human_decision_chat_continuation.py`, `human_decision_meeting_continuation.py` | Continuation dispatcher |
+| Workspace document instructions | `app/services/agent_workspace_documents.py` | Agent workspace operations |
+
+Search for provider-visible construction with:
+
+```bash
+rg -n 'render_business_prompt|render_.*prompt|build_.*prompt|def .*_prompt' app --glob '*.py'
+```
+
+Every new or touched provider-visible prompt must have one XML root, put dynamic material in formatter-owned untrusted/JSON boundaries, and keep `output` last. Do not concatenate independently rendered XML prompt documents. Meeting targeted questions previously did this; they now render as a section of the single `meeting_turn_prompt`, reducing duplicated envelope/schema/context tokens.
+
+## Optimization checklist
+
+- Prefer incremental context or a bounded recent window over replaying a full transcript.
+- Include one output schema and one output instruction; avoid restating the same contract in prose.
+- Pass only fields used by the decision. In particular, avoid full project, task, provider, or Meeting records when an allowlisted projection is enough.
+- Truncate before rendering so escaped output cannot exceed the provider budget unexpectedly.
+- Keep static rules trusted and cacheable; keep user, transcript, tool, file, and provider data explicitly untrusted.
+- Add a test for root count, escaping, required sections, output-last ordering, and the configured prompt-character budget.
+
 ## Verification Notes
 
 - Python core prompt suite: `179 passed` across formatter, static prompt checks,

@@ -183,7 +183,6 @@ function createEnvironment() {
     en: {
       settings_modal_connections_agents: 'Connections & Agents',
       settings_modal_office: 'Office',
-      settings_modal_weather: 'Weather',
       settings_modal_display: 'Display',
       settings_modal_tools_browser: 'Tools & Browser',
       settings_modal_notifications: 'Notifications',
@@ -194,7 +193,6 @@ function createEnvironment() {
     zh: {
       settings_modal_connections_agents: '连接与 Agent',
       settings_modal_office: '办公室',
-      settings_modal_weather: '天气',
       settings_modal_display: '显示',
       settings_modal_tools_browser: '工具与浏览器',
       settings_modal_notifications: '通知',
@@ -238,8 +236,8 @@ function main() {
   assert(env.api, 'module should expose a focused VOSettingsModal API');
   assert.deepStrictEqual(
     Array.from(env.api.CATEGORY_DEFINITIONS, (category) => category.id),
-    ['connections-agents', 'office', 'weather', 'display', 'tools-browser', 'notifications', 'storage', 'advanced'],
-    'the modal should expose Weather as an independent task category',
+    ['connections-agents', 'office', 'display', 'tools-browser', 'notifications', 'storage', 'advanced'],
+    'the modal should group weather settings with the office category',
   );
 
   const dialog = env.panel.querySelector('.settings-modal-dialog');
@@ -266,14 +264,10 @@ function main() {
     'Feishu notifications and Feishu chat must remain separate cards in the notification category',
   );
   const officePanel = env.panel.querySelector('[data-settings-category-panel="office"]');
-  const weatherPanel = env.panel.querySelector('[data-settings-category-panel="weather"]');
   assert(officePanel.querySelector('#mm-office-name'), 'Office should retain office identity settings');
+  assert(officePanel.querySelector('#mm-show-weather'), 'Office should own weather location and display controls');
   assert(officePanel.querySelector('#mm-weather-provider'), 'Office should own the weather provider integration');
-  assert.strictEqual(officePanel.querySelector('#mm-show-weather'), null, 'Office must not own weather controls');
-  assert(weatherPanel.querySelector('#mm-show-weather'), 'Weather should own its display toggle');
-  assert.strictEqual(weatherPanel.querySelector('#mm-weather-provider'), null, 'Weather should not duplicate the provider integration');
-  assert.strictEqual(weatherPanel.querySelectorAll('.mm-section').length, 1, 'Weather should render location as its own card');
-  assert.strictEqual(officePanel.querySelectorAll('.mm-section').length, 2, 'Office should render identity and provider as independent cards');
+  assert.strictEqual(officePanel.querySelectorAll('.mm-section').length, 3, 'Office should render identity, weather location, and provider as independent cards');
 
   const originalInput = env.document.getElementById('mm-oc-path');
   originalInput.value = '/edited/path';

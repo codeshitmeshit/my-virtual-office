@@ -231,6 +231,7 @@ class DashboardRealtimeStream:
     requests_loader: Callable[[], list[Any]]
     projects_loader: Callable[[], list[Any]] | None = None
     decisions_loader: Callable[[], JsonDict] | None = None
+    snapshot_feed: Any | None = None
     interval_sec: float = 1.0
     heartbeat_sec: float = 15.0
 
@@ -261,6 +262,10 @@ class DashboardRealtimeStream:
         handler.send_header("X-Accel-Buffering", "no")
         handler.end_headers()
 
+        if self.snapshot_feed is not None:
+            self._stream_shared(handler)
+            return
+
         previous: JsonDict | None = None
         last_heartbeat = 0.0
         while True:
@@ -279,6 +284,37 @@ class DashboardRealtimeStream:
             except (BrokenPipeError, ConnectionResetError, OSError):
                 return
             except Exception as exc:  # keep the stream self-reporting instead of silently dying
+                if not self._send_event(handler, "dashboard.error", {"ts": int(time.time() * 1000), "error": str(exc)}):
+                    return
+                time.sleep(max(1.0, self.interval_sec))
+
+    def _stream_shared(self, handler: Any) -> None:
+        """Stream process-shared snapshots without per-client repository polling."""
+        previous: JsonDict | None = None
+        revision = 0
+        last_heartbeat = 0.0
+        while True:
+            try:
+                if previous is None:
+                    revision, current = self.snapshot_feed.current()
+                else:
+                    revision, current = self.snapshot_feed.wait_after(
+                        revision,
+                        timeout=max(0.2, self.heartbeat_sec),
+                    )
+                if current is not None:
+                    for event_name, payload in diff_dashboard_events(previous, current):
+                        if not self._send_event(handler, event_name, payload):
+                            return
+                    previous = current
+                now = time.time()
+                if now - last_heartbeat >= self.heartbeat_sec:
+                    if not self._send_event(handler, "dashboard.heartbeat", {"ts": int(now * 1000)}):
+                        return
+                    last_heartbeat = now
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                return
+            except Exception as exc:
                 if not self._send_event(handler, "dashboard.error", {"ts": int(time.time() * 1000), "error": str(exc)}):
                     return
                 time.sleep(max(1.0, self.interval_sec))

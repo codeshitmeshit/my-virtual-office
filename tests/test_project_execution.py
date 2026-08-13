@@ -1427,7 +1427,7 @@ def test_project_reset_requires_confirmation_and_preserves_history_order():
             stored["tasks"][2]["columnId"] = done
             stored["scheduledCronHistory"] = [{"id": "cron-history-1", "status": "started"}]
             server._save_projects(data)
-            server._meeting_domain_repository().update(lambda meeting_data: meeting_data["requests"].update({
+            server._meeting_domain_repository().create_request(lambda meeting_data: meeting_data["requests"].update({
                 "req-1": {
                     "id": "req-1",
                     "status": "pending",
@@ -1450,7 +1450,7 @@ def test_project_reset_requires_confirmation_and_preserves_history_order():
             assert result["resetTaskCount"] == 2
             assert result["resetMeetingRequestCount"] == 1
             fresh = next(p for p in server._load_projects()["projects"] if p["id"] == project["id"])
-            reset_request = server._meeting_domain_repository().snapshot()["requests"]["req-1"]
+            reset_request = server._meeting_domain_repository().get_request("req-1")
             assert reset_request["status"] == "pending"
             assert reset_request["taskBlocker"]["status"] == "cleared"
             assert reset_request["taskBlocker"]["resolvedAt"]

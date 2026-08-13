@@ -1,12 +1,14 @@
 import urllib.parse
+import sys
 
 from .http import JsonBodyError, read_json, send_json
 
 
 def _meetings_service():
-    from server_services import meetings
-    meetings._hydrate()
-    return meetings
+    server = sys.modules.get("server") or sys.modules.get("__main__")
+    if server is None:
+        raise RuntimeError("Meeting routes require the server module")
+    return server
 
 
 def _body(handler):

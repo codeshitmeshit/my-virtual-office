@@ -3,6 +3,7 @@
 
     var STORAGE_KEY = 'voManagementToken';
     var PROBE_PATH = '/api/management/session';
+    var PROBE_TIMEOUT_MS = 8000;
     var gatePromise = null;
     var gateResolve = null;
     var elements = null;
@@ -18,6 +19,7 @@
         management_gate_submit: { en: 'Verify and enter', zh: '验证并进入' },
         management_gate_validating: { en: 'Verifying...', zh: '正在验证…' },
         management_gate_invalid: { en: 'The management token is invalid.', zh: '管理令牌无效，请检查后重试。' },
+        management_gate_timeout: { en: 'Verification timed out. Check the server connection and try again.', zh: '验证超时，请检查服务连接后重试。' },
         management_gate_network_error: { en: 'Could not verify access. Check the server connection and try again.', zh: '暂时无法验证权限，请检查服务连接后重试。' },
         management_token_placeholder: { en: 'Enter management token', zh: '请输入管理令牌' }
     };
@@ -183,12 +185,29 @@
     async function probe(token) {
         var headers = new Headers();
         if (token) headers.set('X-VO-Management-Token', token);
-        var response = await root.fetch(PROBE_PATH, {
+        var controller = typeof AbortController === 'function' ? new AbortController() : null;
+        var timeoutId = null;
+        var timeout = new Promise(function (_resolve, reject) {
+            timeoutId = setTimeout(function () {
+                if (controller) controller.abort();
+                var error = new Error('management_session_probe_timeout');
+                error.code = 'management_session_probe_timeout';
+                reject(error);
+            }, PROBE_TIMEOUT_MS);
+        });
+        var requestOptions = {
             method: 'GET',
             headers: headers,
             cache: 'no-store',
             credentials: 'same-origin'
-        });
+        };
+        if (controller) requestOptions.signal = controller.signal;
+        var response;
+        try {
+            response = await Promise.race([root.fetch(PROBE_PATH, requestOptions), timeout]);
+        } finally {
+            if (timeoutId !== null) clearTimeout(timeoutId);
+        }
         if (response.ok) return { authenticated: true, response: response };
         var payload = null;
         try { payload = await response.clone().json(); } catch (_error) {}
@@ -222,8 +241,10 @@
             if (result.authenticated && token) return complete(token);
             if (token) sessionStorage.removeItem(STORAGE_KEY);
             showLogin(result.invalid ? 'management_gate_invalid' : '');
-        } catch (_error) {
-            showLogin('management_gate_network_error');
+        } catch (error) {
+            showLogin(error && error.code === 'management_session_probe_timeout'
+                ? 'management_gate_timeout'
+                : 'management_gate_network_error');
         }
         return '';
     }
@@ -240,8 +261,10 @@
             }
             sessionStorage.removeItem(STORAGE_KEY);
             showLogin('management_gate_invalid');
-        } catch (_error) {
-            showLogin('management_gate_network_error');
+        } catch (error) {
+            showLogin(error && error.code === 'management_session_probe_timeout'
+                ? 'management_gate_timeout'
+                : 'management_gate_network_error');
         }
     }
 

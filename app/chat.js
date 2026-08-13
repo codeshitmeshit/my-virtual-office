@@ -599,7 +599,9 @@
     }
 
     isVisibleForPolling() {
-      return this.isPrimary || this.root.classList.contains('open');
+      const sessionReady = !window.VOManagementSessionReadiness
+        || window.VOManagementSessionReadiness.isAuthenticated();
+      return sessionReady && (this.isPrimary || this.root.classList.contains('open'));
     }
 
     async fetchContextUsage() {
@@ -5613,6 +5615,15 @@
   chatBtn.addEventListener('click', () => {
     setPrimaryPanelOpen(!primaryWindow.root.classList.contains('open'));
   });
+
+  if (window.VOManagementSessionReadiness) {
+    window.VOManagementSessionReadiness.whenAuthenticated(() => {
+      for (const windowInstance of chatWindowsByRoot.values()) {
+        windowInstance.updateProviderEventSource();
+        windowInstance.updateFeishuEventSource();
+      }
+    });
+  }
 
   const chatUrlParams = new URLSearchParams(window.location.search);
   const chatViewParam = chatUrlParams.get('chatView');

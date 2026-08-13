@@ -79,7 +79,7 @@ def test_phase5_busy_agent_requires_conflict_aware_creation_and_advisory_is_read
             assert conflict["riskLevel"] == "medium"
             assert conflict["advisory"]["status"] == "completed"
             assert conflict["advisory"]["recommendation"] == "wait"
-            assert server._load_exec_meeting_store()["occupancy"] == {}
+            assert server._meeting_domain_repository().list_occupancy() == {}
 
             run = server._handle_executable_meeting_run(meeting["id"], {})
             assert run["_status"] == 409
@@ -103,7 +103,7 @@ def test_phase5_reservation_does_not_lock_agent_and_refresh_rechecks_conflict():
             assert reserved["ok"] is True
             assert reserved["meeting"]["stage"] == "conflict"
             assert reserved["meeting"]["reservation"]["busy-agent"]["status"] == "scheduled"
-            assert server._load_exec_meeting_store()["occupancy"] == {}
+            assert server._meeting_domain_repository().list_occupancy() == {}
 
             refreshed = server._handle_executable_meeting_conflict_action(meeting["id"], {
                 "action": "refresh",
@@ -138,7 +138,7 @@ def test_phase5_force_join_requires_confirmation_snapshots_work_and_resumes_once
             meeting = forced["meeting"]
             assert meeting["stage"] == "preparing"
             assert meeting["originalWork"]["busy-agent"]["pauseState"] == "logical_paused"
-            assert server._load_exec_meeting_store()["occupancy"]["busy-agent"] == meeting["id"]
+            assert server._meeting_domain_repository().list_occupancy()["busy-agent"] == meeting["id"]
 
             completed = server._handle_executable_meeting_transition(meeting["id"], {
                 "stage": "cancelled",
@@ -190,10 +190,10 @@ def test_phase5_force_join_transfers_existing_meeting_occupancy():
             assert meeting["stage"] == "preparing"
             assert all(c.get("status") != "open" for c in meeting["conflicts"])
             assert meeting["participantState"]["busy-agent"]["forcedJoin"] is True
-            store = server._load_exec_meeting_store()
-            assert store["occupancy"]["busy-agent"] == meeting["id"]
-            assert store["occupancy"]["second-reviewer"] == meeting["id"]
-            assert store["meetings"][first["id"]]["stage"] == "preparing"
+            occupancy = server._meeting_domain_repository().list_occupancy()
+            assert occupancy["busy-agent"] == meeting["id"]
+            assert occupancy["second-reviewer"] == meeting["id"]
+            assert server._meeting_domain_repository().get_meeting(first["id"])["stage"] == "preparing"
         finally:
             restore_store(old)
 

@@ -67,7 +67,8 @@ assert.ok(
 
 assert.ok(
   dashboardRealtimeJs.includes('function connectAfterStartup()')
-    && dashboardRealtimeJs.includes('setTimeout(connect, 1800);'),
+    && dashboardRealtimeJs.includes('setTimeout(connect, 1800);')
+    && dashboardRealtimeJs.includes('VOManagementSessionReadiness.whenAuthenticated'),
   'dashboard realtime connection should be delayed until after startup'
 );
 

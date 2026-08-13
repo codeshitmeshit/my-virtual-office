@@ -131,7 +131,7 @@ def test_phase4_request_quality_gate_and_pending_safety():
 
             active_ids = {m["id"] for m in server._meeting_active_projection()}
             assert req["id"] not in active_ids
-            assert server._load_exec_meeting_store()["occupancy"] == {}
+            assert server._meeting_domain_repository().list_occupancy() == {}
 
             aggregate = server._meeting_request_list_filtered("status=pending")
             assert aggregate["pendingCount"] == 1
@@ -483,8 +483,8 @@ def test_phase4_project_commit_failure_records_and_retries_forward_reconciliatio
                 data["occupancy"] = {
                     agent: owner for agent, owner in data["occupancy"].items() if owner != meeting_id
                 }
-            server._meeting_domain_repository().update(finish)
-            meeting = server._meeting_domain_repository().snapshot()["meetings"][meeting_id]
+            server._meeting_domain_repository().mutate_meeting(meeting_id, finish)
+            meeting = server._meeting_domain_repository().get_meeting(meeting_id)
             with mock.patch.object(server._PROJECT_REPOSITORY, "update", side_effect=server.ProjectConflictError("race")):
                 failed = server._project_execution_apply_meeting_result(meeting)
             assert failed["code"] == "project_meeting_commit_failed"

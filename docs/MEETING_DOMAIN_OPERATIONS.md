@@ -2,7 +2,7 @@
 
 ## Authority and files
 
-`<status-dir>/meeting-domain.json` is the only runtime authority for executable Meetings, events, occupancy, AI Meeting requests, callback replay, action-item idempotency and notification intents. `executable-meetings.json` and `meeting-requests.json` are migration/rollback inputs only and must never be used as parallel runtime authorities after cutover.
+`<status-dir>/meeting-domain.sqlite3` is the only runtime authority for executable Meetings, events, occupancy, AI Meeting requests, callback replay, action-item idempotency and notification intents. `meeting-domain.json`, `executable-meetings.json` and `meeting-requests.json` are offline migration/rollback inputs only. Runtime has no JSON fallback, dual read, full-store `snapshot/update`, or legacy load/save compatibility path.
 
 Startup states:
 
@@ -18,16 +18,16 @@ The supported deployment has exactly one server writer. The active-process lock 
 Stop the server and all Meeting mutations first. Always start with dry-run:
 
 ```bash
-.venv/bin/python scripts/migrate_meeting_store.py --status-dir /absolute/status/dir
+.venv/bin/python scripts/migrate_performance_stores.py --status-dir /absolute/status/dir
 ```
 
 Review counts, `sourceDigest`, every `relationshipChecks.*.status`, destination and source byte counts. Apply only after dry-run passes:
 
 ```bash
-.venv/bin/python scripts/migrate_meeting_store.py --status-dir /absolute/status/dir --apply
+.venv/bin/python scripts/migrate_performance_stores.py --status-dir /absolute/status/dir --apply
 ```
 
-Apply creates byte-for-byte timestamped backups of both legacy inputs, validates a candidate, writes the unified Store atomically, reloads it and writes `meeting-store-migration-report.json`. Repeating the same apply must return `already_migrated` without new backups or replacement. A changed source digest, symlink, malformed input, dangling request link, conflicting occupancy, running server, replace/fsync failure or unknown schema fails closed.
+Apply creates byte-for-byte timestamped backups of every present legacy input, validates a candidate SQLite database, runs `integrity_check`, installs it atomically and writes `performance-store-migration-report.json`. Repeating the same apply must return `already_migrated` without new backups or replacement. A changed source digest, symlink, malformed input, dangling request link, conflicting occupancy, running server, replace/fsync failure or unknown schema fails closed.
 
 Do not edit or delete the legacy inputs between dry-run and apply. Do not use a force/last-writer-wins merge.
 
@@ -46,7 +46,7 @@ Agent calls, Feishu delivery and other external effects are not reversible. Reco
 
 ## Locks, compare tokens and recovery
 
-- Repository mutation is short and atomic; Agent/notification/callback/Project work runs outside it.
+- Repository mutation is short and atomic. Normal commands load only one Meeting/request and its owned rows; collection transactions are explicit for creation, occupancy reconciliation and timeout sweeping. Agent/notification/callback/Project work runs outside it.
 - Agent completion commits only when Meeting ID, phase, version, event sequence, call ID and participant still match.
 - Project results verify request, Meeting, task, attempt and blocker linkage before commit.
 - Action-item Project projection dedupes by `(meetingId, actionItemId)` and Meeting commit compares the draft snapshot.

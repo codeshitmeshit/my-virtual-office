@@ -1,6 +1,7 @@
 # My Virtual Office Fork
 
 > This is the optional English companion document. The primary README is Chinese: [README.md](README.md).
+> Documentation baseline: 2026-08-10. See [docs/README.md](docs/README.md) for the maintained documentation map.
 
 This repository is a second-development fork of the open-source project [eliautobot/my-virtual-office](https://github.com/eliautobot/my-virtual-office). It keeps the original pixel-art office idea and extends it into a local-first AI agent control surface for OpenClaw, Hermes, Codex, and other local agent runtimes or CLI harnesses.
 
@@ -13,11 +14,13 @@ Thanks to the original project author and community for the foundation. This for
 This fork is a local AI team console:
 
 - Visualize agent presence and activity in a pixel-art office.
-- Chat with OpenClaw, Hermes, and Codex agents from one UI.
+- Chat with OpenClaw, Hermes, Codex, and Claude Code agents from one UI.
 - Route cross-platform agent communication through Virtual Office.
 - Manage projects, tasks, reviews, acceptance, and artifacts.
 - Observe Codex live bridge turns, reasoning, tool/file activity, approvals, cancellation, and compaction.
 - Manage meetings, skills, agent workspaces, browser view, SMS, and local metrics.
+- Route user choices through one durable HUMAN DECISIONS center.
+- Manage single-user Personal Assets with optional local-first Alibaba Cloud OSS weak synchronization.
 
 ## Implemented Areas
 
@@ -35,6 +38,7 @@ This fork is a local AI team console:
 - OpenClaw remains a first-class provider through the existing gateway/session paths.
 - Hermes profiles are discovered through the local Hermes CLI.
 - Codex can be exposed as `codex-local` through the local Codex harness.
+- Claude Code can be exposed as `claude-code-local` through its native stream-json CLI protocol.
 - Cross-provider communication is routed through `/api/agent-platform-communications/send`.
 - Provider activity is normalized into the office agent list, presence state, chat bubbles, and logs.
 
@@ -65,7 +69,7 @@ The project board supports durable project work:
 - Workspace validation and dirty-workspace confirmation.
 - Project-level and task-level execution.
 - Single-task and continuous project execution modes.
-- OpenClaw, Hermes, and Codex provider routing.
+- OpenClaw, Hermes, Codex, and Claude Code provider routing.
 - Separate executor and independent reviewer roles.
 - Reviewer-skip confirmation when explicitly allowed.
 - Cancellation, failure evidence, blocked states, review, rework, user acceptance, and rejection.
@@ -100,6 +104,16 @@ Meeting for AI safety boundaries:
 - Copy library skills into individual agent workspaces.
 - Agent workspace panel with overview, bulletin, tasks, files, skills, notes, and settings.
 
+### HUMAN DECISIONS And Personal Assets
+
+- HUMAN DECISIONS is the shared user-choice boundary for chat, project execution, meetings, and sensitive-data authorization.
+- Decisions survive browser closure and service restart, then resume the original Agent and workflow at most once.
+- Personal Assets stores profile, career, interests, chat preferences, office goals, and extensible entries for this single-user deployment.
+- Agents receive a value-free profile outline by default; sensitive values require explicit HUMAN DECISIONS authorization.
+- Optional Alibaba Cloud OSS synchronization is asynchronous and local-first. Cloud failure never reverses a successful local edit, and divergent snapshots require an explicit conflict choice.
+
+See [Personal Assets and OSS](docs/PERSONAL_ASSETS_AND_OSS.en.md) and [HUMAN DECISIONS](docs/HUMAN_DECISIONS.en.md).
+
 ### Optional Panels
 
 - Chat with Markdown, attachments, image preview, and Codex reasoning summary.
@@ -126,7 +140,7 @@ Project cron binding connects the global OpenClaw Gateway cron scheduler to Virt
 > **Deployment boundary: the Virtual Office application does not support Docker or Docker Compose deployment. It must run directly on the host. The optional Agent Browser image is the repository's only supported use of Docker.**
 
 ```bash
-git clone https://github.com/eliautobot/my-virtual-office.git
+git clone https://github.com/codeshitmeshit/my-virtual-office.git
 cd my-virtual-office
 chmod +x start.sh
 ./start.sh
@@ -224,12 +238,18 @@ Exact commands depend on your local virtual environment and installed dependenci
 
 ## Documentation
 
+- [Documentation center](docs/README.md)
+- [Personal Assets and OSS](docs/PERSONAL_ASSETS_AND_OSS.en.md)
+- [HUMAN DECISIONS](docs/HUMAN_DECISIONS.en.md)
 - [docs/VO_AGENT_USAGE_GUIDE.md](docs/VO_AGENT_USAGE_GUIDE.md)
 - [docs/VIRTUAL_OFFICE_AGENT_TOOLS.md](docs/VIRTUAL_OFFICE_AGENT_TOOLS.md)
 - [docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md)
 - [docs/CODEX_PROVIDER_ADAPTER.md](docs/CODEX_PROVIDER_ADAPTER.md)
 - [docs/HERMES_PROVIDER_ADAPTER.md](docs/HERMES_PROVIDER_ADAPTER.md)
 - [docs/UNIVERSAL-AGENT-HARNESS-SPEC.md](docs/UNIVERSAL-AGENT-HARNESS-SPEC.md)
+- [Performance store and development-machine migration](docs/PERFORMANCE_STORE_MIGRATION.md)
+- [Backend performance report](docs/PERFORMANCE_OPTIMIZATION_REPORT_2026-08-13.md)
+- [Prompt source inventory and optimization rules](docs/prompt-formatter-inventory.md)
 - [docs/SKILLS-LIBRARY-SPEC.md](docs/SKILLS-LIBRARY-SPEC.md)
 - [docs/MULTI-CHAT-ARCHITECTURE.md](docs/MULTI-CHAT-ARCHITECTURE.md)
 
@@ -241,4 +261,4 @@ This repository is not the official upstream release. Fork-specific features, do
 
 ## License
 
-MIT
+GNU Affero General Public License v3.0 or later (`AGPL-3.0-or-later`). If you modify the application and make it available over a network, you must offer the corresponding source code to those users. Commercial licensing is available separately for organizations that need different terms.

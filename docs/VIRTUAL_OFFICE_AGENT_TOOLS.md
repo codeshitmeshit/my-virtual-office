@@ -4,6 +4,7 @@
 
 Status: canonical agent-facing tool index  
 Scope: My Virtual Office Product
+Verified against the current route and skill surface: 2026-08-10
 
 ## Purpose
 
@@ -22,6 +23,8 @@ Virtual Office seeds these skills into the Skills Library so agents can learn ho
 - `VirtualOffice-Browser-Control`
 - `VirtualOffice-Meetings`
 - `VirtualOffice-Projects-and-Tasks`
+
+The current repository also publishes focused runtime skills under `/skills/`, including `vo-human-decision`, `vo-personal-assets`, `vo-personal-context`, `vo-agent-hr`, `vo-project-authoring`, and `vo-project-workflow`. Use [../skills/catalog.md](../skills/catalog.md) as the short source-of-truth list.
 
 Skills Library endpoints:
 
@@ -73,7 +76,7 @@ Codex configuration is product-neutral:
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`: read `$CODEX_HOME/agents/*.toml`, enabled by default
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`: write `$CODEX_HOME/agents/<profile>.toml` when creating VO Codex agents, enabled by default
 - `VO_CODEX_PREFER_APP_SERVER`: native app-server integration on by default
-- `VO_CODEX_SANDBOX`: Codex sandbox mode; the local default is `workspace-write`
+- `VO_CODEX_SANDBOX`: Codex sandbox mode. The checked-in config default is `workspace-write`; `start.sh` writes/exports the trusted-local default `danger-full-access` unless the environment already specifies a value.
 - `VO_CODEX_APPROVAL_POLICY`: Codex approval policy, default `never` so unattended Office runs do not hang on approval prompts
 
 Claude Code configuration is product-neutral:
@@ -110,6 +113,21 @@ Supported routed targets today:
 - OpenClaw agents
 - Hermes profiles
 - Codex harness agent, when `VO_CODEX_ENABLED=1`
+- Claude Code harness agent, when `VO_CLAUDE_CODE_ENABLED=1`
+
+### Human decisions and personal context
+
+Use these surfaces when work must pause for an explicit user choice or when an Agent needs owner context:
+
+- `POST /api/agent/human-decisions`
+- `POST /api/agent/human-decisions/<decisionId>/execution-started`
+- `POST /api/agent/personal-assets/profile-outline`
+- `POST /api/agent/personal-assets/request-context`
+- `POST /api/agent/personal-assets/suggest-change`
+- `POST /api/agent/personal-assets/apply-confirmed-onboarding`
+- `POST /api/agent/personal-assets/feishu-onboarding-form`
+
+Read `skills/vo-human-decision/SKILL.md`, `skills/vo-personal-assets/SKILL.md`, and `skills/vo-personal-context/SKILL.md` before using them. Never substitute a management token for Agent authentication. Sensitive personal-asset reads must be authorized through HUMAN DECISIONS and remain limited to the granted scope.
 
 ### Presence and status
 
@@ -208,7 +226,7 @@ Project execution endpoints are available for assigning board work to provider-b
 - `GET /api/projects/<projectId>/artifacts`
 - `GET /api/projects/<projectId>/artifacts/read?path=<relativePath>`
 
-Project execution currently supports OpenClaw, Hermes, and Codex provider refs, independent reviewer routing, dirty-workspace confirmation, reviewer-skip confirmation, cancellation, acceptance/rejection/blocking, and markdown artifact discovery.
+Project execution currently supports OpenClaw, Hermes, Codex, and Claude Code provider refs, independent reviewer routing, dirty-workspace confirmation, reviewer-skip confirmation, cancellation, acceptance/rejection/blocking, and markdown artifact discovery.
 
 Project-bound scheduled cron endpoints connect the Gateway cron scheduler to project execution:
 

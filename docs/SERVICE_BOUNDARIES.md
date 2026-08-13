@@ -37,7 +37,7 @@ Code under `app/services/` must not import `server.py`, `OfficeHandler`, `http.s
 | `review_acceptance.py` | Review, rework, acceptance, trusted entry context, notification intents and sanitized DTOs | Transport identity discovery or exactly-once external delivery |
 | `artifacts.py` | Workspace containment, association/extension policy, bounded scan/read, secure open/delete and descriptor lifetime | HTTP streaming headers or management-token checks |
 | `project_schedule.py` | Gateway/binding orchestration, dispatch claims/leases, occurrence idempotency, reconciliation and history decisions | Gateway transport implementation or project execution internals |
-| `meeting_repository.py` | Versioned unified Meeting Store, validation, authority gate, atomic replacement, cache and process lock | HTTP, Agent calls, Project mutation or online migration |
+| `meeting_repository.py` | Versioned SQLite Meeting authority, typed row-scoped transactions, relationship validation, authority gate and offline import/export | HTTP, Agent calls, Project mutation, JSON fallback or online migration |
 | `meeting_lifecycle.py` | Meeting creation/transitions, occupancy, conflicts, Agent compare tokens, terminalization and recovery | Transport parsing, Provider implementation or Project persistence |
 | `meeting_requests.py` | Request validation, selection, confirmation/rejection and atomic request-to-Meeting conversion | HTTP, notification delivery or Project Markdown writes |
 | `meeting_action_items.py` | Stable action-item identity, user selection, Project projection and compare commit | Project storage implementation or transport responses |
@@ -66,7 +66,7 @@ Lock order is:
 
 Cron binding file locks are never held while acquiring a project/store lock. Per-Cron operation locks serialize Gateway CRUD and dispatch state for one Cron. Slow Provider, notification, Gateway, Git, and filesystem work must not run while a project lock is held; dependent results re-enter an atomic compare-and-commit boundary.
 
-Meeting-domain commands use the repository process lock and one atomic `meeting-domain.json` replacement. They release that lock before Agent, notification, Feishu and Project work. Cross-domain operations commit Meeting state first, then use Project linkage tokens and bounded forward-reconciliation records. Occupancy release removes an Agent only when the terminating Meeting is still the recorded owner.
+Meeting-domain commands use short SQLite transactions against `meeting-domain.sqlite3`. Normal paths read/write the affected Meeting, request, event stream, occupancy and idempotency rows; they do not hydrate or replace the whole domain. They release the transaction before Agent, notification, Feishu and Project work. Cross-domain operations commit Meeting state first, then use Project linkage tokens and bounded forward-reconciliation records. Occupancy release removes an Agent only when the terminating Meeting is still the recorded owner.
 
 ## Sensitive data
 

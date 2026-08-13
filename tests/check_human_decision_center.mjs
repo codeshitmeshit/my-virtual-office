@@ -431,7 +431,7 @@ assert.match(productionHtml, /human-decision-center\.css\?v=20260803-vo-shell/u,
 assert.match(productionHtml, /human-decision-center-i18n\.js\?v=20260804-i18n/u, 'VO page loads the decision translation adapter before the component');
 assert.match(productionHtml, /human-decision-center\.js\?v=20260804-i18n/u, 'VO page invalidates cached decision component code for i18n');
 assert.match(productionHtml, /human-decision-center-app\.js\?v=20260804-i18n/u, 'VO page loads the versioned production adapter');
-assert.match(productionHtml, /dashboard-realtime\.js\?v=20260803-human-decisions/u, 'VO page invalidates cached realtime code that projects decisions');
+assert.match(productionHtml, /dashboard-realtime\.js\?v=20260810-auth-ready/u, 'VO page invalidates cached realtime code that projects decisions');
 assert.doesNotMatch(productionHtml, /human-decision-center-prototype\.js/u, 'VO page never loads the removable showcase controller');
 assert.equal(fs.existsSync(path.join(here, '../app/human-decision-center-prototype.html')), false, 'approved showcase HTML is removed');
 assert.equal(fs.existsSync(path.join(here, '../app/human-decision-center-prototype.js')), false, 'approved showcase controller is removed');

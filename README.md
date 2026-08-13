@@ -1,6 +1,7 @@
 # My Virtual Office 二开版
 
 > 中文为主文档。英文辅助文档见 [README.en.md](README.en.md)。
+> 当前文档基线：2026-08-10。完整文档导航见 [docs/README.md](docs/README.md)。
 
 My Virtual Office 二开版是一个本地优先的 AI Agent 可视化工作台。它基于原开源项目 [eliautobot/my-virtual-office](https://github.com/eliautobot/my-virtual-office) 二次开发，保留像素风办公室、Agent 状态可视化和浏览器内运行体验，并扩展为一个可以连接 OpenClaw、Hermes、Codex、Claude Code 等本地 Agent/CLI 的统一控制台。
 
@@ -18,6 +19,8 @@ My Virtual Office 二开版是一个本地优先的 AI Agent 可视化工作台�
 - 把项目、任务、评审、验收和产物沉淀到项目看板
 - 观察 Codex / Hermes / Claude Code 任务执行、推理、工具调用、审批、取消和上下文压缩
 - 管理 Agent 工作区、技能库、会议、浏览器、飞书通知、短信和本机监控等能力
+- 通过 HUMAN DECISIONS 统一处理聊天、项目、会议和敏感信息授权中的人工选择
+- 管理单用户个人资产，并可选使用 Alibaba Cloud OSS 做 local-first 弱同步
 
 ## 主要功能
 
@@ -138,6 +141,17 @@ Meeting for AI 的安全边界：
 - Agent workspace 面板：概览、公告、任务、文件、技能、笔记、设置
 - 本地文件和技能以 `VO_STATUS_DIR` / Agent workspace 为持久化来源
 
+### HUMAN DECISIONS 与个人资产
+
+- HUMAN DECISIONS 是聊天、项目执行、会议和敏感信息授权共用的人工决策中心
+- 决策持久化后可跨浏览器关闭或服务重启恢复；完成后最多一次唤醒原 Agent 和原工作流
+- 个人资产保存基本信息、职业方向、兴趣、聊天偏好、办公室目标和扩展条目
+- Agent 只读取不含值的 profile outline；敏感值必须经 HUMAN DECISIONS 明确授权
+- 个人资产本地保存成功不依赖云端，可选启用 Alibaba Cloud OSS 异步弱同步
+- OSS 双端冲突不会自动覆盖，必须选择“保留本地”或“使用云端”
+
+详见 [个人资产与 OSS](docs/PERSONAL_ASSETS_AND_OSS.md) 和 [HUMAN DECISIONS](docs/HUMAN_DECISIONS.md)。
+
 ### 辅助面板
 
 - Chat：支持 Markdown、附件、图片预览、语音输入入口、Provider 运行状态、Codex 推理摘要和 approval 卡片
@@ -181,7 +195,7 @@ Virtual Office 支持通过飞书向人类协作者推送关键工作流通知�
 建议直接使用仓库内的 `start.sh` 启动。该脚本会加载本地配置并进入真实本地运行路径，避免误用回归测试或 demo 模式。
 
 ```bash
-git clone https://github.com/eliautobot/my-virtual-office.git
+git clone https://github.com/codeshitmeshit/my-virtual-office.git
 cd my-virtual-office
 chmod +x start.sh
 ./start.sh
@@ -256,7 +270,7 @@ http://localhost:8090/setup
 | `VO_CODEX_SANDBOX` | `danger-full-access` | 本地启动默认关闭 Codex sandbox；仅适用于受信任机器 |
 | `VO_CODEX_APPROVAL_POLICY` | `never` | 本地启动默认不请求 Codex approval |
 | `VO_CODEX_ROUTE_APPROVALS_THROUGH_VO` | `false` | 是否强制使用 `untrusted` 并把 Codex 审批路由到 VO |
-| `VO_CODEX_INCLUDE_MAIN` | `true` | 是否显示 `codex-main` |
+| `VO_CODEX_INCLUDE_MAIN` | `false` | 是否额外显示合成的 `codex-main`；默认使用可运行的 `codex-local` |
 | `VO_CODEX_INCLUDE_NATIVE_AGENTS` | `true` | 是否发现 `$CODEX_HOME/agents/*.toml` |
 | `VO_CODEX_REGISTER_NATIVE_AGENTS` | `true` | 创建 VO Codex agent 时是否写入 native agent 配置 |
 | `VO_CODEX_BRIDGE_URL` | 空 | 外部 Codex bridge 地址 |
@@ -269,7 +283,7 @@ http://localhost:8090/setup
 | `VO_CLAUDE_CODE_MAIN_WORKSPACE` | `VO_CLAUDE_CODE_WORKSPACE` | `claude-code-main` 和 native subagents 使用的主 workspace |
 | `VO_CLAUDE_CODE_MODEL` | 空 | Claude Code 模型覆盖 |
 | `VO_CLAUDE_CODE_PERMISSION_MODE` | `acceptEdits` | Claude Code permission mode |
-| `VO_CLAUDE_CODE_INCLUDE_MAIN` | `true` | 是否显示 `claude-code-main` |
+| `VO_CLAUDE_CODE_INCLUDE_MAIN` | `false` | 是否额外显示合成的 `claude-code-main`；默认使用可运行的 `claude-code-local` |
 | `VO_CLAUDE_CODE_INCLUDE_NATIVE_AGENTS` | `true` | 是否发现 `$CLAUDE_CONFIG_DIR/agents/*.md` |
 | `VO_CLAUDE_CODE_REGISTER_NATIVE_AGENTS` | `true` | 创建 VO Claude Code agent 时是否写入 native subagent 配置 |
 | `VO_FEISHU_NOTIFICATION_ENABLED` | `true` | 是否启用飞书通知 |
@@ -343,6 +357,10 @@ codex --dangerously-bypass-approvals-and-sandbox app-server --stdio
 - Claude Code / Hermes / provider run 历史和活动记录
 - 项目定时任务绑定：`project-cron-bindings.json`
 - 飞书卡片动作：`feishu-card-actions.jsonl`
+- 人工决策：HUMAN DECISIONS 持久化状态与投递记录
+- 个人资产：`personal-assets.json`
+- OSS 激活配置：`oss-settings.json`（包含凭证，必须保持私有）
+- 个人资产 OSS 弱同步状态与冲突元数据
 - 会议、presence、workflow、workspace 相关状态
 
 不要把包含密钥、聊天记录或工作区内容的本地数据公开发布。
@@ -392,6 +410,9 @@ npm test
 
 ## 文档索引
 
+- 完整导航与文档生命周期：[docs/README.md](docs/README.md)
+- 个人资产与 Alibaba Cloud OSS：[docs/PERSONAL_ASSETS_AND_OSS.md](docs/PERSONAL_ASSETS_AND_OSS.md)
+- HUMAN DECISIONS：[docs/HUMAN_DECISIONS.md](docs/HUMAN_DECISIONS.md)
 - Agent 工具索引：[docs/VIRTUAL_OFFICE_AGENT_TOOLS.md](docs/VIRTUAL_OFFICE_AGENT_TOOLS.md)
 - VO 内 Agent 使用手册：[docs/VO_AGENT_USAGE_GUIDE.md](docs/VO_AGENT_USAGE_GUIDE.md)
 - 跨平台通信：[docs/AGENT_PLATFORM_COMMUNICATIONS.md](docs/AGENT_PLATFORM_COMMUNICATIONS.md)
@@ -402,6 +423,9 @@ npm test
 - Provider 服务架构与运维：[docs/PROVIDER_SERVICE_ARCHITECTURE.md](docs/PROVIDER_SERVICE_ARCHITECTURE.md)
 - Project Service 边界与开发约束：[docs/SERVICE_BOUNDARIES.md](docs/SERVICE_BOUNDARIES.md)
 - Project Task Orchestration 运维与开发契约：[docs/PROJECT_TASK_ORCHESTRATION_OPERATIONS.md](docs/PROJECT_TASK_ORCHESTRATION_OPERATIONS.md)
+- 性能存储与开发机迁移：[docs/PERFORMANCE_STORE_MIGRATION.md](docs/PERFORMANCE_STORE_MIGRATION.md)
+- 后端性能报告：[docs/PERFORMANCE_OPTIMIZATION_REPORT_2026-08-13.md](docs/PERFORMANCE_OPTIMIZATION_REPORT_2026-08-13.md)
+- Prompt 源码索引与优化约束：[docs/prompt-formatter-inventory.md](docs/prompt-formatter-inventory.md)
 - 技能库：[docs/SKILLS-LIBRARY-SPEC.md](docs/SKILLS-LIBRARY-SPEC.md)
 - 多聊天窗口架构：[docs/MULTI-CHAT-ARCHITECTURE.md](docs/MULTI-CHAT-ARCHITECTURE.md)
 - 历史设计记录：[docs/design-history/](docs/design-history/)

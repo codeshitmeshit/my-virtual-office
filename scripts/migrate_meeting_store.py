@@ -21,7 +21,7 @@ if str(APP) not in sys.path:
     sys.path.insert(0, str(APP))
 
 from services.meeting_repository import (
-    LEGACY_EXECUTABLE_FILENAME, LEGACY_REQUEST_FILENAME, UNIFIED_FILENAME,
+    LEGACY_EXECUTABLE_FILENAME, LEGACY_REQUEST_FILENAME, LEGACY_UNIFIED_FILENAME, UNIFIED_FILENAME,
     MeetingDomainRepository, MeetingStoreError, acquire_active_lock, merge_legacy,
     normalize_store, read_regular_no_follow, source_digest,
 )
@@ -147,7 +147,7 @@ def main() -> int:
     try:
         if not all(_inside(status, path) for path in (executable_path, request_path, destination, report_path)):
             raise MeetingStoreError("Migration paths must stay inside status directory", code="meeting_store_migration_path_invalid")
-        protected = (executable_path, request_path, destination, status / "meeting-store-active.lock")
+        protected = (executable_path, request_path, status / LEGACY_UNIFIED_FILENAME, destination, status / "meeting-store-active.lock")
         if report_path in protected or any(
             report_path.exists() and path.exists() and os.path.samefile(report_path, path) for path in protected
         ):
@@ -168,7 +168,7 @@ def main() -> int:
             "destination": destination.name,
         })
         if destination.exists():
-            existing = MeetingDomainRepository(status).snapshot()
+            existing = MeetingDomainRepository(status).export_for_migration()
             if (existing.get("migration") or {}).get("sourceDigest") == digest:
                 if _semantic(existing) != _semantic(merged):
                     raise MeetingStoreError("Existing migration content does not match", code="meeting_store_conflict")
@@ -196,8 +196,8 @@ def main() -> int:
             })
             with tempfile.TemporaryDirectory(prefix="meeting-migration-candidate-", dir=status) as candidate_dir:
                 candidate_repo = MeetingDomainRepository(candidate_dir)
-                candidate_repo._write_atomic(merged)
-                candidate = candidate_repo.snapshot()
+                candidate_repo.import_store(merged)
+                candidate = candidate_repo.export_for_migration()
                 if _semantic(candidate) != _semantic(merged):
                     raise MeetingStoreError("Unified Store candidate verification failed", code="meeting_store_migration_verify_failed")
             prepared = {**report, "status": "prepared", "ok": False}
@@ -206,8 +206,8 @@ def main() -> int:
                 raise MeetingStoreError("Migration source changed before cutover", code="migration_source_changed")
             repository = MeetingDomainRepository(status)
             cutover_started = True
-            repository._write_atomic(merged)
-            written = repository.snapshot()
+            repository.import_store(merged)
+            written = repository.export_for_migration()
             if _semantic(written) != _semantic(merged):
                 destination.unlink(missing_ok=True)
                 raise MeetingStoreError("Unified Store verification failed", code="meeting_store_migration_verify_failed")

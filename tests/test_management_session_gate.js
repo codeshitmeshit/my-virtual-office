@@ -5,6 +5,7 @@ const vm = require('vm');
 
 const root = path.resolve(__dirname, '..');
 const gate = fs.readFileSync(path.join(root, 'app', 'management-session-gate.js'), 'utf8');
+const readiness = fs.readFileSync(path.join(root, 'app', 'management-session-readiness.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'app', 'management-session-gate.css'), 'utf8');
 const index = fs.readFileSync(path.join(root, 'app', 'index.html'), 'utf8');
 const i18n = fs.readFileSync(path.join(root, 'app', 'i18n.js'), 'utf8');
@@ -13,6 +14,7 @@ const server = fs.readFileSync(path.join(root, 'app', 'server.py'), 'utf8');
 assert(index.includes('class="management-session-pending"'));
 assert(index.includes('management-session-gate.css'));
 assert(index.includes('<script src="management-session-gate.js'));
+assert(index.includes('<script src="management-session-readiness.js'));
 assert(gate.includes("PROBE_PATH = '/api/management/session'"));
 assert(gate.includes("sessionStorage.setItem(STORAGE_KEY, token)"));
 assert(!gate.includes('localStorage.setItem'));
@@ -22,6 +24,11 @@ assert(gate.includes("input.type = 'password'"));
 assert(gate.includes('card.tabIndex = -1'));
 assert(gate.includes('if (elements.input.value.trim()) validateInput()'));
 assert(gate.includes("credentials: 'same-origin'"));
+assert(gate.includes('PROBE_TIMEOUT_MS = 8000'));
+assert(gate.includes('Promise.race'));
+assert(gate.includes('controller.abort()'));
+assert(readiness.includes("AUTHENTICATED_EVENT = 'management-session:authenticated'"));
+assert(readiness.includes("classList.contains('management-session-pending')"));
 assert(css.includes('z-index: 20000'));
 assert(css.includes('backdrop-filter: blur(8px)'));
 assert(css.includes('body > :not(#management-session-gate)'));
@@ -36,6 +43,7 @@ for (const locale of ['en.json', 'zh.json']) {
         'management_gate_login_title',
         'management_gate_submit',
         'management_gate_invalid',
+        'management_gate_timeout',
         'management_gate_network_error'
     ]) assert(messages[key], `${locale} missing ${key}`);
 }
@@ -116,7 +124,9 @@ async function testEntryGateAuthenticatesAndStoresTabSession() {
         Response,
         CustomEvent: class CustomEvent {},
         Promise,
-        setTimeout: (fn) => { fn(); return 1; }
+        setTimeout: (fn, delay) => { if (!delay) fn(); return 1; },
+        clearTimeout() {},
+        AbortController
     };
     vm.runInNewContext(gate, context, { filename: 'management-session-gate.js' });
     await new Promise((resolve) => setImmediate(resolve));

@@ -5,6 +5,7 @@
 状态：面向代理的操作指南  
 受众：运行在 My Virtual Office 内部、旁边或通过 My Virtual Office 运行的代理  
 范围：可见的办公室工具、通信、会议、项目、共享浏览器和安全规则
+核对基线：2026-08-10。新的所有者上下文与人工决策流程概览如下；详细契约以聚焦 Skill 和所链接运维文档为准。
 
 ## 目录
 
@@ -28,6 +29,14 @@
 - [18. 安全性与人工确认](#18-safety-and-human-confirmation)
 - [19. 常见工作流](#19-common-workflows)
 - [20. 参数参考](#20-parameter-reference)
+- [当前新增：人工决策与个人资产](#当前新增人工决策与个人资产)
+
+## 当前新增：人工决策与个人资产
+
+- 进展需要用户明确选择时，使用 `skills/vo-human-decision/SKILL.md`。决策服务会持久暂停并恢复聊天、项目或会议工作；不得用普通聊天文本假装用户已经选择。
+- 需要所有者上下文时，使用 `skills/vo-personal-context/SKILL.md`，只获取当前任务所需的最小范围。
+- 读取轮廓、提交已确认建档内容或申请敏感上下文时，使用 `skills/vo-personal-assets/SKILL.md`。敏感值必须经过 HUMAN DECISIONS 授权，不得复制到日志或无关 Prompt。
+- 当前 HTTP、持久化和失败行为见 [HUMAN_DECISIONS.md](HUMAN_DECISIONS.md) 与 [PERSONAL_ASSETS_AND_OSS.md](PERSONAL_ASSETS_AND_OSS.md)。
 
 ## 1. 目的
 
@@ -242,7 +251,7 @@ curl -sS -X POST http://127.0.0.1:8090/api/presence/YOUR_AGENT_ID \
 
 ## 8. 跨代理通信
 
-当对话应在办公室内可见时，使用 AgentPlatform 通信。这是 OpenClaw、Hermes、Codex 以及未来提供者之间相互通信的首选路径。
+当对话应在办公室内可见时，使用 AgentPlatform 通信。这是 OpenClaw、Hermes、Codex、Claude Code 以及未来提供者之间相互通信的首选路径。
 
 发送消息：
 

@@ -16,7 +16,7 @@ os.environ["VO_HERMES_ENABLED"] = "0"
 os.environ["VO_CODEX_ENABLED"] = "0"
 
 import server
-from services.meeting_repository import empty_store
+from services.meeting_repository import DATABASE_FILENAME, empty_store
 
 
 def startup_status(status_dir: Path):
@@ -33,7 +33,7 @@ def startup_status(status_dir: Path):
 def test_startup_initializes_empty_unified_store(tmp_path):
     status = startup_status(tmp_path)
     assert status["ok"] is True and status["state"] == "unified"
-    assert json.loads((tmp_path / "meeting-domain.json").read_text())["schemaVersion"] == 1
+    assert (tmp_path / DATABASE_FILENAME).exists()
 
 
 def test_startup_reports_migration_required_without_creating_unified(tmp_path):

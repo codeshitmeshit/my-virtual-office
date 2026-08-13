@@ -42,7 +42,7 @@ def main():
             status = Path(directory); fixture(status, size)
             source_digests = {name: sha(status / name) for name in ("executable-meetings.json", "meeting-requests.json")}
             dry_code, dry = run(status); apply_code, applied = run(status, True)
-            unified_digest = sha(status / "meeting-domain.json")
+            unified_digest = sha(status / "meeting-domain.sqlite3")
             repeat_code, repeated = run(status, True)
             backups = sorted(path.name for path in status.glob("*.backup-*"))
             result["fixtures"][label] = {
@@ -51,7 +51,7 @@ def main():
                 "repeatExit": repeat_code, "repeatStatus": repeated.get("status"),
                 "counts": applied.get("counts"), "relationshipChecks": applied.get("relationshipChecks"),
                 "sourceDigest": applied.get("sourceDigest"), "sourceFileDigests": source_digests,
-                "unifiedDigest": unified_digest, "repeatUnifiedDigest": sha(status / "meeting-domain.json"),
+                "unifiedDigest": unified_digest, "repeatUnifiedDigest": sha(status / "meeting-domain.sqlite3"),
                 "backups": backups, "backupCount": len(backups),
             }
     assert all(item["dryRunStatus"] == "validated" and item["applyStatus"] == "migrated" and item["repeatStatus"] == "already_migrated" for item in result["fixtures"].values())

@@ -4,6 +4,7 @@
 
 状态：标准代理可用工具索引  
 范围：我的虚拟办公室产品
+已按当前路由和技能表核对：2026-08-10
 
 ## 目的
 
@@ -22,6 +23,8 @@
 - `VirtualOffice-Browser-Control`
 - `VirtualOffice-Meetings`
 - `VirtualOffice-Projects-and-Tasks`
+
+当前仓库还在 `/skills/` 下发布聚焦的运行时技能，包括 `vo-human-decision`、`vo-personal-assets`、`vo-personal-context`、`vo-agent-hr`、`vo-project-authoring` 和 `vo-project-workflow`。简短的权威清单见 [../skills/catalog.md](../skills/catalog.md)。
 
 技能库端点：
 
@@ -49,7 +52,7 @@ Codex 创建支持两种位置模式：
 - `codexCreationMode: "standard"`：在已配置的 `codex.workspaceRoot` 下创建，并在启用原生注册时注册 `$CODEX_HOME/agents/<profile>.toml`。
 - `codexCreationMode: "custom"` 搭配 `codexCustomDirectory`：在 `<codexCustomDirectory>/<profile>` 下创建，并写入项目本地 `.codex/agents/<profile>.toml`。虚拟办公室在 `codex.workspaceRoot` 下存储注册条目，以便自定义代理保持可发现。
 
-Codex 发现还会读取标准的 `$CODEX_HOME/agents/*.toml` 自定义代理目录，并为 Codex 的默认主代理包含一个合成的 `codex-main` 条目。
+Codex 发现还会读取标准的 `$CODEX_HOME/agents/*.toml` 自定义代理目录。合成的 `codex-main` 默认关闭，因为 `codex-local` 才是默认可运行的本地协作者。
 
 Codex 应用服务器审批请求会在回合运行期间通过聊天历史呈现。Web 聊天会渲染待处理的命令、文件更改和权限审批卡片，并带有批准/取消控件。集成还可以轮询 `GET /api/codex/approval/pending?agentId=<id>`，并使用 `POST /api/codex/approval/respond` 响应活动的回调，传入 `approval_id` 和 `choice: "approve"` 或 `"cancel"`。
 
@@ -58,7 +61,7 @@ Claude Code 创建支持两种位置模式：
 - `claudeCodeCreationMode: "standard"`：在已配置的 `claudeCode.workspaceRoot` 下创建，并在启用原生注册时注册 `$CLAUDE_CONFIG_DIR/agents/<profile>.md`。
 - `claudeCodeCreationMode: "custom"` 搭配 `claudeCodeCustomDirectory`：在 `<claudeCodeCustomDirectory>/<profile>` 下创建，并写入项目本地 `.claude/agents/<profile>.md`。虚拟办公室在 `claudeCode.workspaceRoot` 下存储注册条目，以便自定义代理保持可发现。
 
-Claude Code 发现还会读取原生的 `$CLAUDE_CONFIG_DIR/agents/*.md` 子代理，并为 Claude Code 的默认主代理包含一个合成的 `claude-code-main` 条目。
+Claude Code 发现还会读取原生的 `$CLAUDE_CONFIG_DIR/agents/*.md` 子代理。合成的 `claude-code-main` 默认关闭，因为 `claude-code-local` 才是默认可运行的本地协作者。
 
 Claude Code 聊天使用 `claude -p --output-format stream-json --include-partial-messages`，并在可用时使用 `--resume <session_id>`。适配器将助手增量、`tool_use` 块、`tool_result` 块、使用量元数据、运行完成和中断转换为与 Hermes 和 Codex 相同的虚拟办公室聊天/事件形状。
 
@@ -72,7 +75,7 @@ Codex 配置是与产品无关的：
 - `VO_CODEX_INCLUDE_NATIVE_AGENTS`：读取 `$CODEX_HOME/agents/*.toml`，默认启用
 - `VO_CODEX_REGISTER_NATIVE_AGENTS`：创建 VO Codex 代理时写入 `$CODEX_HOME/agents/<profile>.toml`，默认启用
 - `VO_CODEX_PREFER_APP_SERVER`：默认启用原生应用服务器集成
-- `VO_CODEX_SANDBOX`：Codex 沙箱模式；本地默认值为 `workspace-write`
+- `VO_CODEX_SANDBOX`：Codex 沙箱模式。仓库配置默认是 `workspace-write`；`start.sh` 在环境未显式设置时会写入/导出受信任本机默认值 `danger-full-access`
 - `VO_CODEX_APPROVAL_POLICY`：Codex 审批策略，默认 `never`，以便无人值守的办公室运行不会因审批提示而挂起
 
 Claude Code 配置是与产品无关的：
@@ -109,6 +112,21 @@ Codex 是一种可选择加入的协作工具，而非创建的代理类型。�
 - OpenClaw 代理
 - Hermes 配置文件
 - Codex 协作代理（当 `VO_CODEX_ENABLED=1` 时）
+- Claude Code 协作代理（当 `VO_CLAUDE_CODE_ENABLED=1` 时）
+
+### 人工决策与个人上下文
+
+当工作必须暂停等待用户明确选择，或 Agent 需要所有者上下文时使用：
+
+- `POST /api/agent/human-decisions`
+- `POST /api/agent/human-decisions/<decisionId>/execution-started`
+- `POST /api/agent/personal-assets/profile-outline`
+- `POST /api/agent/personal-assets/request-context`
+- `POST /api/agent/personal-assets/suggest-change`
+- `POST /api/agent/personal-assets/apply-confirmed-onboarding`
+- `POST /api/agent/personal-assets/feishu-onboarding-form`
+
+使用前读取 `skills/vo-human-decision/SKILL.md`、`skills/vo-personal-assets/SKILL.md` 和 `skills/vo-personal-context/SKILL.md`。不得用管理令牌代替 Agent 身份。敏感个人资产读取必须经 HUMAN DECISIONS 授权，并严格限制在批准范围内。
 
 ### 状态与在线状态
 
@@ -204,7 +222,7 @@ AI 发起的会议请求路由：
 - `GET /api/projects/<projectId>/artifacts`
 - `GET /api/projects/<projectId>/artifacts/read?path=<relativePath>`
 
-项目执行目前支持 OpenClaw、Hermes 和 Codex 提供者引用、独立的审查者路由、脏工作区确认、跳过审查者确认、取消、接受/拒绝/阻止以及 Markdown 制品发现。
+项目执行目前支持 OpenClaw、Hermes、Codex 和 Claude Code 提供者引用、独立的审查者路由、脏工作区确认、跳过审查者确认、取消、接受/拒绝/阻止以及 Markdown 制品发现。
 
 项目绑定的定时 cron 端点将 Gateway cron 调度器连接到项目执行：
 

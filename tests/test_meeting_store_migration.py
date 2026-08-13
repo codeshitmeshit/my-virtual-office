@@ -6,6 +6,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "app"))
+from services.meeting_repository import DATABASE_FILENAME, MeetingDomainRepository
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/migrate_meeting_store.py"
@@ -44,7 +47,7 @@ def test_dry_run_validates_without_writing_unified_or_backups(tmp_path):
     assert completed.returncode == 0 and report["status"] == "validated"
     assert report["counts"] == {"meetings": 1, "events": 1, "occupancy": 1, "requests": 1}
     assert {item["status"] for item in report["relationshipChecks"].values()} == {"pass"}
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
     assert not list(tmp_path.glob("*.backup-*"))
 
 
@@ -54,16 +57,16 @@ def test_apply_backs_up_migrates_and_repeated_run_is_noop(tmp_path):
     requests_before = (tmp_path / "meeting-requests.json").read_bytes()
     completed, report = run(tmp_path, "--apply")
     assert completed.returncode == 0 and report["status"] == "migrated"
-    unified = json.loads((tmp_path / "meeting-domain.json").read_text())
+    unified = MeetingDomainRepository(tmp_path).export_for_migration()
     assert unified["schemaVersion"] == 1
     assert unified["requests"]["r1"]["conversion"]["meetingId"] == "m1"
     assert (tmp_path / report["backups"]["executable"]).read_bytes() == executable_before
     assert (tmp_path / report["backups"]["requests"]).read_bytes() == requests_before
-    digest = (tmp_path / "meeting-domain.json").read_bytes()
+    digest = (tmp_path / DATABASE_FILENAME).read_bytes()
     repeated, repeated_report = run(tmp_path, "--apply")
     assert repeated.returncode == 0 and repeated_report["status"] == "already_migrated"
     assert repeated_report["relationshipChecks"]["requestMeetingLinks"]["checked"] == 1
-    assert (tmp_path / "meeting-domain.json").read_bytes() == digest
+    assert (tmp_path / DATABASE_FILENAME).read_bytes() == digest
     assert len(list(tmp_path.glob("*.backup-*"))) == 2
 
 
@@ -84,14 +87,14 @@ def test_single_legacy_store_migrates_without_manufacturing_missing_source(tmp_p
     assert set(report["backups"]) == {"executable"}
     assert (tmp_path / report["backups"]["executable"]).read_bytes() == source.read_bytes()
     assert not (tmp_path / "meeting-requests.json").exists()
-    assert json.loads((tmp_path / "meeting-domain.json").read_text())["requests"] == {}
+    assert MeetingDomainRepository(tmp_path).list_requests() == []
 
 
 def test_malformed_dangling_or_symlink_input_fails_without_destination(tmp_path):
     legacy_fixture(tmp_path, dangling=True)
     completed, report = run(tmp_path, "--apply")
     assert completed.returncode == 1 and report["code"] == "meeting_store_conflict"
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
 
 
 def test_malformed_nested_or_deep_json_returns_stable_failure_report(tmp_path):
@@ -112,7 +115,7 @@ def test_malformed_nested_or_deep_json_returns_stable_failure_report(tmp_path):
     (tmp_path / "meeting-requests.json").unlink(); (tmp_path / "meeting-requests.json").symlink_to(outside)
     completed, report = run(tmp_path, "--apply")
     assert completed.returncode == 1
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
 
 
 def test_server_lock_and_changed_source_digest_fail_closed(tmp_path):
@@ -135,11 +138,11 @@ def test_server_lock_and_changed_source_digest_fail_closed(tmp_path):
 def test_already_migrated_rejects_same_counts_with_changed_semantics(tmp_path):
     legacy_fixture(tmp_path)
     assert run(tmp_path, "--apply")[0].returncode == 0
-    unified_path = tmp_path / "meeting-domain.json"
-    unified = json.loads(unified_path.read_text())
-    unified["meetings"]["m1"]["stage"] = "paused"
-    unified["idempotency"]["meetings"] = {"different": "value"}
-    unified_path.write_text(json.dumps(unified))
+    repository = MeetingDomainRepository(tmp_path)
+    repository.mutate_meeting("m1", lambda scoped: (
+        scoped["meetings"]["m1"].update({"stage": "paused"}),
+        scoped["idempotency"].update({"meetings": {"different": "value"}}),
+    ))
     completed, report = run(tmp_path, "--apply")
     assert completed.returncode == 1 and report["code"] == "meeting_store_conflict"
 
@@ -150,7 +153,7 @@ def test_apply_creates_private_store_backups_and_report_under_open_umask(tmp_pat
     completed = subprocess.run(["sh", "-c", 'umask 000; exec "$@"', "sh", *command], cwd=ROOT, text=True, capture_output=True)
     report = json.loads(completed.stdout)
     assert completed.returncode == 0
-    paths = [tmp_path / "meeting-domain.json", tmp_path / "meeting-store-migration-report.json"]
+    paths = [tmp_path / DATABASE_FILENAME, tmp_path / "meeting-store-migration-report.json"]
     paths += [tmp_path / name for name in report["backups"].values()]
     assert all((path.stat().st_mode & 0o777) == 0o600 for path in paths)
 
@@ -183,7 +186,7 @@ def test_migration_disk_failure_preserves_sources_and_does_not_cut_over(tmp_path
     monkeypatch.setattr(module, "_write_private", fail_backup)
     code, report = call_module_main(module, tmp_path, monkeypatch, capsys)
     assert code == 1 and report["status"] == "failed"
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
     assert all((tmp_path / name).read_bytes() == content for name, content in before.items())
 
 
@@ -198,21 +201,21 @@ def test_migration_report_preflight_failure_does_not_cut_over(tmp_path, monkeypa
     monkeypatch.setattr(module, "_write_report", fail_prepared)
     code, report = call_module_main(module, tmp_path, monkeypatch, capsys)
     assert code == 1 and report["status"] == "failed"
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
 
 
 def test_migration_destination_replace_failure_preserves_legacy_and_no_authority(tmp_path, monkeypatch, capsys):
     legacy_fixture(tmp_path)
     module = load_script_module()
-    original = module.MeetingDomainRepository._write_atomic
+    original = module.MeetingDomainRepository.import_store
     def fail_destination(repository, data):
         if repository.status_dir == tmp_path.resolve():
             raise OSError("destination replace failed")
         return original(repository, data)
-    monkeypatch.setattr(module.MeetingDomainRepository, "_write_atomic", fail_destination)
+    monkeypatch.setattr(module.MeetingDomainRepository, "import_store", fail_destination)
     code, report = call_module_main(module, tmp_path, monkeypatch, capsys)
     assert code == 1 and report["status"] == "failed"
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
     assert (tmp_path / "executable-meetings.json").exists()
     assert (tmp_path / "meeting-requests.json").exists()
 
@@ -231,16 +234,16 @@ def test_source_change_after_prepared_report_aborts_before_cutover(tmp_path, mon
     monkeypatch.setattr(module, "_write_report", mutate_after_prepared)
     code, report = call_module_main(module, tmp_path, monkeypatch, capsys)
     assert code == 1 and report["code"] == "migration_source_changed"
-    assert not (tmp_path / "meeting-domain.json").exists()
+    assert not (tmp_path / DATABASE_FILENAME).exists()
 
 
 def test_report_cannot_alias_destination_legacy_or_active_lock(tmp_path):
     legacy_fixture(tmp_path)
-    protected = ["meeting-domain.json", "executable-meetings.json", "meeting-requests.json", "meeting-store-active.lock"]
+    protected = [DATABASE_FILENAME, "meeting-domain.json", "executable-meetings.json", "meeting-requests.json", "meeting-store-active.lock"]
     original = {name: (tmp_path / name).read_bytes() for name in protected if (tmp_path / name).exists()}
     for name in protected:
         completed, report = run(tmp_path, "--apply", "--report", str(tmp_path / name))
         assert completed.returncode == 1 and report["code"] == "meeting_store_migration_path_invalid"
         for original_name, content in original.items():
             assert (tmp_path / original_name).read_bytes() == content
-        assert not (tmp_path / "meeting-domain.json").exists()
+        assert not (tmp_path / DATABASE_FILENAME).exists()

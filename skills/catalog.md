@@ -1,5 +1,7 @@
 # Virtual Office Skills
 
+Verified against the repository skill directory: 2026-08-10.
+
 This Virtual Office instance is the source of truth for VO runtime skills.
 
 Agents should read the skill files from the current local VO instance:
@@ -8,6 +10,7 @@ Agents should read the skill files from the current local VO instance:
 - `/skills/vo-agent-communication/SKILL.md`
 - `/skills/vo-codex-communication/SKILL.md`
 - `/skills/vo-browser-control/SKILL.md`
+- `/skills/vo-human-decision/SKILL.md`
 - `/skills/vo-agent-workspace/SKILL.md`
 - `/skills/vo-personal-assets/SKILL.md`
 - `/skills/vo-personal-context/SKILL.md`

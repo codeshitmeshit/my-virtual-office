@@ -5,7 +5,6 @@
     var FALLBACK_COPY = {
         settings_modal_connections_agents: 'Connections & Agents',
         settings_modal_office: 'Office',
-        settings_modal_weather: 'Weather',
         settings_modal_display: 'Display',
         settings_modal_tools_browser: 'Tools & Browser',
         settings_modal_notifications: 'Notifications',
@@ -20,8 +19,11 @@
             labelKey: 'settings_modal_connections_agents',
             selectors: ['#mm-oc-path', '#mm-hermes-enable', '#mm-codex-enable', '#mm-claude-code-enable'],
         },
-        { id: 'office', labelKey: 'settings_modal_office', selectors: ['#mm-office-name', '#mm-weather-provider'] },
-        { id: 'weather', labelKey: 'settings_modal_weather', selectors: ['#mm-show-weather'] },
+        {
+            id: 'office',
+            labelKey: 'settings_modal_office',
+            selectors: ['#mm-office-name', '#mm-show-weather', '#mm-weather-provider'],
+        },
         { id: 'display', labelKey: 'settings_modal_display', selectors: ['#mm-show-bubbles'] },
         {
             id: 'tools-browser',

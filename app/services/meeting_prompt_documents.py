@@ -148,6 +148,7 @@ def turn_prompt(
     speaker: str,
     stage: str,
     context_values: Mapping[str, str],
+    targeted_question: str = "",
 ) -> str:
     sections: list[dict[str, Any]] = [
         {
@@ -170,6 +171,15 @@ def turn_prompt(
     ]
     for name, value in context_values.items():
         sections.append({"name": name, "value": value})
+    if targeted_question:
+        sections.append({
+            "name": "targeted_question",
+            "value": {
+                "from": "user",
+                "question": targeted_question,
+                "rule": "Answer once using the normal JSON schema; this is not a formal round turn.",
+            },
+        })
     sections.extend(
         [
             {"name": "instruction", "value": "Contribute to the meeting. Avoid repeating previous points.", "trusted": True},

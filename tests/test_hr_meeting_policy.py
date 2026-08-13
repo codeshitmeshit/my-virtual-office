@@ -68,17 +68,13 @@ def test_executable_hr_meeting_claims_releases_and_restores_without_hr_performan
         })
         assert created["ok"] is True
         meeting_id = created["meeting"]["id"]
-        store = server._load_exec_meeting_store()
-        assert store["occupancy"] == {"main": meeting_id, "hr": meeting_id}
+        assert server._meeting_domain_repository().list_occupancy() == {"main": meeting_id, "hr": meeting_id}
 
-        store["meetings"][meeting_id]["originalWork"] = {
-            "hr": {
-                "pauseState": "logical_paused",
-                "resumeStatus": "pending",
-                "resumeToken": "hr-resume",
-            }
-        }
-        server._save_exec_meeting_store(store)
+        server._meeting_domain_repository().mutate_meeting(meeting_id, lambda store: store["meetings"][meeting_id].update({
+            "originalWork": {"hr": {
+                "pauseState": "logical_paused", "resumeStatus": "pending", "resumeToken": "hr-resume",
+            }}
+        }))
         server._handle_executable_meeting_transition(
             meeting_id, {"action": "start", "expectedVersion": 1},
         )
@@ -94,12 +90,11 @@ def test_executable_hr_meeting_claims_releases_and_restores_without_hr_performan
         )
         assert completed["meeting"]["stage"] == "completed"
 
-        final_store = server._load_exec_meeting_store()
-        final_meeting = final_store["meetings"][meeting_id]
-        assert final_store["occupancy"] == {}
+        final_meeting = server._meeting_domain_repository().get_meeting(meeting_id)
+        assert server._meeting_domain_repository().list_occupancy() == {}
         assert final_meeting["originalWork"]["hr"]["resumeStatus"] == "resumed"
         assert final_meeting["scoreAwarded"]["meetingParticipantXp"]["participants"] == ["main"]
-        event_types = [event["type"] for event in final_store["events"][meeting_id]]
+        event_types = [event["type"] for event in server._meeting_domain_repository().list_events(meeting_id)]
         assert "original_work_resumed" in event_types
         assert not any("performance" in event_type or event_type.startswith("hr_") for event_type in event_types)
 

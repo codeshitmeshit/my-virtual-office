@@ -305,7 +305,12 @@
     window.addEventListener('i18n:changed', refreshModeLabel);
 
     function connectAfterStartup() {
-        setTimeout(connect, 1800);
+        var start = function () { setTimeout(connect, 1800); };
+        if (window.VOManagementSessionReadiness) {
+            window.VOManagementSessionReadiness.whenAuthenticated(start);
+        } else {
+            start();
+        }
     }
 
     if (document.readyState === 'loading') {

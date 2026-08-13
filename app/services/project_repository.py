@@ -46,12 +46,14 @@ class ProjectRepository:
         *,
         load_projects: Callable[[], ProjectData],
         save_projects: Callable[[ProjectData], None],
+        save_project: Callable[[ProjectData], None] | None = None,
         repair_projects: Callable[[ProjectData], ProjectData] | None = None,
         delete_project: Callable[[str], bool] | None = None,
         cache_namespace: Callable[[], Any] | None = None,
     ) -> None:
         self._load_projects = load_projects
         self._save_projects = save_projects
+        self._save_project = save_project
         self._repair_projects = repair_projects or (lambda data: data)
         self._delete_project = delete_project
         self._cache_namespace = cache_namespace or (lambda: None)
@@ -96,7 +98,7 @@ class ProjectRepository:
                     latest = dict(coherent)
                     latest["projects"] = list(coherent.get("projects", []))
                     self._replace_project(latest, project_id, merged)
-                    self._save_coherent(latest)
+                    self._save_project_coherent(latest, project_id)
             return result
 
     def update_from_snapshot(
@@ -129,7 +131,7 @@ class ProjectRepository:
                     latest = dict(coherent)
                     latest["projects"] = list(coherent.get("projects", []))
                     self._replace_project(latest, project_id, merged)
-                    self._save_coherent(latest)
+                    self._save_project_coherent(latest, project_id)
             return result
 
     def create(self, project: ProjectData) -> ProjectData:
@@ -232,7 +234,7 @@ class ProjectRepository:
                     latest = dict(coherent)
                     latest["projects"] = list(coherent.get("projects", []))
                     self._replace_project(latest, project_id, merged_project)
-                    self._save_coherent(latest)
+                    self._save_project_coherent(latest, project_id)
                     return copy.deepcopy(merged_project)
 
     def update_root(self, mutator: RootMutator[T]) -> T:
@@ -248,6 +250,10 @@ class ProjectRepository:
         """Expose registry size for deterministic leak tests and diagnostics."""
         with self._registry_guard:
             return len(self._project_locks)
+
+    def cache_revision(self) -> Any:
+        """Expose the cheap backing-store revision for read-model caches."""
+        return self._cache_namespace()
 
     @contextmanager
     def _project_lock(self, project_id: str) -> Iterator[None]:
@@ -283,6 +289,19 @@ class ProjectRepository:
 
     def _save_coherent(self, data: ProjectData) -> None:
         self._save_projects(data)
+        with self._cache_guard:
+            repaired = self._repair_projects(data)
+            self._cached_namespace = self._cache_namespace()
+            self._cached_data = repaired if repaired is not None else data
+
+    def _save_project_coherent(self, data: ProjectData, project_id: str) -> None:
+        if self._save_project is None:
+            self._save_coherent(data)
+            return
+        project = self._find_project(data, project_id)
+        if project is None:
+            raise ProjectNotFoundError(project_id)
+        self._save_project(project)
         with self._cache_guard:
             repaired = self._repair_projects(data)
             self._cached_namespace = self._cache_namespace()
