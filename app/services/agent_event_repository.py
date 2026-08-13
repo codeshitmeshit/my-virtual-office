@@ -30,22 +30,6 @@ class AgentEventRepository:
         self.max_events = max(1, int(max_events))
         self._lock = threading.RLock()
         self._initialized = False
-        self._compat_events: list[dict[str, Any]] | None = None
-        self._compat_count = 0
-        self._scope_events: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        self._scope_max_sequence: dict[tuple[str, str], int] = {}
-
-    def _rebuild_scope_cache(self, events: Sequence[Mapping[str, Any]]) -> None:
-        scoped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        maximums: dict[tuple[str, str], int] = {}
-        for event in events:
-            key = (str(event.get("agentId") or ""), str(event.get("conversationId") or ""))
-            scoped.setdefault(key, []).append(event)
-            maximums[key] = max(maximums.get(key, 0), int(event.get("sequence") or 0))
-        for values in scoped.values():
-            values.sort(key=lambda event: int(event.get("sequence") or 0))
-        self._scope_events = scoped
-        self._scope_max_sequence = maximums
 
     def initialize(self, *, allow_legacy: bool = False) -> None:
         with self._lock:
@@ -135,8 +119,6 @@ class AgentEventRepository:
     def load_all(self) -> list[dict[str, Any]]:
         self.initialize()
         with self._lock:
-            if self._compat_events is not None:
-                return self._compat_events
             connection = connect_sqlite(self.path, readonly=True)
             try:
                 rows = connection.execute(
@@ -144,18 +126,10 @@ class AgentEventRepository:
                 ).fetchall()
             finally:
                 connection.close()
-            events = self._decode_rows(rows)
-            self._compat_events = events
-            self._compat_count = len(events)
-            self._rebuild_scope_cache(events)
-            return events
+            return self._decode_rows(rows)
 
     def list_scope(self, agent_id: str, conversation_id: str, *, after: int = 0) -> list[dict[str, Any]]:
         self.initialize()
-        key = (str(agent_id), str(conversation_id))
-        with self._lock:
-            if self._compat_events is not None:
-                return [event for event in self._scope_events.get(key, ()) if int(event.get("sequence") or 0) > int(after or 0)]
         connection = connect_sqlite(self.path, readonly=True)
         try:
             rows = connection.execute(
@@ -170,10 +144,6 @@ class AgentEventRepository:
 
     def max_sequence(self, agent_id: str, conversation_id: str) -> int:
         self.initialize()
-        key = (str(agent_id), str(conversation_id))
-        with self._lock:
-            if self._compat_events is not None:
-                return self._scope_max_sequence.get(key, 0)
         connection = connect_sqlite(self.path, readonly=True)
         try:
             row = connection.execute(
@@ -184,36 +154,21 @@ class AgentEventRepository:
         finally:
             connection.close()
 
-    def save_compat(self, events: Sequence[Mapping[str, Any]]) -> None:
-        """Preserve the legacy load/append/save API while optimizing its hot path."""
+    def append(self, event: Mapping[str, Any]) -> None:
+        """Append one durable event without loading or rewriting prior events."""
         self.initialize()
-        bounded = [dict(item) for item in events[-self.max_events :] if isinstance(item, Mapping)]
         with self._lock:
-            append_only = (
-                self._compat_events is events
-                and len(events) == self._compat_count + 1
-                and bool(events)
-                and isinstance(events[-1], Mapping)
-            )
             connection = connect_sqlite(self.path)
             try:
                 connection.execute("BEGIN IMMEDIATE")
-                if append_only:
-                    self._insert(connection, events[-1])
-                    self._trim(connection)
-                else:
-                    connection.execute("DELETE FROM agent_events")
-                    for event in bounded:
-                        self._insert(connection, event)
+                self._insert(connection, event)
+                self._trim(connection)
                 connection.commit()
             except Exception:
                 connection.rollback()
                 raise
             finally:
                 connection.close()
-            self._compat_events = bounded
-            self._compat_count = len(bounded)
-            self._rebuild_scope_cache(bounded)
 
     def import_events(self, events: Sequence[Mapping[str, Any]], *, source_digest: str) -> dict[str, Any]:
         self.initialize(allow_legacy=True)

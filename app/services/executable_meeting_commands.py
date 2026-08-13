@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import urllib.parse
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping
 
@@ -132,18 +131,6 @@ class ExecutableMeetingCommands:
             else:
                 projected = self.ports.project_active(meeting, events)
             return {"ok": True, "meeting": {**meeting, **projected}, "events": events}
-
-    def events(self, meeting_id: str, query_string: str = "") -> dict:
-        query = urllib.parse.parse_qs(query_string or "")
-        try:
-            after = int((query.get("after") or ["0"])[0] or 0)
-        except (TypeError, ValueError):
-            after = 0
-        with self.ports.lock:
-            if not self.ports.repository.get_meeting(meeting_id):
-                return {"error": "Executable meeting not found", "_status": 404}
-            events = self.ports.repository.list_events(meeting_id, after=after)
-            return {"ok": True, "meetingId": meeting_id, "after": after, "events": events}
 
     def conflict_action(self, meeting_id: str, body: Mapping[str, Any]) -> dict:
         hooks = meeting_lifecycle.ConflictHooks(

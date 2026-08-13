@@ -16941,7 +16941,7 @@ var _mtgCurrentTab = 'active';
 var _mtgData = { active: [], history: [], requests: [], projects: [] };
 var _mtgOpenCards = {};
 var _mtgLiveEvents = {};
-var _mtgLivePollTimer = null;
+var _mtgLiveTimer = null;
 var _mtgHistorySearch = '';
 var _mtgDecisionAutoContinuing = {};
 var _mtgDetailMeetingId = '';
@@ -17014,7 +17014,7 @@ function openMeetingsDashboard() {
     document.getElementById('meetingsModal').classList.remove('hidden');
     updateMeetingLabels();
     _mtgRefresh();
-    _mtgEnsureLivePolling();
+    _mtgEnsureLiveUpdates();
 }
 
 function closeMeetingsModal() {
@@ -17022,7 +17022,7 @@ function closeMeetingsModal() {
     toggleNewMeetingForm(false);
     closeMeetingRequestDetailModal();
     closeMeetingDetailModal();
-    _mtgStopLivePolling();
+    _mtgStopLiveUpdates();
 }
 
 function switchMtgTab(tab) {
@@ -17163,7 +17163,7 @@ async function openMeetingReference(ref) {
     var requestId = String(ref.requestId || '').trim();
     var meetingId = String(ref.meetingId || '').trim();
     updateMeetingLabels();
-    _mtgEnsureLivePolling();
+    _mtgEnsureLiveUpdates();
     ['meetingsModal', 'meetingDetailModal', 'meetingRequestDetailModal'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.classList.add('modal-above-projects');
@@ -18343,7 +18343,10 @@ function _mtgLiveStateFromMeeting(m) {
 function _mtgSeedLiveMeetings(meetings) {
     (meetings || []).forEach(function(m) {
         if (!m.executableMeeting || m.status !== 'active') return;
-        _mtgLiveEvents[m.id] = _mtgLiveStateFromMeeting(m);
+        var previous = _mtgLiveEvents[m.id];
+        var next = _mtgLiveStateFromMeeting(m);
+        next.timeoutRunBySeq = previous && previous.timeoutRunBySeq ? previous.timeoutRunBySeq : {};
+        _mtgLiveEvents[m.id] = next;
     });
 }
 
@@ -18540,66 +18543,49 @@ function _mtgApplyLiveEvent(meetingId, event) {
     _mtgLiveEvents[meetingId] = state;
 }
 
-function _mtgEnsureLivePolling() {
-    if (_mtgLivePollTimer) return;
-    _mtgLivePollTimer = setInterval(_mtgPollLiveMeetings, 2000);
+function _mtgEnsureLiveUpdates() {
+    if (_mtgLiveTimer) return;
+    _mtgLiveTimer = setInterval(_mtgTickLiveMeetings, 1000);
 }
 
-function _mtgStopLivePolling() {
-    if (_mtgLivePollTimer) clearInterval(_mtgLivePollTimer);
-    _mtgLivePollTimer = null;
+function _mtgStopLiveUpdates() {
+    if (_mtgLiveTimer) clearInterval(_mtgLiveTimer);
+    _mtgLiveTimer = null;
 }
 
-async function _mtgPollLiveMeetings() {
+function _mtgTickLiveMeetings() {
     var modal = document.getElementById('meetingsModal');
     if (!modal || modal.classList.contains('hidden')) {
-        _mtgStopLivePolling();
+        _mtgStopLiveUpdates();
         return;
     }
     var meetings = (_mtgData.active || []).filter(function(m) { return m.executableMeeting && m.status === 'active'; });
     if (!meetings.length) return;
     var changed = false;
-    var shouldRefresh = false;
-    await Promise.all(meetings.map(async function(m) {
+    meetings.forEach(function(m) {
         var state = _mtgLiveEvents[m.id] || _mtgLiveStateFromMeeting(m);
         _mtgLiveEvents[m.id] = state;
-        try {
-            var res = await fetch('/api/meetings/executable/' + encodeURIComponent(m.id) + '/events?after=' + encodeURIComponent(state.lastSeq || 0));
-            var data = await res.json();
-            if (!res.ok || data.error) return;
-            _mtgMaybeAutoContinueDecisionMeeting(m);
-            (data.events || []).forEach(function(event) {
-                _mtgApplyLiveEvent(m.id, event);
-                changed = true;
-                if (event.type === 'meeting_result' || (event.type === 'meeting_transitioned' && (event.payload || {}).to === 'completed')) {
-                    shouldRefresh = true;
-                }
+        _mtgMaybeAutoContinueDecisionMeeting(m);
+        var hydratedPending = Object.keys(state.pendingBySeq || {}).map(function(key) {
+            var previous = state.pendingBySeq[key];
+            var call = _mtgHydratePendingCall(previous);
+            if (call.elapsedSec !== previous.elapsedSec || call.timedOut !== previous.timedOut) changed = true;
+            state.pendingBySeq[key] = call;
+            return call;
+        });
+        hydratedPending.forEach(function(call) {
+            if (!call.timedOut || !call.sequence || state.timeoutRunBySeq[call.sequence]) return;
+            state.timeoutRunBySeq[call.sequence] = Date.now();
+            fetch('/api/meetings/executable/' + encodeURIComponent(m.id) + '/run', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action: 'provider_timeout_skip', pendingSequence: call.sequence })
+            }).catch(function(e) {
+                console.warn('[meetings] provider timeout skip failed:', e);
             });
-            var hydratedPending = Object.keys(state.pendingBySeq || {}).map(function(key) {
-                var call = _mtgHydratePendingCall(state.pendingBySeq[key]);
-                state.pendingBySeq[key] = call;
-                return call;
-            });
-            if (hydratedPending.some(function(call) { return call.timedOut; })) changed = true;
-            hydratedPending.forEach(function(call) {
-                if (!call.timedOut || !call.sequence || state.timeoutRunBySeq[call.sequence]) return;
-                state.timeoutRunBySeq[call.sequence] = Date.now();
-                fetch('/api/meetings/executable/' + encodeURIComponent(m.id) + '/run', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'provider_timeout_skip', pendingSequence: call.sequence })
-                }).catch(function(e) {
-                    console.warn('[meetings] provider timeout skip failed:', e);
-                });
-            });
-        } catch (e) {
-            console.warn('[meetings] live poll error:', e);
-        }
-    }));
-    if (shouldRefresh) {
-        await _mtgAfterMeetingRefresh();
-        switchMtgTab('completed');
-    } else if (changed && !modal.classList.contains('hidden')) {
+        });
+    });
+    if (changed && !modal.classList.contains('hidden')) {
         _mtgRender();
         _mtgRefreshDetailModal();
     }

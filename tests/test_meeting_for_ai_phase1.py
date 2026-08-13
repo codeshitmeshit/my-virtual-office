@@ -1109,9 +1109,8 @@ def test_executable_meeting_events_after_and_reconcile():
             created = create_meeting(idempotencyKey="create-events")
             meeting = created["meeting"]
             server._handle_executable_meeting_transition(meeting["id"], {"action": "start", "expectedVersion": 1})
-            events = server._handle_executable_meeting_events(meeting["id"], "after=1")
-            assert events["ok"] is True
-            assert [e["sequence"] for e in events["events"]] == [2]
+            events = server._meeting_domain_repository().list_events(meeting["id"], after=1)
+            assert [e["sequence"] for e in events] == [2]
 
             reconciled = server._handle_executable_meeting_reconcile()
             assert reconciled["ok"] is True
@@ -1555,8 +1554,8 @@ def test_phase3_user_intervention_is_projected_and_passed_to_incremental_prompt(
             assert "用户插话：请先确认风险。" in prompt
             assert "补充上下文：预算上限是 2 天。" in prompt
 
-            events_after = server._handle_executable_meeting_events(meeting_id, f"after={first['event']['sequence'] - 1}")
-            assert events_after["events"][0]["type"] == "user_intervention"
+            events_after = server._meeting_domain_repository().list_events(meeting_id, after=first['event']['sequence'] - 1)
+            assert events_after[0]["type"] == "user_intervention"
 
             cancelled = server._handle_executable_meeting_transition(meeting_id, {"action": "cancel"})
             assert cancelled["meeting"]["stage"] == "cancelled"
@@ -1612,8 +1611,8 @@ def test_phase3_agenda_change_updates_future_prompt_and_projection():
             assert "user changed agenda to: 改为先评估上线风险和回滚方案" in prompt
             assert "reason: 用户临时调整优先级" in prompt
 
-            events_after = server._handle_executable_meeting_events(meeting_id, f"after={changed['event']['sequence'] - 1}")
-            assert events_after["events"][0]["type"] == "agenda_change"
+            events_after = server._meeting_domain_repository().list_events(meeting_id, after=changed['event']['sequence'] - 1)
+            assert events_after[0]["type"] == "agenda_change"
 
             cancelled = server._handle_executable_meeting_transition(meeting_id, {"action": "cancel"})
             assert cancelled["meeting"]["stage"] == "cancelled"

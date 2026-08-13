@@ -76,6 +76,14 @@
         if (!meetingPayload) return;
         var active = meetingPayload.active || [];
         var pending = meetingPayload.pendingRequests || [];
+        var previouslyActive = typeof window._mtgData === 'object' && window._mtgData && Array.isArray(window._mtgData.active)
+            ? window._mtgData.active
+            : [];
+        var completedIds = Object.create(null);
+        active.forEach(function (meeting) { if (meeting && meeting.id) completedIds[meeting.id] = true; });
+        var activeMeetingCompleted = previouslyActive.some(function (meeting) {
+            return meeting && meeting.executableMeeting && meeting.status === 'active' && !completedIds[meeting.id];
+        });
         if (typeof window._mtgData === 'object' && window._mtgData) {
             window._mtgData.active = active;
             window._mtgData.requests = typeof window._mtgSortRequestsByStatusThenTime === 'function'
@@ -85,6 +93,12 @@
         if (typeof window._mtgSeedLiveMeetings === 'function') window._mtgSeedLiveMeetings(active);
         if (Array.isArray(active) && typeof window._mtgMaybeAutoContinueDecisionMeeting === 'function') {
             active.forEach(window._mtgMaybeAutoContinueDecisionMeeting);
+        }
+        var modal = document.getElementById('meetingsModal');
+        if (modal && !modal.classList.contains('hidden') && typeof window._mtgRender === 'function') {
+            window._mtgRender();
+            if (typeof window._mtgRefreshDetailModal === 'function') window._mtgRefreshDetailModal();
+            if (activeMeetingCompleted && typeof window._mtgRefresh === 'function') window._mtgRefresh();
         }
         if (typeof window._updateSidebarMeetings === 'function') window._updateSidebarMeetings();
     }

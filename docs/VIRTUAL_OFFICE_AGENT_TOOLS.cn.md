@@ -167,7 +167,7 @@ AI 可执行会议路由：
 
 - `POST /api/meetings/executable/create`
 - `GET /api/meetings/executable/<meetingId>`
-- `GET /api/meetings/executable/<meetingId>/events?afterSeq=<seq>`
+- `GET /api/dashboard/events`（实时会议投影共用 SSE）
 - `POST /api/meetings/executable/<meetingId>/run`
 - `POST /api/meetings/executable/<meetingId>/transition`
 - `POST /api/meetings/executable/<meetingId>/intervention`

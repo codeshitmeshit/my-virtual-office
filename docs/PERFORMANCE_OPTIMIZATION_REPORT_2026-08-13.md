@@ -2,12 +2,13 @@
 
 ## Scope
 
-This report covers the two persistence paths migrated from JSON to SQLite:
+This report covers the production cutover and the P0 follow-up for:
 
 - Agent/Codex activity events.
 - Meeting-domain state and event append operations.
+- Meeting live updates in the browser.
 
-The raw, machine-readable result is in [`performance/performance-store-benchmark-2026-08-13.json`](performance/performance-store-benchmark-2026-08-13.json). The benchmark is reproducible with:
+The raw result is in [`performance/performance-store-benchmark-2026-08-13.json`](performance/performance-store-benchmark-2026-08-13.json). Reproduce it with:
 
 ```bash
 .venv/bin/python tests/performance_store_benchmark.py \
@@ -16,51 +17,60 @@ The raw, machine-readable result is in [`performance/performance-store-benchmark
   --output docs/performance/performance-store-benchmark-2026-08-13.json
 ```
 
-The latest figures below are the median of 50 measured operations after five warmups, using local temporary directories. The old Agent baseline uses its cached JSON read plus bounded whole-file rewrite. The old Meeting baseline reproduces cached deep-copy snapshots, validation, synchronous whole-file replacement and directory sync. The SQLite side runs the production typed repository APIs; it no longer uses a full-store compatibility snapshot.
+The figures below are medians of 50 measured operations after five warmups on local temporary directories. The P0 implementation uses a bounded pool of exclusive SQLite connection leases, initializes WAL/PRAGMA settings once per physical connection, appends Agent events directly, and no longer exposes the per-Meeting event polling endpoint.
 
-## Results
+## P0 results
 
 ### Agent event hot paths
 
-| Retained events | Append JSON → SQLite | Change | Scoped query JSON → SQLite | Change |
+| Retained events | Append JSON → SQLite | Change | Scoped query JSON → SQLite | Absolute SQLite latency |
 |---:|---:|---:|---:|---:|
-| 100 | 0.798 ms → 1.979 ms | 0.40× / fixed-cost regression | 0.0050 ms → 0.0016 ms | 3.12× faster |
-| 1,000 | 3.908 ms → 2.362 ms | 1.65× faster | 0.0240 ms → 0.0037 ms | 6.49× faster |
-| 4,000 | 13.301 ms → 3.916 ms | 3.40× faster | 0.0920 ms → 0.0108 ms | 8.52× faster |
+| 100 | 0.897 ms → 0.062 ms | 14.58× faster | 0.0049 ms → 0.0350 ms | 0.0350 ms |
+| 1,000 | 3.929 ms → 0.073 ms | 53.96× faster | 0.0230 ms → 0.0836 ms | 0.0836 ms |
+| 4,000 | 14.150 ms → 0.085 ms | 167.46× faster | 0.0896 ms → 0.2660 ms | 0.2660 ms |
 
-Agent events show the intended scaling improvement. SQLite has fixed transaction overhead at 100 records, but it avoids rewriting an increasingly large JSON file and wins from 1,000 records onward. The in-process per-scope index also prevents scoped reads from scanning the retained global list.
+The previous 100-event append regression is removed: median SQLite append fell from 1.979 ms to 0.062 ms. Runtime now issues one insert plus bounded trimming; it does not load, copy, rewrite, or rebuild an in-process compatibility list.
+
+The benchmark's JSON scoped query measures a cached in-memory list and is therefore still faster in isolation. SQLite remains below 0.3 ms at 4,000 retained events and provides the durable cross-process authority; no second in-memory authority is retained.
 
 ### Meeting-domain hot paths
 
 | Meetings / initial events | Event append JSON → SQLite | Change | Full JSON snapshot → typed detail read | Change |
 |---:|---:|---:|---:|---:|
-| 1 / 20 | 0.927 ms → 2.156 ms | fixed-cost regression | 0.104 ms → 2.080 ms | fixed-cost regression |
-| 20 / 400 | 4.008 ms → 2.186 ms | 1.83× faster | 0.660 ms → 2.062 ms | fixed-cost regression |
-| 100 / 2,000 | 16.369 ms → 2.242 ms | 7.30× faster | 3.080 ms → 2.120 ms | 1.45× faster |
+| 1 / 20 | 1.002 ms → 0.295 ms | 3.40× faster | 0.101 ms → 0.227 ms | 0.45× / 0.126 ms absolute regression |
+| 20 / 400 | 4.756 ms → 0.305 ms | 15.61× faster | 0.681 ms → 0.240 ms | 2.84× faster |
+| 100 / 2,000 | 18.119 ms → 0.286 ms | 63.26× faster | 3.103 ms → 0.227 ms | 13.69× faster |
 
-The typed cutover removes the former dominant whole-domain copy/validation cost. At 20 Meetings, event append is 45.5% lower latency; at 100 Meetings it is 86.3% lower. A one-Meeting database remains slower because opening and committing SQLite has a fixed cost, but its absolute median is about 2.2 ms. The detail-read crossover appears above 20 Meetings and is 31.2% faster at 100. Runtime projections also batch Meeting/event reads through one connection, avoiding an N+1 connection pattern.
+The one-Meeting append and the 20-Meeting detail-read regressions are removed. A one-Meeting cached JSON detail read remains faster by 0.126 ms, while the typed database read becomes faster from the 20-Meeting fixture onward.
 
-### Storage footprint
+### Meeting live-update request count
 
-SQLite uses more disk space at these sizes because of pages and indexes. Examples:
+Previously, while the Meeting surface was open, the browser sent one request per active executable Meeting every two seconds:
 
-- Agent events, 4,000 records: JSON 1.31 MiB; SQLite 2.07 MiB.
-- Meetings, 100 meetings / 2,000 initial events: JSON 570 KiB; SQLite 776 KiB.
+```text
+requests per minute = active Meetings × 30
+```
 
-The WAL was checkpointed when measured, so the reported WAL size was zero. Runtime WAL size can temporarily grow between checkpoints.
+That loop and its `/api/meetings/executable/<id>/events` compatibility endpoint were removed. Meeting updates now reuse the existing process-shared `/api/dashboard/events` SSE connection. The remaining one-second browser timer performs local elapsed-time rendering and provider-timeout control only; it does not query events. Therefore incremental Meeting reads generated by this UI path fall from `N × 30/min` to zero.
 
-## Functional and migration verification
+## Functional verification
 
-- Full Python regression: 3,028 passed; two pre-existing UI typography assertions remain red because the dirty worktree uses non-pixel fonts.
-- Meeting/Prompt/migration focused regression: 218 passed.
-- Agent/Meeting migration rehearsals: 1, 20 and 100 Meeting fixtures passed validation, apply, integrity check and idempotent repeat.
-- Agent append regression verifies one event insert rather than a full-table rewrite.
-- Meeting append regression verifies one new event-row write with no deletion/rebuild of prior events.
-- Static gates verify the extracted Agent and Meeting workflow modules do not import or hydrate `server.py` globals.
-- Provider and Meeting generated inventories reproduce exactly.
+- P0 focused Python regression: 108 passed.
+- Meeting lifecycle, routes, repository and provider boundary regression: 103 passed.
+- Full Meeting Python regression after restoring the Meeting service boundary: 191 passed.
+- Frontend performance, Meeting history/detail/reference and human-decision static checks passed.
+- New connection-pool tests verify physical connection reuse and rollback before lease reuse.
+- New frontend gate verifies both UI sources contain no per-Meeting event request and consume the shared Dashboard SSE.
+- The broader frontend module-split check passes. The P0 cutover had accidentally deleted `app/server_services/meetings.py` and moved its current Meeting orchestration back into `app/server.py`; the service boundary and direct route imports have now been restored, and the tracked Meeting call inventory scans the extracted service.
+
+## Architecture after P0
+
+- `sqlite_runtime.py` owns a bounded per-database connection pool. A lease is exclusive, and `close()` returns it after rolling back any uncommitted transaction.
+- `agent_event_repository.py` exposes direct `append()` and indexed reads. Runtime contains no `save_compat`, dual read, or JSON fallback.
+- Both the main server and the extracted Agent bridge use the same SQLite repository behavior.
+- Meeting request, lifecycle, projection, prompt and command orchestration live in `server_services/meetings.py`; `server.py` imports that facade, and Meeting routes no longer resolve handlers by reaching back into the entry-point module.
+- Meeting event polling is not a public compatibility API. Dashboard SSE is the sole live browser transport for Meeting projections.
 
 ## Conclusion
 
-The Agent event migration is a measured performance improvement for retained histories of 1,000–4,000 events. Meeting is now also a measured scaling improvement: typed row-scoped transactions replace the generic full-domain mutation path, while projection reads batch Meetings and event streams on one connection.
-
-Runtime `snapshot/update`, split-store load/save views and dual reads were removed. Full-domain export remains only as the explicitly named offline migration verifier. The remaining low-cardinality regression is bounded SQLite connection/transaction overhead; it is the tradeoff for durable atomic writes and does not grow with the full domain size.
+All three P0 items now show a concrete improvement: the low-cardinality SQLite write regression is removed, Agent writes no longer scale with retained history, and Meeting UI network load no longer scales with the number of active Meetings. The remaining measured low-cardinality tradeoff is a 0.126 ms one-Meeting detail-read delta, which is below the former connection setup cost and does not justify restoring a second cache authority.

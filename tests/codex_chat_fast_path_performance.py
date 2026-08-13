@@ -221,7 +221,6 @@ class CounterPatch:
             setattr(server, name, measured)
 
         wrap("_load_codex_activity", "activityJsonLoads")
-        wrap("_save_codex_activity", "activityJsonWrites")
         wrap("_load_comm_history", "communicationHistoryLoads")
         wrap("_rewrite_comm_events", "communicationProgressRewrites")
 

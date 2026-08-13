@@ -403,8 +403,10 @@ curl -sS -X POST http://127.0.0.1:8090/api/meetings/executable/create \
 
 ```bash
 curl -sS http://127.0.0.1:8090/api/meetings/executable/MEETING_ID
-curl -sS 'http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/events?afterSeq=0'
+curl -N http://127.0.0.1:8090/api/dashboard/events
 ```
+
+详情响应包含当前有序事件。实时会议投影统一通过 Dashboard SSE 跟踪；原来的单会议事件轮询接口已删除。
 
 关注以下字段：
 

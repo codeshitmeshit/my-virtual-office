@@ -73,13 +73,14 @@ def test_enabled_path_keeps_transient_activity_live_and_persists_only_key_events
         ])
         _configure(monkeypatch, status_dir, provider)
         persisted_types = []
-        original_save = server._save_codex_activity
+        repository = server._codex_activity_repository()
+        original_append = repository.append
 
-        def capture_save(events):
-            persisted_types.append(events[-1].get("type"))
-            original_save(events)
+        def capture_append(event):
+            persisted_types.append(event.get("type"))
+            original_append(event)
 
-        monkeypatch.setattr(server, "_save_codex_activity", capture_save)
+        monkeypatch.setattr(repository, "append", capture_append)
         live_during_callback = []
 
         def inspect_live(record):

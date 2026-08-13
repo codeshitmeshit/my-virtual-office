@@ -37,6 +37,7 @@ from services.meeting_repository import (  # noqa: E402
     read_regular_no_follow,
     source_digest,
 )
+from services.sqlite_runtime import close_sqlite_path  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
@@ -250,6 +251,7 @@ def main() -> int:
                     raise MeetingStoreError("Agent event database already exists", code="store_migration_destination_exists")
                 repository = AgentEventRepository(candidate_dir)
                 repository.import_events(agent_events, source_digest=agent_digest)
+                close_sqlite_path(repository.path)
                 _finalize_candidate(repository.path)
                 candidates.append((repository.path, destination, "agentEvents"))
             if meeting_data is not None and report["stores"]["meetings"]["status"] != "already_migrated":
@@ -259,6 +261,7 @@ def main() -> int:
                 meeting_data["migration"]["reportFile"] = report_path.name
                 repository = MeetingDomainRepository(candidate_dir)
                 repository.import_store(meeting_data)
+                close_sqlite_path(repository.path)
                 _finalize_candidate(repository.path)
                 candidates.append((repository.path, destination, "meetings"))
 

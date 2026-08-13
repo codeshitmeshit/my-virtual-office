@@ -18,6 +18,8 @@ import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from services.agent_platform_prompt_formatting import render_provider_delivery_prompt
+from services.agent_event_repository import AgentEventRepository
+from services import agent_activity_service
 
 APP_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATUS_DIR = os.environ.get("VO_STATUS_DIR") or os.path.join(APP_DIR, "status")
@@ -95,7 +97,6 @@ __all__ = [
     '_codex_activity_path',
     '_sanitize_codex_value',
     '_load_codex_activity',
-    '_save_codex_activity',
     '_append_codex_activity',
     '_get_codex_activity',
     '_get_codex_active',
@@ -1741,13 +1742,24 @@ _CODEX_THREAD_STATE_LOCK = threading.Lock()
 _CODEX_ACTIVITY_LOCK = threading.Lock()
 _CODEX_ACTIVE_LOCK = threading.Lock()
 _CODEX_ACTIVE_OPERATIONS = {}
+_CODEX_ACTIVITY_REPOSITORY = None
+_CODEX_ACTIVITY_REPOSITORY_LOCK = threading.Lock()
 
 _CODEX_SECRET_KEYS = {"authorization", "cookie", "token", "api_key", "apikey", "password", "secret", "access_token", "refresh_token"}
 _CODEX_MAX_EVENT_TEXT = 12000
 
 
 def _codex_activity_path():
-    return os.path.join(STATUS_DIR, "codex-activity.json")
+    return str(_codex_activity_repository().path)
+
+
+def _codex_activity_repository():
+    global _CODEX_ACTIVITY_REPOSITORY
+    with _CODEX_ACTIVITY_REPOSITORY_LOCK:
+        expected = os.path.realpath(STATUS_DIR)
+        if _CODEX_ACTIVITY_REPOSITORY is None or str(_CODEX_ACTIVITY_REPOSITORY.status_dir) != expected:
+            _CODEX_ACTIVITY_REPOSITORY = AgentEventRepository(expected, max_events=5000)
+        return _CODEX_ACTIVITY_REPOSITORY
 
 
 def _sanitize_codex_value(value, key=""):
@@ -1768,39 +1780,13 @@ def _sanitize_codex_value(value, key=""):
 
 
 def _load_codex_activity():
-    try:
-        with open(_codex_activity_path(), "r") as f:
-            data = json.load(f)
-        return data if isinstance(data, list) else []
-    except (FileNotFoundError, json.JSONDecodeError, OSError):
-        return []
-
-
-def _save_codex_activity(events):
-    path = _codex_activity_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(events[-5000:], f, ensure_ascii=False, indent=2)
-    os.replace(tmp, path)
+    return _codex_activity_repository().load_all()
 
 
 def _append_codex_activity(agent_id, conversation_id, event):
-    with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-        last_sequence = max(
-            (int(item.get("sequence") or 0) for item in events if item.get("agentId") == agent_id and item.get("conversationId") == conversation_id),
-            default=0,
-        )
-        record = _sanitize_codex_value({
-            **event,
-            "providerSequence": int(event.get("sequence") or 0),
-            "sequence": last_sequence + 1,
-            "agentId": agent_id,
-            "conversationId": conversation_id,
-        })
-        events.append(record)
-        _save_codex_activity(events)
+    record = agent_activity_service.append(
+        _codex_activity_repository(), _CODEX_ACTIVITY_LOCK, agent_id, conversation_id, event,
+    )
     with _CODEX_ACTIVE_LOCK:
         active = _CODEX_ACTIVE_OPERATIONS.get(agent_id)
         if active and active.get("conversationId") == conversation_id:
@@ -1819,8 +1805,7 @@ def _append_codex_activity(agent_id, conversation_id, event):
 
 def _get_codex_activity(agent_id, conversation_id, after=0):
     with _CODEX_ACTIVITY_LOCK:
-        events = _load_codex_activity()
-    return [event for event in events if event.get("agentId") == agent_id and event.get("conversationId") == conversation_id and int(event.get("sequence") or 0) > int(after or 0)]
+        return _codex_activity_repository().list_scope(agent_id, conversation_id, after=after)
 
 
 def _get_codex_active(agent_id):

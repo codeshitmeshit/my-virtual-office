@@ -404,8 +404,10 @@ Context modes:
 
 ```bash
 curl -sS http://127.0.0.1:8090/api/meetings/executable/MEETING_ID
-curl -sS 'http://127.0.0.1:8090/api/meetings/executable/MEETING_ID/events?afterSeq=0'
+curl -N http://127.0.0.1:8090/api/dashboard/events
 ```
+
+The detail response contains the current ordered events. Follow live Meeting projections through the shared dashboard SSE stream; the former per-Meeting event polling route was removed.
 
 Watch these fields:
 

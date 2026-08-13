@@ -50,4 +50,6 @@ PYTHONPATH=. .venv/bin/pytest -q \
 
 The runtime deliberately does not read legacy JSON. If a database is absent while legacy data is present, Meeting endpoints fail with `meeting_store_migration_required`; this is a deployment error, not a signal to restore fallback reads.
 
+After migration, restart the server so the process creates its bounded SQLite connection pools. No runtime compatibility interface, dual read, or per-Meeting event polling endpoint remains; clients receive Meeting changes through the shared dashboard SSE stream.
+
 Keep the source JSON and `.backup-*` files through the observation period. Rollback requires the previous application version as well as its JSON inputs: the current application cannot run from legacy JSON. While stopped, preserve the failed databases and their `-wal`/`-shm` sidecars for diagnosis, restore the backup filenames, deploy the previous version, and only then restart.

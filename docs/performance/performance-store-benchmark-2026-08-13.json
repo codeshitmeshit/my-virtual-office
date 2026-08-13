@@ -3,43 +3,43 @@
     "100": {
       "append": {
         "legacyJson": {
-          "maxMs": 1.3393,
-          "medianMs": 0.7946,
-          "minMs": 0.6811,
-          "p95Ms": 0.9327,
+          "maxMs": 1.4058,
+          "medianMs": 0.8967,
+          "minMs": 0.719,
+          "p95Ms": 1.1276,
           "runs": 50
         },
-        "medianLatencyReductionPct": -149.0,
-        "medianSpeedup": 0.4,
+        "medianLatencyReductionPct": 93.1,
+        "medianSpeedup": 14.58,
         "sqlite": {
-          "maxMs": 228.973,
-          "medianMs": 1.9788,
-          "minMs": 1.455,
-          "p95Ms": 3.0623,
+          "maxMs": 0.1067,
+          "medianMs": 0.0615,
+          "minMs": 0.0583,
+          "p95Ms": 0.0834,
           "runs": 50
         }
       },
       "bytes": {
         "legacyJson": 51781,
-        "sqlite": 110592,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 1100072
       },
       "records": 100,
       "scopedQuery": {
         "legacyJson": {
-          "maxMs": 0.0054,
-          "medianMs": 0.005,
-          "minMs": 0.0048,
-          "p95Ms": 0.0053,
+          "maxMs": 0.0063,
+          "medianMs": 0.0049,
+          "minMs": 0.0047,
+          "p95Ms": 0.0056,
           "runs": 50
         },
-        "medianLatencyReductionPct": 68.0,
-        "medianSpeedup": 3.12,
+        "medianLatencyReductionPct": -614.3,
+        "medianSpeedup": 0.14,
         "sqlite": {
-          "maxMs": 0.0018,
-          "medianMs": 0.0016,
-          "minMs": 0.0015,
-          "p95Ms": 0.0018,
+          "maxMs": 0.038,
+          "medianMs": 0.035,
+          "minMs": 0.0298,
+          "p95Ms": 0.0375,
           "runs": 50
         }
       }
@@ -47,43 +47,43 @@
     "1000": {
       "append": {
         "legacyJson": {
-          "maxMs": 4.3921,
-          "medianMs": 3.903,
-          "minMs": 3.5014,
-          "p95Ms": 4.2643,
+          "maxMs": 6.2687,
+          "medianMs": 3.9286,
+          "minMs": 3.4945,
+          "p95Ms": 4.5641,
           "runs": 50
         },
-        "medianLatencyReductionPct": 39.5,
-        "medianSpeedup": 1.65,
+        "medianLatencyReductionPct": 98.1,
+        "medianSpeedup": 53.96,
         "sqlite": {
-          "maxMs": 3.4572,
-          "medianMs": 2.3615,
-          "minMs": 2.1324,
-          "p95Ms": 2.7636,
+          "maxMs": 0.2962,
+          "medianMs": 0.0728,
+          "minMs": 0.062,
+          "p95Ms": 0.147,
           "runs": 50
         }
       },
       "bytes": {
         "legacyJson": 354716,
-        "sqlite": 557056,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 1656272
       },
       "records": 1000,
       "scopedQuery": {
         "legacyJson": {
-          "maxMs": 0.0423,
-          "medianMs": 0.024,
-          "minMs": 0.023,
-          "p95Ms": 0.0267,
+          "maxMs": 0.031,
+          "medianMs": 0.023,
+          "minMs": 0.0223,
+          "p95Ms": 0.0276,
           "runs": 50
         },
-        "medianLatencyReductionPct": 84.6,
-        "medianSpeedup": 6.49,
+        "medianLatencyReductionPct": -263.5,
+        "medianSpeedup": 0.28,
         "sqlite": {
-          "maxMs": 0.0044,
-          "medianMs": 0.0037,
-          "minMs": 0.0035,
-          "p95Ms": 0.0043,
+          "maxMs": 0.1353,
+          "medianMs": 0.0836,
+          "minMs": 0.0803,
+          "p95Ms": 0.1068,
           "runs": 50
         }
       }
@@ -91,43 +91,43 @@
     "4000": {
       "append": {
         "legacyJson": {
-          "maxMs": 14.5891,
-          "medianMs": 13.325,
-          "minMs": 12.4144,
-          "p95Ms": 14.3745,
+          "maxMs": 21.7397,
+          "medianMs": 14.1502,
+          "minMs": 12.7075,
+          "p95Ms": 17.4681,
           "runs": 50
         },
-        "medianLatencyReductionPct": 70.6,
-        "medianSpeedup": 3.4,
+        "medianLatencyReductionPct": 99.4,
+        "medianSpeedup": 167.46,
         "sqlite": {
-          "maxMs": 5.172,
-          "medianMs": 3.9161,
-          "minMs": 3.5073,
-          "p95Ms": 4.3538,
+          "maxMs": 0.5159,
+          "medianMs": 0.0845,
+          "minMs": 0.0779,
+          "p95Ms": 0.1559,
           "runs": 50
         }
       },
       "bytes": {
         "legacyJson": 1372291,
-        "sqlite": 2174976,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 3254832
       },
       "records": 4000,
       "scopedQuery": {
         "legacyJson": {
-          "maxMs": 0.119,
-          "medianMs": 0.092,
-          "minMs": 0.0896,
-          "p95Ms": 0.0943,
+          "maxMs": 0.2998,
+          "medianMs": 0.0896,
+          "minMs": 0.0871,
+          "p95Ms": 0.1388,
           "runs": 50
         },
-        "medianLatencyReductionPct": 88.3,
-        "medianSpeedup": 8.52,
+        "medianLatencyReductionPct": -196.9,
+        "medianSpeedup": 0.34,
         "sqlite": {
-          "maxMs": 0.0145,
-          "medianMs": 0.0108,
-          "minMs": 0.0101,
-          "p95Ms": 0.014,
+          "maxMs": 0.6018,
+          "medianMs": 0.266,
+          "minMs": 0.251,
+          "p95Ms": 0.3405,
           "runs": 50
         }
       }
@@ -138,29 +138,29 @@
     "platform": "macOS-26.5.1-arm64-arm-64bit",
     "python": "3.12.13"
   },
-  "generatedAt": "2026-08-12T19:41:13Z",
+  "generatedAt": "2026-08-13T04:05:06Z",
   "meetings": {
     "1": {
       "bytes": {
         "legacyJson": 20285,
-        "sqlite": 94208,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 1347272
       },
       "eventAppend": {
         "legacyJson": {
-          "maxMs": 1.1435,
-          "medianMs": 0.9276,
-          "minMs": 0.753,
-          "p95Ms": 1.0686,
+          "maxMs": 2.8682,
+          "medianMs": 1.0016,
+          "minMs": 0.7586,
+          "p95Ms": 1.8908,
           "runs": 50
         },
-        "medianLatencyReductionPct": -132.4,
-        "medianSpeedup": 0.43,
+        "medianLatencyReductionPct": 70.6,
+        "medianSpeedup": 3.4,
         "sqlite": {
-          "maxMs": 4.9388,
-          "medianMs": 2.1556,
-          "minMs": 1.8066,
-          "p95Ms": 2.5114,
+          "maxMs": 0.6062,
+          "medianMs": 0.2946,
+          "minMs": 0.1888,
+          "p95Ms": 0.4183,
           "runs": 50
         }
       },
@@ -168,19 +168,19 @@
       "meetings": 1,
       "targetDetailRead": {
         "legacyJson": {
-          "maxMs": 0.106,
-          "medianMs": 0.1022,
-          "minMs": 0.1005,
-          "p95Ms": 0.1039,
+          "maxMs": 0.2736,
+          "medianMs": 0.1014,
+          "minMs": 0.0994,
+          "p95Ms": 0.148,
           "runs": 50
         },
-        "medianLatencyReductionPct": -1935.5,
-        "medianSpeedup": 0.05,
+        "medianLatencyReductionPct": -124.3,
+        "medianSpeedup": 0.45,
         "sqlite": {
-          "maxMs": 2.6223,
-          "medianMs": 2.0803,
-          "minMs": 1.891,
-          "p95Ms": 2.2438,
+          "maxMs": 0.4012,
+          "medianMs": 0.2274,
+          "minMs": 0.222,
+          "p95Ms": 0.317,
           "runs": 50
         }
       }
@@ -188,24 +188,24 @@
     "100": {
       "bytes": {
         "legacyJson": 583680,
-        "sqlite": 794624,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 2101232
       },
       "eventAppend": {
         "legacyJson": {
-          "maxMs": 26.152,
-          "medianMs": 16.3576,
-          "minMs": 15.5173,
-          "p95Ms": 17.3193,
+          "maxMs": 26.9998,
+          "medianMs": 18.1189,
+          "minMs": 16.931,
+          "p95Ms": 20.4943,
           "runs": 50
         },
-        "medianLatencyReductionPct": 86.3,
-        "medianSpeedup": 7.3,
+        "medianLatencyReductionPct": 98.4,
+        "medianSpeedup": 63.26,
         "sqlite": {
-          "maxMs": 3.4977,
-          "medianMs": 2.2423,
-          "minMs": 1.9121,
-          "p95Ms": 2.7352,
+          "maxMs": 0.4479,
+          "medianMs": 0.2864,
+          "minMs": 0.1901,
+          "p95Ms": 0.3717,
           "runs": 50
         }
       },
@@ -213,19 +213,19 @@
       "meetings": 100,
       "targetDetailRead": {
         "legacyJson": {
-          "maxMs": 4.3463,
-          "medianMs": 3.0765,
-          "minMs": 2.9963,
-          "p95Ms": 3.1566,
+          "maxMs": 5.1203,
+          "medianMs": 3.1028,
+          "minMs": 2.9675,
+          "p95Ms": 3.6678,
           "runs": 50
         },
-        "medianLatencyReductionPct": 31.1,
-        "medianSpeedup": 1.45,
+        "medianLatencyReductionPct": 92.7,
+        "medianSpeedup": 13.69,
         "sqlite": {
-          "maxMs": 3.051,
-          "medianMs": 2.1204,
-          "minMs": 1.8885,
-          "p95Ms": 2.3816,
+          "maxMs": 0.2892,
+          "medianMs": 0.2266,
+          "minMs": 0.2157,
+          "p95Ms": 0.2399,
           "runs": 50
         }
       }
@@ -233,24 +233,24 @@
     "20": {
       "bytes": {
         "legacyJson": 128360,
-        "sqlite": 229376,
-        "sqliteWal": 0
+        "sqlite": 4096,
+        "sqliteWal": 1483232
       },
       "eventAppend": {
         "legacyJson": {
-          "maxMs": 5.2285,
-          "medianMs": 4.0038,
-          "minMs": 3.5104,
-          "p95Ms": 4.2789,
+          "maxMs": 7.2858,
+          "medianMs": 4.756,
+          "minMs": 4.0695,
+          "p95Ms": 6.3918,
           "runs": 50
         },
-        "medianLatencyReductionPct": 45.4,
-        "medianSpeedup": 1.83,
+        "medianLatencyReductionPct": 93.6,
+        "medianSpeedup": 15.61,
         "sqlite": {
-          "maxMs": 2.8747,
-          "medianMs": 2.1863,
-          "minMs": 1.8077,
-          "p95Ms": 2.7084,
+          "maxMs": 0.744,
+          "medianMs": 0.3046,
+          "minMs": 0.1945,
+          "p95Ms": 0.5133,
           "runs": 50
         }
       },
@@ -258,19 +258,19 @@
       "meetings": 20,
       "targetDetailRead": {
         "legacyJson": {
-          "maxMs": 0.7155,
-          "medianMs": 0.6611,
-          "minMs": 0.6512,
-          "p95Ms": 0.6973,
+          "maxMs": 1.8091,
+          "medianMs": 0.681,
+          "minMs": 0.6523,
+          "p95Ms": 1.0177,
           "runs": 50
         },
-        "medianLatencyReductionPct": -211.9,
-        "medianSpeedup": 0.32,
+        "medianLatencyReductionPct": 64.8,
+        "medianSpeedup": 2.84,
         "sqlite": {
-          "maxMs": 2.4377,
-          "medianMs": 2.0617,
-          "minMs": 1.8085,
-          "p95Ms": 2.3329,
+          "maxMs": 0.6499,
+          "medianMs": 0.2396,
+          "minMs": 0.2279,
+          "p95Ms": 0.3814,
           "runs": 50
         }
       }

@@ -81,7 +81,7 @@ def benchmark_agent(size: int, *, runs: int, warmups: int) -> dict:
         legacy = JsonArrayEventStore(max_events=5_000)
         legacy.save(legacy_path, seed)
         sqlite = AgentEventRepository(sqlite_dir, max_events=5_000)
-        sqlite.save_compat(seed)
+        sqlite.import_events(seed, source_digest=f"benchmark-{size}")
         next_legacy = size
         next_sqlite = size
 
@@ -94,9 +94,7 @@ def benchmark_agent(size: int, *, runs: int, warmups: int) -> dict:
 
         def append_sqlite():
             nonlocal next_sqlite
-            events = sqlite.load_all()
-            events.append(agent_event(next_sqlite))
-            sqlite.save_compat(events)
+            sqlite.append(agent_event(next_sqlite))
             next_sqlite += 1
 
         def query_legacy():

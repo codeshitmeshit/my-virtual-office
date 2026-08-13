@@ -170,7 +170,7 @@ Executable Meeting for AI routes:
 
 - `POST /api/meetings/executable/create`
 - `GET /api/meetings/executable/<meetingId>`
-- `GET /api/meetings/executable/<meetingId>/events?afterSeq=<seq>`
+- `GET /api/dashboard/events` (shared SSE for live Meeting projections)
 - `POST /api/meetings/executable/<meetingId>/run`
 - `POST /api/meetings/executable/<meetingId>/transition`
 - `POST /api/meetings/executable/<meetingId>/intervention`

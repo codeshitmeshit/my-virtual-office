@@ -43,8 +43,6 @@ def test_create_detail_and_event_filter_without_server():
     assert created["ok"] is True and created["meeting"]["id"] == "m1"
     detail = commands.detail("m1")
     assert detail["ok"] is True and detail["meeting"]["active"] is True
-    assert commands.events("m1", "after=0")["events"]
-    assert commands.events("m1", "after=999")["events"] == []
 
 
 def test_validation_and_mutation_commands_are_owned_by_service():

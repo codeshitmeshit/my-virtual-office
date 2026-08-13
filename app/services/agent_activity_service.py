@@ -104,13 +104,8 @@ def append(
     event: Mapping[str, Any],
     *,
     preserve_sequence: bool = False,
-    load: Callable[[], list[dict[str, Any]]] | None = None,
-    save: Callable[[list[dict[str, Any]]], None] | None = None,
 ) -> dict[str, Any]:
-    load = load or repository.load_all
-    save = save or repository.save_compat
     with activity_lock:
-        events = load()
         last_sequence = repository.max_sequence(agent_id, conversation_id)
         provider_sequence = int(event.get("providerSequence") or event.get("sequence") or 0)
         record = sanitize({
@@ -120,8 +115,7 @@ def append(
             "agentId": agent_id,
             "conversationId": conversation_id,
         })
-        events.append(record)
-        save(events)
+        repository.append(record)
     return record
 
 

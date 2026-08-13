@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sources = [
     ROOT / "app" / "server.py",
+    ROOT / "app" / "server_services" / "meetings.py",
     ROOT / "app" / "services" / "meeting_request_workflow.py",
     ROOT / "app" / "services" / "executable_meeting_commands.py",
 ]

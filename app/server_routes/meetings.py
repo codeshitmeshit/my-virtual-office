@@ -1,14 +1,12 @@
 import urllib.parse
-import sys
 
 from .http import JsonBodyError, read_json, send_json
 
 
 def _meetings_service():
-    server = sys.modules.get("server") or sys.modules.get("__main__")
-    if server is None:
-        raise RuntimeError("Meeting routes require the server module")
-    return server
+    from server_services import meetings
+    meetings._hydrate()
+    return meetings
 
 
 def _body(handler):
@@ -37,9 +35,6 @@ def handle_get(handler, parsed_url):
         return send_json(handler, meetings_service._handle_executable_meeting_reconcile())
     if path.startswith("/api/meetings/executable/"):
         rest = path.split("/api/meetings/executable/", 1)[1].strip("/")
-        if rest.endswith("/events"):
-            meeting_id = urllib.parse.unquote(rest.rsplit("/events", 1)[0].strip("/"))
-            return send_json(handler, meetings_service._handle_executable_meeting_events(meeting_id, query))
         meeting_id = urllib.parse.unquote(rest)
         return send_json(handler, meetings_service._handle_executable_meeting_detail(meeting_id))
     return False
